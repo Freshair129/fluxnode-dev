@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MASTERPLAN Remaining Work Report</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0d10;
+      --panel: #13161b;
+      --panel-2: #181d24;
+      --text: #eef2f7;
+      --muted: #9aa4b2;
+      --accent: #e0ff00;
+      --line: rgba(255,255,255,0.08);
+      --warn: #f59e0b;
+      --ok: #22c55e;
+      --blue: #60a5fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(224,255,0,0.08), transparent 30%),
+        radial-gradient(circle at top right, rgba(96,165,250,0.08), transparent 25%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 20px 56px; }
+    .hero {
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+      box-shadow: 0 24px 80px rgba(0,0,0,0.35);
+    }
+    h1, h2, h3 { margin: 0 0 12px; line-height: 1.15; }
+    h1 { font-size: clamp(2rem, 4vw, 3.25rem); }
+    h2 { font-size: 1.35rem; margin-top: 28px; }
+    h3 { font-size: 1rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.14em; }
+    p { margin: 0 0 12px; color: var(--text); }
+    .muted { color: var(--muted); }
+    .grid { display: grid; gap: 16px; margin-top: 20px; }
+    .cards { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .card {
+      padding: 18px;
+      border-radius: 18px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.03);
+    }
+    .badge.ok { color: var(--ok); }
+    .badge.warn { color: var(--warn); }
+    .badge.blue { color: var(--blue); }
+    ul { margin: 0; padding-left: 20px; }
+    li { margin: 8px 0; }
+    .callout {
+      padding: 18px;
+      border-left: 4px solid var(--accent);
+      background: rgba(224,255,0,0.06);
+      border-radius: 14px;
+      margin-top: 12px;
+    }
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      margin-top: 10px;
+    }
+    .table th, .table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    .table th {
+      background: rgba(255,255,255,0.04);
+      color: var(--muted);
+      font-size: 0.88rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .table tr:last-child td { border-bottom: none; }
+    .stack { display: grid; gap: 12px; }
+    .foot {
+      margin-top: 28px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+    code {
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.06);
+      color: #f8fafc;
+    }
+    a { color: #a5f3fc; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <div class="badge warn">MASTERPLAN status: partial</div>
+      <h1>Remaining Work Report</h1>
+      <p class="muted">Generated from the current repository audit on 2026-06-29. Most of <code>MASTERPLAN.md</code> is implemented; the last unresolved area is Section 11 proof breadth across real target environments.</p>
+      <div class="grid cards">
+        <div class="card">
+          <h3>Completed</h3>
+          <p><strong>11 / 12</strong> major sections are marked implemented in the audit.</p>
+        </div>
+        <div class="card">
+          <h3>Remaining</h3>
+          <p><strong>Section 11</strong> is still partial because cross-platform / target-hardware proof is not complete.</p>
+        </div>
+        <div class="card">
+          <h3>Evidence UX</h3>
+          <p>Proof snapshots now persist, export, import, and summarize directly from the Section 11 audit panel.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:18px;">
+      <h2>What is still unfinished</h2>
+      <div class="callout">
+        <p><strong>Only one repo-level gap remains:</strong> full requirement-by-requirement proof for Section 11 across every listed OS target and realistic hardware class.</p>
+      </div>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Unfinished item</th>
+            <th>Why it is still unfinished</th>
+            <th>What would prove it</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Full OS coverage</td>
+            <td>Current proof is strong in-browser and on this local machine, but not across all listed desktop targets.</td>
+            <td>Saved proof records from native runs on Windows 10+, Windows 11, macOS 12+, and Ubuntu 22.04+.</td>
+          </tr>
+          <tr>
+            <td>Target-hardware breadth</td>
+            <td>We still lack proof on multiple hardware tiers, especially native VRAM and sustained desktop runtime capture.</td>
+            <td>Proof packets from representative low/mid/high hardware classes with comparable Section 11 verdicts.</td>
+          </tr>
+          <tr>
+            <td>Cross-machine audit completion</td>
+            <td>The evidence packet now transfers well, but it still needs real target-machine runs to close the loop.</td>
+            <td>Imported proof history from external machines plus native runtime confirmations on those machines.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="grid cards">
+      <div class="card">
+        <h2>Already finished</h2>
+        <ul>
+          <li>Timeline / workflow sync protocol and duplicate-link fixes</li>
+          <li>Audio system, export pipeline, validation, shortcuts, UX essentials</li>
+          <li>Section 11 proof suite, 4K/60 render proof, proof history, import/export, and latest-proof summary</li>
+          <li>Audit docs updated to reflect current repo evidence</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h2>Best next step</h2>
+        <p>Run the Section 11 proof panel on each target OS, save the proof to project history, then import those records back into the archive bundle. That will close the last real gap in the audit.</p>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:18px;">
+      <h2>Relevant evidence files</h2>
+      <div class="stack">
+        <p><a href="MASTERPLAN Completion Audit.md">MASTERPLAN Completion Audit.md</a></p>
+        <p><a href="MASTERPLAN Performance Evidence Audit.md">MASTERPLAN Performance Evidence Audit.md</a></p>
+        <p><a href="src/features/status/SystemPanels.tsx">src/features/status/SystemPanels.tsx</a></p>
+        <p><a href="src/store/project-store.ts">src/store/project-store.ts</a></p>
+        <p><a href="src/domain/project/types.ts">src/domain/project/types.ts</a></p>
+      </div>
+    </section>
+
+    <div class="foot">
+      This report is intentionally narrow: it lists the unfinished work that still blocks a fully honest “complete” claim for <code>MASTERPLAN.md</code>.
+    </div>
+  </main>
+</body>
+</html>

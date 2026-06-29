@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Inter", "Segoe UI", sans-serif;
+  --font-sans: "Geist", "Segoe UI", sans-serif;
+}
+
+:root {
+  font-family: var(--font-sans);
+  color: #ffffff;
+  background: #0d0d0d;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #e0ff00;
+  outline-offset: 3px;
+}
+
+[role="button"],
+[tabindex]:not([tabindex="-1"]) {
+  outline-color: #e0ff00;
+}
+
+::selection {
+  background: rgba(224, 255, 0, 0.28);
+  color: #ffffff;
+}
+
+@keyframes fluxnode-invalid-edge-snapback {
+  0% {
+    transform: translateX(0);
+    opacity: 0.95;
+  }
+
+  25% {
+    transform: translateX(-6px);
+  }
+
+  50% {
+    transform: translateX(5px);
+  }
+
+  75% {
+    transform: translateX(-3px);
+  }
+
+  100% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+}
+
+@keyframes fluxnode-invalid-port-shake {
+  0% {
+    transform: translateX(0);
+  }
+
+  25% {
+    transform: translateX(-4px);
+  }
+
+  50% {
+    transform: translateX(4px);
+  }
+
+  75% {
+    transform: translateX(-2px);
+  }
+
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.fluxnode-invalid-edge {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: fluxnode-invalid-edge-snapback 420ms ease-out forwards;
+}
+
+.fluxnode-invalid-port {
+  animation: fluxnode-invalid-port-shake 320ms ease-out;
+}
