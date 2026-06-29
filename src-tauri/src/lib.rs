@@ -709,6 +709,72 @@ fn asset_generate_waveform(
     .map_err(|error| error.to_string())
 }
 
+/// Minimal, dependency-free base64 (standard alphabet, padded) encoder.
+fn base64_encode(input: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(ALPHABET[((triple >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((triple >> 12) & 0x3f) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(ALPHABET[((triple >> 6) & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(ALPHABET[(triple & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+/// Extracts a single video frame at `time` (seconds) into `dest` (a PNG path)
+/// using the bundled ffmpeg sidecar, then returns the PNG bytes.
+/// Returns Err on a missing binary, ffmpeg failure, or an unreadable output —
+/// callers fall back to the SVG placeholder.
+fn extract_thumbnail_frame(source_path: &str, time: f64, dest: &Path) -> Result<Vec<u8>, String> {
+    let bin = sidecar_path("ffmpeg");
+    if !bin.exists() {
+        return Err(format!("ffmpeg sidecar not found at {}", bin.display()));
+    }
+    let output = Command::new(&bin)
+        .args([
+            "-ss",
+            &format!("{time}"),
+            "-i",
+            source_path,
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=320:-1",
+            "-y",
+        ])
+        .arg(dest)
+        .output()
+        .map_err(|error| format!("failed to launch ffmpeg ({}): {error}", bin.display()))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "ffmpeg exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let bytes = fs::read(dest).map_err(|error| error.to_string())?;
+    if bytes.is_empty() {
+        return Err("ffmpeg produced an empty thumbnail".to_string());
+    }
+    Ok(bytes)
+}
+
 #[tauri::command]
 fn asset_generate_thumbnail(
     app: AppHandle,
@@ -723,13 +789,29 @@ fn asset_generate_thumbnail(
 
     let thumbnail_dir = project_dir.join("thumbnails");
     fs::create_dir_all(&thumbnail_dir).map_err(|error| error.to_string())?;
+    let generated_at = current_timestamp();
+
+    // Preferred path: extract a real video frame via the bundled ffmpeg sidecar.
+    let png_file = thumbnail_dir.join(format!("{asset_id}-thumb.png"));
+    if let Ok(bytes) = extract_thumbnail_frame(&source_path, time, &png_file) {
+        let data_url = format!("data:image/png;base64,{}", base64_encode(&bytes));
+        return serde_json::to_string(&ThumbnailResult {
+            asset_id,
+            thumbnail_path: data_url,
+            mime_type: "image/png".to_string(),
+            generated_at,
+        })
+        .map_err(|error| error.to_string());
+    }
+
+    // Fallback: SVG placeholder so the app never hard-crashes when ffmpeg is
+    // missing or fails to decode the source.
     let thumbnail_file = thumbnail_dir.join(format!("{asset_id}-thumb.svg"));
     let source_path_buf = PathBuf::from(&source_path);
     let file_name = source_path_buf
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or(&source_path);
-    let generated_at = current_timestamp();
     let svg = format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
   <defs>
@@ -759,6 +841,75 @@ fn asset_generate_thumbnail(
         generated_at,
     })
     .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod thumbnail_tests {
+    use super::*;
+
+    #[test]
+    fn base64_encode_matches_known_vectors() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn extract_thumbnail_frame_produces_real_png_via_ffmpeg() {
+        let ffmpeg = sidecar_path("ffmpeg");
+        if !ffmpeg.exists() {
+            eprintln!("skipping: ffmpeg sidecar not staged");
+            return;
+        }
+
+        let clip = std::env::temp_dir().join("fluxnode-thumb-test.mp4");
+        let _ = fs::remove_file(&clip);
+
+        let status = Command::new(&ffmpeg)
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x240:rate=25:duration=1",
+                "-c:v",
+                "mpeg4",
+                "-frames:v",
+                "25",
+            ])
+            .arg(&clip)
+            .status()
+            .expect("ffmpeg should launch");
+        assert!(status.success(), "ffmpeg failed to synthesize the test clip");
+
+        let dest = std::env::temp_dir().join("fluxnode-thumb-test.png");
+        let _ = fs::remove_file(&dest);
+
+        let bytes = extract_thumbnail_frame(&clip.to_string_lossy(), 0.2, &dest)
+            .expect("frame extraction should succeed");
+
+        // PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A
+        const PNG_MAGIC: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        assert!(
+            bytes.starts_with(&PNG_MAGIC),
+            "extracted thumbnail should be a real PNG"
+        );
+
+        let data_url = format!("data:image/png;base64,{}", base64_encode(&bytes));
+        assert!(data_url.starts_with("data:image/png;base64,"));
+        // The PNG header round-trips through base64 to "iVBORw0KGgo".
+        assert!(
+            data_url[..40].contains("iVBORw0KGgo"),
+            "data_url should encode the PNG magic bytes"
+        );
+
+        let _ = fs::remove_file(&clip);
+        let _ = fs::remove_file(&dest);
+    }
 }
 
 #[tauri::command]
