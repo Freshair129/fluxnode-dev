@@ -446,18 +446,143 @@ fn inspect_asset_path(path: String) -> Result<String, String> {
     .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-fn asset_probe(path: String) -> Result<String, String> {
-    let path_buf = PathBuf::from(&path);
-    let metadata = fs::metadata(&path_buf).ok();
-    let file_size = metadata.as_ref().map(|value| value.len()).unwrap_or(0);
-    let extension = path_buf
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.to_lowercase())
+// --- ffmpeg / ffprobe sidecar helpers ---------------------------------------
+
+#[cfg(target_os = "windows")]
+const SIDECAR_TRIPLE: &str = "x86_64-pc-windows-msvc";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const SIDECAR_TRIPLE: &str = "aarch64-apple-darwin";
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+const SIDECAR_TRIPLE: &str = "x86_64-apple-darwin";
+#[cfg(target_os = "linux")]
+const SIDECAR_TRIPLE: &str = "x86_64-unknown-linux-gnu";
+
+/// Resolves a bundled sidecar (`ffmpeg` / `ffprobe`) across dev and release.
+/// Release: Tauri places `<name><EXE_SUFFIX>` next to the app executable.
+/// Dev: the staged `<name>-<triple><EXE_SUFFIX>` lives in `src-tauri/binaries/`.
+fn sidecar_path(name: &str) -> PathBuf {
+    let plain = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+    let triple = format!("{name}-{SIDECAR_TRIPLE}{}", std::env::consts::EXE_SUFFIX);
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for candidate in [&plain, &triple] {
+                let path = dir.join(candidate);
+                if path.exists() {
+                    return path;
+                }
+            }
+        }
+    }
+
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("binaries")
+        .join(&triple)
+}
+
+/// Runs `ffprobe` and returns the parsed JSON report for a media file.
+fn run_ffprobe(path: &str) -> Result<Value, String> {
+    let bin = sidecar_path("ffprobe");
+    let output = Command::new(&bin)
+        .args([
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            path,
+        ])
+        .output()
+        .map_err(|error| format!("failed to launch ffprobe ({}): {error}", bin.display()))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "ffprobe exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
+}
+
+/// Parses an ffprobe `r_frame_rate` like "30000/1001" into fps.
+fn parse_frame_rate(raw: &str) -> Option<f64> {
+    let (num, den) = raw.split_once('/')?;
+    let num: f64 = num.parse().ok()?;
+    let den: f64 = den.parse().ok()?;
+    if den == 0.0 {
+        None
+    } else {
+        Some(num / den)
+    }
+}
+
+/// Builds an `AssetProbeResult` from a parsed ffprobe JSON report.
+fn probe_result_from_ffprobe(report: &Value, file_size: u64) -> AssetProbeResult {
+    let streams = report
+        .get("streams")
+        .and_then(|value| value.as_array())
+        .cloned()
         .unwrap_or_default();
 
-    let probe = match extension.as_str() {
+    let video = streams
+        .iter()
+        .find(|stream| stream.get("codec_type").and_then(|value| value.as_str()) == Some("video"));
+    let audio = streams
+        .iter()
+        .find(|stream| stream.get("codec_type").and_then(|value| value.as_str()) == Some("audio"));
+
+    let duration = report
+        .get("format")
+        .and_then(|format| format.get("duration"))
+        .and_then(|value| value.as_str())
+        .and_then(|value| value.parse::<f64>().ok())
+        .or_else(|| {
+            video
+                .or(audio)
+                .and_then(|stream| stream.get("duration"))
+                .and_then(|value| value.as_str())
+                .and_then(|value| value.parse::<f64>().ok())
+        });
+
+    let codec = video
+        .or(audio)
+        .and_then(|stream| stream.get("codec_name"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string());
+
+    AssetProbeResult {
+        codec,
+        width: video
+            .and_then(|stream| stream.get("width"))
+            .and_then(|value| value.as_u64())
+            .map(|value| value as u32),
+        height: video
+            .and_then(|stream| stream.get("height"))
+            .and_then(|value| value.as_u64())
+            .map(|value| value as u32),
+        frame_rate: video
+            .and_then(|stream| stream.get("r_frame_rate"))
+            .and_then(|value| value.as_str())
+            .and_then(parse_frame_rate),
+        channels: audio
+            .and_then(|stream| stream.get("channels"))
+            .and_then(|value| value.as_u64())
+            .map(|value| value as u8),
+        sample_rate: audio
+            .and_then(|stream| stream.get("sample_rate"))
+            .and_then(|value| value.as_str())
+            .and_then(|value| value.parse::<u32>().ok()),
+        file_size,
+        duration,
+    }
+}
+
+/// Extension-heuristic fallback used only when ffprobe is unavailable/fails.
+fn probe_result_from_extension(extension: &str, file_size: u64) -> AssetProbeResult {
+    match extension {
         "mp4" | "mov" | "mkv" | "webm" => AssetProbeResult {
             codec: Some("H.264".to_string()),
             width: Some(if file_size > 100_000_000 { 3840 } else { 1920 }),
@@ -469,7 +594,7 @@ fn asset_probe(path: String) -> Result<String, String> {
             duration: Some(if file_size > 500_000_000 { 36.0 } else { 12.0 }),
         },
         "wav" | "mp3" | "flac" | "aac" => AssetProbeResult {
-            codec: Some(match extension.as_str() {
+            codec: Some(match extension {
                 "wav" => "PCM".to_string(),
                 "mp3" => "MP3".to_string(),
                 "flac" => "FLAC".to_string(),
@@ -503,6 +628,24 @@ fn asset_probe(path: String) -> Result<String, String> {
             file_size,
             duration: None,
         },
+    }
+}
+
+#[tauri::command]
+fn asset_probe(path: String) -> Result<String, String> {
+    let path_buf = PathBuf::from(&path);
+    let metadata = fs::metadata(&path_buf).ok();
+    let file_size = metadata.as_ref().map(|value| value.len()).unwrap_or(0);
+    let extension = path_buf
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_lowercase())
+        .unwrap_or_default();
+
+    // Real metadata via ffprobe; fall back to extension heuristics only if it fails.
+    let probe = match run_ffprobe(&path) {
+        Ok(report) => probe_result_from_ffprobe(&report, file_size),
+        Err(_) => probe_result_from_extension(&extension, file_size),
     };
 
     serde_json::to_string(&probe).map_err(|error| error.to_string())
@@ -2076,5 +2219,54 @@ mod tests {
     fn estimate_total_frames_falls_back_without_timeline() {
         let project = serde_json::json!({ "settings": { "frameRate": 30.0 } });
         assert_eq!(estimate_total_frames(&project), 120);
+    }
+
+    #[test]
+    fn asset_probe_reads_real_metadata_via_ffprobe() {
+        let ffmpeg = sidecar_path("ffmpeg");
+        let ffprobe = sidecar_path("ffprobe");
+        if !ffmpeg.exists() || !ffprobe.exists() {
+            eprintln!("skipping: ffmpeg/ffprobe sidecars not staged");
+            return;
+        }
+
+        let out = std::env::temp_dir().join("fluxnode-probe-test.mp4");
+        let _ = fs::remove_file(&out);
+
+        let status = Command::new(&ffmpeg)
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x240:rate=25:duration=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=1",
+                "-c:v",
+                "mpeg4",
+                "-c:a",
+                "aac",
+                "-shortest",
+            ])
+            .arg(&out)
+            .status()
+            .expect("ffmpeg should launch");
+        assert!(status.success(), "ffmpeg failed to synthesize the test clip");
+
+        let report = run_ffprobe(&out.to_string_lossy()).expect("ffprobe should succeed");
+        let size = fs::metadata(&out).map(|meta| meta.len()).unwrap_or(0);
+        let probe = probe_result_from_ffprobe(&report, size);
+
+        assert_eq!(probe.width, Some(320));
+        assert_eq!(probe.height, Some(240));
+        assert_eq!(probe.frame_rate, Some(25.0));
+        assert!(probe.codec.is_some(), "codec should be detected");
+        assert_eq!(probe.channels, Some(1));
+        let duration = probe.duration.expect("duration should be present");
+        assert!((duration - 1.0).abs() < 0.25, "duration ~1s, got {duration}");
+
+        let _ = fs::remove_file(&out);
     }
 }
