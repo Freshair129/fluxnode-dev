@@ -464,6 +464,17 @@ fn sidecar_path(name: &str) -> PathBuf {
     let plain = format!("{name}{}", std::env::consts::EXE_SUFFIX);
     let triple = format!("{name}-{SIDECAR_TRIPLE}{}", std::env::consts::EXE_SUFFIX);
 
+    // Explicit override: lets isolated dev worktrees / CI point at a shared
+    // binaries directory without copying the (gitignored) sidecars.
+    if let Ok(dir) = std::env::var("FLUXNODE_FFMPEG_DIR") {
+        for candidate in [&triple, &plain] {
+            let path = PathBuf::from(&dir).join(candidate);
+            if path.exists() {
+                return path;
+            }
+        }
+    }
+
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             for candidate in [&plain, &triple] {
