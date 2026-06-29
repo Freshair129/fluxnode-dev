@@ -1105,6 +1105,48 @@ fn asset_watch_sync(app: AppHandle, targets_json: String) -> Result<(), String> 
     Ok(())
 }
 
+/// Transcodes `src` into a real low-resolution proxy mp4 at `dst`, scaled to
+/// `width`x`height`. Uses the `mpeg4` software encoder (always present in the
+/// bundled LGPL ffmpeg build, no GPU required). Returns `Err` on a missing
+/// binary or a non-zero ffmpeg exit so callers can fall back gracefully.
+fn transcode_proxy(
+    ffmpeg: &Path,
+    src: &str,
+    dst: &Path,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    let output = Command::new(ffmpeg)
+        .args([
+            "-y",
+            "-i",
+            src,
+            "-vf",
+            &format!("scale={width}:{height}"),
+            "-c:v",
+            "mpeg4",
+            "-q:v",
+            "5",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+        ])
+        .arg(dst)
+        .output()
+        .map_err(|error| format!("failed to launch ffmpeg ({}): {error}", ffmpeg.display()))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "ffmpeg exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 fn asset_generate_proxy(
     app: AppHandle,
@@ -1121,6 +1163,17 @@ fn asset_generate_proxy(
     let proxy_dir = project_dir.join("proxies");
     fs::create_dir_all(&proxy_dir).map_err(|error| error.to_string())?;
     let proxy_path = proxy_dir.join(format!("{asset_id}-proxy.mp4"));
+
+    // Prefer a real transcode with the bundled ffmpeg. If the binary is missing
+    // or ffmpeg fails for any reason, fall back to the text placeholder so the
+    // app never hard-crashes on proxy generation.
+    let ffmpeg = sidecar_path("ffmpeg");
+    if ffmpeg.exists()
+        && transcode_proxy(&ffmpeg, &source_path, &proxy_path, target_width, target_height).is_ok()
+    {
+        return Ok(proxy_path.to_string_lossy().to_string());
+    }
+
     let proxy_payload = format!(
         "FluxNode proxy artifact\nasset={asset_id}\nsource={source_path}\nresolution={}x{}\ncreated={}\n",
         target_width,
@@ -1130,6 +1183,73 @@ fn asset_generate_proxy(
     fs::write(&proxy_path, proxy_payload).map_err(|error| error.to_string())?;
 
     Ok(proxy_path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod proxy_tests {
+    use super::*;
+
+    #[test]
+    fn transcode_proxy_writes_real_scaled_video() {
+        let ffmpeg = sidecar_path("ffmpeg");
+        let ffprobe = sidecar_path("ffprobe");
+        if !ffmpeg.exists() || !ffprobe.exists() {
+            eprintln!("skipping: ffmpeg/ffprobe sidecars not staged");
+            return;
+        }
+
+        // Synthesize a real source clip at 640x480.
+        let source = std::env::temp_dir().join("fluxnode-proxy-source.mp4");
+        let _ = fs::remove_file(&source);
+        let status = Command::new(&ffmpeg)
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=640x480:rate=25:duration=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=1",
+                "-c:v",
+                "mpeg4",
+                "-c:a",
+                "aac",
+                "-shortest",
+            ])
+            .arg(&source)
+            .status()
+            .expect("ffmpeg should launch");
+        assert!(status.success(), "ffmpeg failed to synthesize the source clip");
+
+        // Transcode it into a downscaled proxy.
+        let proxy = std::env::temp_dir().join("fluxnode-proxy-out.mp4");
+        let _ = fs::remove_file(&proxy);
+        let target_width = 320u32;
+        let target_height = 240u32;
+        transcode_proxy(
+            &ffmpeg,
+            &source.to_string_lossy(),
+            &proxy,
+            target_width,
+            target_height,
+        )
+        .expect("transcode_proxy should succeed");
+
+        // The proxy must be a real video at the requested width.
+        let report = run_ffprobe(&proxy.to_string_lossy()).expect("ffprobe should read the proxy");
+        let size = fs::metadata(&proxy).map(|meta| meta.len()).unwrap_or(0);
+        let probe = probe_result_from_ffprobe(&report, size);
+
+        assert_eq!(probe.width, Some(target_width), "proxy width should match target");
+        assert_eq!(probe.height, Some(target_height), "proxy height should match target");
+        assert!(probe.codec.is_some(), "proxy should have a decodable video codec");
+        assert!(size > 0, "proxy file should be non-empty");
+
+        let _ = fs::remove_file(&source);
+        let _ = fs::remove_file(&proxy);
+    }
 }
 
 #[tauri::command]
