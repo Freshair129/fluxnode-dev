@@ -2045,3 +2045,36 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running FluxNode");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn url_encode_svg_passes_unreserved_and_escapes_the_rest() {
+        assert_eq!(url_encode_svg("abcXYZ-_.~09"), "abcXYZ-_.~09");
+        assert_eq!(url_encode_svg("a b"), "a%20b");
+        assert_eq!(url_encode_svg("<svg>"), "%3Csvg%3E");
+    }
+
+    #[test]
+    fn estimate_total_frames_uses_frame_rate_and_clip_extent() {
+        let project = serde_json::json!({
+            "settings": { "frameRate": 30.0 },
+            "timeline": {
+                "outPoint": 0.0,
+                "tracks": [
+                    { "clips": [ { "startTime": 2.0, "duration": 8.0 } ] }
+                ]
+            }
+        });
+        // extent = 2s + 8s = 10s at 30fps => 300 frames
+        assert_eq!(estimate_total_frames(&project), 300);
+    }
+
+    #[test]
+    fn estimate_total_frames_falls_back_without_timeline() {
+        let project = serde_json::json!({ "settings": { "frameRate": 30.0 } });
+        assert_eq!(estimate_total_frames(&project), 120);
+    }
+}

@@ -24,5 +24,11 @@
     "security": {
       "csp": null
     }
+  },
+  "bundle": {
+    "externalBin": [
+      "binaries/ffmpeg",
+      "binaries/ffprobe"
+    ]
   }
 }
