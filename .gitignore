@@ -36,3 +36,4 @@ src-tauri/binaries/
 .codex/
 .agents/
 .playwright-cli/
+.claude/
