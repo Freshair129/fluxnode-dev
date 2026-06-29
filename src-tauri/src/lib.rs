@@ -662,6 +662,81 @@ fn asset_probe(path: String) -> Result<String, String> {
     serde_json::to_string(&probe).map_err(|error| error.to_string())
 }
 
+/// Decodes audio to mono float PCM via ffmpeg and reduces it into `bucket_count`
+/// waveform peaks (max absolute amplitude per bucket, clamped to 0.0..=1.0).
+///
+/// Returns `None` when ffmpeg can't be launched, exits non-zero, or yields no
+/// usable samples — callers should fall back to the byte/seed heuristics.
+fn decode_waveform_peaks_via_ffmpeg(source_path: &str, bucket_count: usize) -> Option<Vec<WaveformPeak>> {
+    let bin = sidecar_path("ffmpeg");
+    let output = Command::new(&bin)
+        .args([
+            "-v",
+            "quiet",
+            "-i",
+            source_path,
+            "-ac",
+            "1",
+            "-filter:a",
+            "aresample=8000",
+            "-f",
+            "f32le",
+            "-",
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    waveform_peaks_from_f32le(&output.stdout, bucket_count)
+}
+
+/// Interprets `bytes` as little-endian f32 PCM samples and buckets them into
+/// `bucket_count` peaks. Returns `None` if there are no complete samples.
+fn waveform_peaks_from_f32le(bytes: &[u8], bucket_count: usize) -> Option<Vec<WaveformPeak>> {
+    let bucket_count = bucket_count.max(1);
+    let sample_count = bytes.len() / 4;
+    if sample_count == 0 {
+        return None;
+    }
+
+    let samples: Vec<f32> = (0..sample_count)
+        .map(|index| {
+            let offset = index * 4;
+            f32::from_le_bytes([
+                bytes[offset],
+                bytes[offset + 1],
+                bytes[offset + 2],
+                bytes[offset + 3],
+            ])
+        })
+        .collect();
+
+    let chunk_size = ((sample_count as f64) / (bucket_count as f64)).ceil().max(1.0) as usize;
+
+    let peaks = (0..bucket_count)
+        .map(|index| {
+            let start = index * chunk_size;
+            let end = usize::min(sample_count, start + chunk_size);
+            let mut peak = 0.0_f32;
+            if start < end {
+                for sample in &samples[start..end] {
+                    let amplitude = sample.abs();
+                    if amplitude > peak {
+                        peak = amplitude;
+                    }
+                }
+            }
+            let peak = peak.clamp(0.0, 1.0);
+            WaveformPeak { min: -peak, max: peak }
+        })
+        .collect();
+
+    Some(peaks)
+}
+
 #[tauri::command]
 fn asset_generate_waveform(
     app: AppHandle,
@@ -674,13 +749,18 @@ fn asset_generate_waveform(
         .ok_or_else(|| "Unable to resolve project directory for waveform cache".to_string())?;
     ensure_project_structure(&project_dir)?;
 
+    let buckets = bucket_count.max(8);
     let path = PathBuf::from(&source_path);
-    let peaks = if path.exists() {
-        let bytes = fs::read(&path).map_err(|error| error.to_string())?;
-        build_waveform_peaks_from_bytes(&bytes, bucket_count.max(8))
-    } else {
-        build_waveform_peaks_from_seed(&source_path, bucket_count.max(8))
-    };
+    let peaks = decode_waveform_peaks_via_ffmpeg(&source_path, buckets).unwrap_or_else(|| {
+        if path.exists() {
+            match fs::read(&path) {
+                Ok(bytes) => build_waveform_peaks_from_bytes(&bytes, buckets),
+                Err(_) => build_waveform_peaks_from_seed(&source_path, buckets),
+            }
+        } else {
+            build_waveform_peaks_from_seed(&source_path, buckets)
+        }
+    });
 
     let waveform_dir = project_dir.join("cache").join("waveforms");
     fs::create_dir_all(&waveform_dir).map_err(|error| error.to_string())?;
@@ -707,6 +787,78 @@ fn asset_generate_waveform(
         generated_at: current_timestamp(),
     })
     .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod waveform_tests {
+    use super::*;
+
+    #[test]
+    fn waveform_peaks_from_f32le_buckets_samples() {
+        // 8 samples ascending in absolute amplitude, 4 buckets.
+        let samples: [f32; 8] = [0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7, -0.8];
+        let mut bytes = Vec::new();
+        for sample in samples {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+
+        let peaks = waveform_peaks_from_f32le(&bytes, 4).expect("should produce peaks");
+        assert_eq!(peaks.len(), 4);
+        for peak in &peaks {
+            assert!(peak.max >= 0.0 && peak.max <= 1.0, "max in range, got {}", peak.max);
+            assert!(peak.min >= -1.0 && peak.min <= 0.0, "min in range, got {}", peak.min);
+        }
+        // Last bucket holds the largest magnitude sample (0.8).
+        assert!((peaks[3].max - 0.8).abs() < 1e-6, "expected 0.8, got {}", peaks[3].max);
+    }
+
+    #[test]
+    fn waveform_peaks_from_f32le_rejects_empty() {
+        assert!(waveform_peaks_from_f32le(&[], 8).is_none());
+        // Fewer than one complete f32 sample.
+        assert!(waveform_peaks_from_f32le(&[0u8, 1, 2], 8).is_none());
+    }
+
+    #[test]
+    fn decode_waveform_peaks_via_ffmpeg_decodes_real_audio() {
+        let ffmpeg = sidecar_path("ffmpeg");
+        if !ffmpeg.exists() {
+            eprintln!("skipping: ffmpeg sidecar not staged");
+            return;
+        }
+
+        let out = std::env::temp_dir().join("fluxnode-waveform-test.wav");
+        let _ = fs::remove_file(&out);
+
+        let status = Command::new(&ffmpeg)
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=1",
+            ])
+            .arg(&out)
+            .status()
+            .expect("ffmpeg should launch");
+        assert!(status.success(), "ffmpeg failed to synthesize the test tone");
+
+        let bucket_count = 64;
+        let peaks = decode_waveform_peaks_via_ffmpeg(&out.to_string_lossy(), bucket_count)
+            .expect("ffmpeg decode should produce peaks for a real audio file");
+
+        assert_eq!(peaks.len(), bucket_count, "expected one peak per bucket");
+        for peak in &peaks {
+            assert!(peak.max >= 0.0 && peak.max <= 1.0, "max in 0..=1, got {}", peak.max);
+            assert!(peak.min >= -1.0 && peak.min <= 0.0, "min in -1..=0, got {}", peak.min);
+        }
+        assert!(
+            peaks.iter().any(|peak| peak.max > 0.1),
+            "a 440Hz sine tone should yield at least one clearly non-zero peak"
+        );
+
+        let _ = fs::remove_file(&out);
+    }
 }
 
 #[tauri::command]
