@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, configDefaults } from 'vitest/config'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 
@@ -9,5 +9,9 @@ export default defineConfig({
   build: {
     outDir: '.dist',
     emptyOutDir: true,
+  },
+  test: {
+    // Never discover tests inside transient agent worktrees or build dirs.
+    exclude: [...configDefaults.exclude, '**/.claude/**', '**/.tmp/**', '**/.dist/**'],
   },
 })
