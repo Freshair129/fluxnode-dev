@@ -1,7 +1,8 @@
 import { Link2, Users, UserPlus, WifiOff, X } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { WorkspaceRole } from '../../domain/project/types'
 import { useProjectStore } from '../../store/project-store'
+import { useModalA11y } from '../settings/useModalA11y'
 
 const inviteRoles: Array<Exclude<WorkspaceRole, 'owner'>> = ['editor', 'viewer']
 
@@ -23,6 +24,19 @@ export function WorkspaceSharingModal() {
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<Exclude<WorkspaceRole, 'owner'>>('editor')
   const [copyMessage, setCopyMessage] = useState<string | null>(null)
+  const dialogRef = useModalA11y<HTMLElement>()
+
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeWorkspaceSharing()
+      }
+    }
+
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [closeWorkspaceSharing])
 
   const onlineCollaboratorCount = useMemo(
     () => sharing.collaborators.filter((collaborator) => collaborator.presence === 'online').length,
@@ -45,10 +59,12 @@ export function WorkspaceSharingModal() {
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="workspace-sharing-title"
-        className="w-full max-w-5xl rounded-[2rem] border border-white/10 bg-[#101112] p-6 shadow-[0_30px_120px_rgba(0,0,0,0.55)]"
+        tabIndex={-1}
+        className="w-full max-w-5xl rounded-[2rem] border border-white/10 bg-[#101112] p-6 shadow-[0_30px_120px_rgba(0,0,0,0.55)] outline-none"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -96,6 +112,7 @@ export function WorkspaceSharingModal() {
                 <button
                   type="button"
                   disabled={networkStatus === 'offline'}
+                  aria-pressed={sharing.enabled}
                   onClick={sharing.enabled ? disableWorkspaceSharing : enableWorkspaceSharing}
                   className={`rounded-full px-4 py-2 text-sm ${
                     sharing.enabled
@@ -110,6 +127,8 @@ export function WorkspaceSharingModal() {
                     key={accessLevel}
                     type="button"
                     disabled={!sharing.enabled || networkStatus === 'offline'}
+                    aria-pressed={sharing.accessLevel === accessLevel}
+                    aria-label={`Set access level to ${accessLevel.replace('_', ' ')}`}
                     onClick={() => setWorkspaceAccessLevel(accessLevel)}
                     className={`rounded-full border px-4 py-2 text-xs uppercase tracking-[0.18em] ${
                       sharing.accessLevel === accessLevel
@@ -138,7 +157,7 @@ export function WorkspaceSharingModal() {
                     Copy
                   </button>
                 </div>
-                {copyMessage ? <p className="mt-2 text-xs text-[#9ca3af]">{copyMessage}</p> : null}
+                <p aria-live="polite" className="mt-2 text-xs text-[#9ca3af]">{copyMessage ?? ''}</p>
               </div>
             </div>
 
@@ -156,6 +175,8 @@ export function WorkspaceSharingModal() {
                   <button
                     key={role}
                     type="button"
+                    aria-pressed={inviteRole === role}
+                    aria-label={`Invite as ${role}`}
                     onClick={() => setInviteRole(role)}
                     className={`rounded-full border px-3 py-2 text-xs uppercase tracking-[0.18em] ${
                       inviteRole === role
@@ -206,6 +227,8 @@ export function WorkspaceSharingModal() {
                             key={role}
                             type="button"
                             disabled={networkStatus === 'offline'}
+                            aria-pressed={collaborator.role === role}
+                            aria-label={`Set ${collaborator.name} role to ${role}`}
                             onClick={() => updateWorkspaceCollaboratorRole(collaborator.id, role)}
                             className={`rounded-full border px-3 py-2 text-xs uppercase tracking-[0.18em] ${
                               collaborator.role === role

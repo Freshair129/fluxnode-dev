@@ -11,6 +11,7 @@ import {
   type ShortcutCommand,
 } from '../../services/shortcuts/shortcut-config'
 import { useProjectStore } from '../../store/project-store'
+import { useModalA11y } from './useModalA11y'
 
 const shortcutGroups: Array<{ title: string; scope: ShortcutScope }> = [
   { title: 'Global', scope: 'global' },
@@ -36,6 +37,7 @@ export function SettingsModal() {
   const [cloudApiKeyDraft, setCloudApiKeyDraft] = useState(preferences.cloudApiKey)
   const [updateChannelDraft, setUpdateChannelDraft] = useState(preferences.updateChannel)
   const [updateManifestUrlDraft, setUpdateManifestUrlDraft] = useState(preferences.updateManifestUrl ?? '')
+  const dialogRef = useModalA11y<HTMLElement>()
 
   const keybindingMap = useMemo(
     () => new Map(preferences.keybindings.map((binding) => [binding.command, binding])),
@@ -115,10 +117,12 @@ export function SettingsModal() {
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm">
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-modal-title"
-        className="w-full max-w-6xl rounded-[2rem] border border-white/10 bg-[#101112] p-6 shadow-[0_30px_120px_rgba(0,0,0,0.55)]"
+        tabIndex={-1}
+        className="w-full max-w-6xl rounded-[2rem] border border-white/10 bg-[#101112] p-6 shadow-[0_30px_120px_rgba(0,0,0,0.55)] outline-none"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -201,6 +205,7 @@ export function SettingsModal() {
                   <button
                     type="button"
                     onClick={toggleOpenFolderAfterExport}
+                    aria-pressed={exportDefaults.openFolderAfterExport}
                     className={`rounded-full px-4 py-2 text-sm ${
                       exportDefaults.openFolderAfterExport
                         ? 'bg-[#e0ff00] font-semibold text-black'
@@ -334,7 +339,7 @@ export function SettingsModal() {
             <p className="mt-3 text-sm leading-6 text-[#9ca3af]">
               Click a shortcut to capture a new key combo. Conflicts within the same scope are blocked before saving.
             </p>
-            <div className="mt-3 rounded-[1.1rem] border border-white/8 bg-[#111214] px-4 py-3 text-sm text-white">
+            <div aria-live="polite" className="mt-3 rounded-[1.1rem] border border-white/8 bg-[#111214] px-4 py-3 text-sm text-white">
               {editingCommand
                 ? `Capturing shortcut for ${SHORTCUT_DEFINITIONS.find((item) => item.command === editingCommand)?.label ?? editingCommand}. Press a key combo now.`
                 : captureMessage ?? 'Select any row below to edit its binding.'}
@@ -367,6 +372,8 @@ export function SettingsModal() {
                                 setCaptureMessage(null)
                                 setEditingCommand(definition.command)
                               }}
+                              aria-pressed={editingCommand === definition.command}
+                              aria-label={`Edit shortcut for ${definition.label}, currently ${formatKeybinding(binding)}`}
                               className={`rounded-full border px-3 py-2 text-xs ${
                                 editingCommand === definition.command
                                   ? 'border-[#e0ff00]/35 bg-[#e0ff00]/10 text-[#f5ffd5]'

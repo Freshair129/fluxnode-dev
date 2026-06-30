@@ -4,6 +4,7 @@ import { NODE_PORT_DEFINITIONS } from '../../domain/workflow/node-definitions'
 import { validateConnectionAttempt } from '../../domain/workflow/validation'
 import type { NodeType, WorkflowNode, WorkflowState } from '../../domain/project/types'
 import { useProjectStore } from '../../store/project-store'
+import { useModalA11y } from '../settings/useModalA11y'
 
 const PORT_COLOR_MAP = {
   video: '#e0ff00',
@@ -1174,7 +1175,7 @@ export function WorkflowView() {
 
           <div className="mt-5 rounded-[1.25rem] border border-white/8 bg-black/20 p-4">
             <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">Validation</p>
-            <div className="mt-3 space-y-3">
+            <div aria-live="polite" className="mt-3 space-y-3">
               {combinedIssues.length === 0 ? (
                 <p className="text-sm text-[#d7f9a7]">No current validation issues.</p>
               ) : (
@@ -1228,6 +1229,8 @@ export function WorkflowView() {
       </div>
       {contextMenu ? (
         <div
+          role="menu"
+          aria-label={contextMenu.type === 'node' ? 'Workflow node actions' : 'Workflow canvas actions'}
           className="fixed z-30 min-w-56 rounded-[1rem] border border-white/10 bg-[#101113]/95 p-2 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(event) => event.stopPropagation()}
@@ -1304,60 +1307,102 @@ export function WorkflowView() {
         </div>
       ) : null}
       {showNodePicker ? (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="workflow-node-picker-title"
-            className="w-full max-w-3xl rounded-[1.75rem] border border-white/10 bg-[#111214] p-5 shadow-[0_30px_120px_rgba(0,0,0,0.55)]"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.28em] text-[#7f8691]">Node Picker</p>
-                <h3 id="workflow-node-picker-title" className="mt-2 text-2xl font-semibold text-white">Search and add a workflow node</h3>
-              </div>
-              <button
-                type="button"
-                onClick={closeNodePicker}
-                aria-label="Close node picker"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <label className="mt-4 flex items-center gap-3 rounded-[1.2rem] border border-white/10 bg-black/20 px-4 py-3">
-              <Search size={16} className="text-[#7f8691]" />
-              <input
-                value={nodeSearch}
-                onChange={(event) => setNodeSearch(event.target.value)}
-                placeholder="Search nodes like shader, output, ai..."
-                className="w-full bg-transparent text-sm text-white outline-none placeholder:text-[#7f8691]"
-                autoFocus
-              />
-            </label>
-            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {filteredNodeTypes.map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() => addNodeOfType(type)}
-                  className="rounded-[1.2rem] border border-white/10 bg-black/20 p-4 text-left transition hover:border-[#e0ff00]/35 hover:bg-white/[0.04]"
-                >
-                  <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">Node Type</p>
-                  <p className="mt-2 text-base font-semibold text-white">{type.replace('_', ' ')}</p>
-                  <p className="mt-2 text-sm leading-6 text-[#9ca3af]">
-                    Inputs {NODE_PORT_DEFINITIONS[type].inputs.length} / Outputs {NODE_PORT_DEFINITIONS[type].outputs.length}
-                  </p>
-                </button>
-              ))}
-            </div>
-            {filteredNodeTypes.length === 0 ? (
-              <p className="mt-4 text-sm text-[#9ca3af]">No node types matched this search.</p>
-            ) : null}
-          </section>
-        </div>
+        <WorkflowNodePicker
+          nodeSearch={nodeSearch}
+          onSearchChange={setNodeSearch}
+          filteredNodeTypes={filteredNodeTypes}
+          onAddNode={addNodeOfType}
+          onClose={closeNodePicker}
+        />
       ) : null}
     </section>
+  )
+}
+
+function WorkflowNodePicker({
+  nodeSearch,
+  onSearchChange,
+  filteredNodeTypes,
+  onAddNode,
+  onClose,
+}: {
+  nodeSearch: string
+  onSearchChange: (value: string) => void
+  filteredNodeTypes: NodeType[]
+  onAddNode: (type: NodeType) => void
+  onClose: () => void
+}) {
+  const dialogRef = useModalA11y<HTMLElement>()
+
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+      }
+    }
+
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [onClose])
+
+  return (
+    <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
+      <section
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="workflow-node-picker-title"
+        tabIndex={-1}
+        className="w-full max-w-3xl rounded-[1.75rem] border border-white/10 bg-[#111214] p-5 shadow-[0_30px_120px_rgba(0,0,0,0.55)] outline-none"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.28em] text-[#7f8691]">Node Picker</p>
+            <h3 id="workflow-node-picker-title" className="mt-2 text-2xl font-semibold text-white">Search and add a workflow node</h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close node picker"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <label className="mt-4 flex items-center gap-3 rounded-[1.2rem] border border-white/10 bg-black/20 px-4 py-3">
+          <Search size={16} className="text-[#7f8691]" />
+          <input
+            value={nodeSearch}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Search nodes like shader, output, ai..."
+            aria-label="Search workflow node types"
+            className="w-full bg-transparent text-sm text-white outline-none placeholder:text-[#7f8691]"
+            autoFocus
+          />
+        </label>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {filteredNodeTypes.map((type) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => onAddNode(type)}
+              aria-label={`Add ${type.replace('_', ' ')} node`}
+              className="rounded-[1.2rem] border border-white/10 bg-black/20 p-4 text-left transition hover:border-[#e0ff00]/35 hover:bg-white/[0.04]"
+            >
+              <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">Node Type</p>
+              <p className="mt-2 text-base font-semibold text-white">{type.replace('_', ' ')}</p>
+              <p className="mt-2 text-sm leading-6 text-[#9ca3af]">
+                Inputs {NODE_PORT_DEFINITIONS[type].inputs.length} / Outputs {NODE_PORT_DEFINITIONS[type].outputs.length}
+              </p>
+            </button>
+          ))}
+        </div>
+        {filteredNodeTypes.length === 0 ? (
+          <p className="mt-4 text-sm text-[#9ca3af]">No node types matched this search.</p>
+        ) : null}
+      </section>
+    </div>
   )
 }
 
@@ -1429,6 +1474,7 @@ function PortGroup({
               <div key={`${port.name}-${workflowConnectionFeedback.shakeKey}`} className="relative">
                 <button
                   type="button"
+                  aria-label={`${side === 'output' ? 'Output' : 'Input'} port ${port.name}, ${port.dataType}${port.required ? ', required' : ''}${side === 'output' ? '. Start a connection from this port.' : connectionDraft ? '. Complete the pending connection on this port.' : ''}`}
                   onClick={(event) => {
                     event.stopPropagation()
 
@@ -1524,6 +1570,7 @@ function ContextAction({
   return (
     <button
       type="button"
+      role="menuitem"
       onClick={onClick}
       disabled={disabled}
       className={`block w-full rounded-xl px-3 py-2 text-left text-sm ${
@@ -1538,7 +1585,7 @@ function ContextAction({
 }
 
 function ContextDivider() {
-  return <div className="my-1 border-t border-white/8" />
+  return <div role="separator" className="my-1 border-t border-white/8" />
 }
 
 function toCanvasPoint(

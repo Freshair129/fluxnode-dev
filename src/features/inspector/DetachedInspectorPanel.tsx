@@ -283,6 +283,8 @@ export function DetachedInspectorPanel() {
                         type="button"
                         onClick={() => setSelectedNodeComputeSource(source)}
                         disabled={source === 'cloud' && useProjectStore.getState().ui.networkStatus === 'offline'}
+                        aria-pressed={nodeComputeSource === source}
+                        aria-label={`Compute source ${source}`}
                         className={`rounded-full px-3 py-2 text-xs ${
                           nodeComputeSource === source
                             ? 'bg-[#e0ff00] font-semibold text-black'

@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { pickProjectDirectory } from '../../services/ipc/file-dialog'
 import type { ProjectTemplateId } from '../../domain/project/defaults'
 import { useProjectStore } from '../../store/project-store'
+import { useModalA11y } from '../settings/useModalA11y'
 
 const templates = [
   {
@@ -34,6 +35,7 @@ export function WelcomeModal() {
   const runtimeHealth = useProjectStore((state) => state.runtimeHealth)
   const setDefaultProjectDirectory = useProjectStore((state) => state.setDefaultProjectDirectory)
   const openSettings = useProjectStore((state) => state.openSettings)
+  const dialogRef = useModalA11y<HTMLElement>()
   const localComputeReady = runtimeHealth.status !== 'degraded'
   const localComputeTone = localComputeReady ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-50' : 'border-amber-300/20 bg-amber-500/10 text-amber-50'
 
@@ -60,10 +62,12 @@ export function WelcomeModal() {
   return (
     <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="welcome-modal-title"
-        className="w-full max-w-4xl rounded-[2rem] border border-white/10 bg-[#101112] p-6 shadow-[0_30px_120px_rgba(0,0,0,0.5)]"
+        tabIndex={-1}
+        className="w-full max-w-4xl rounded-[2rem] border border-white/10 bg-[#101112] p-6 shadow-[0_30px_120px_rgba(0,0,0,0.5)] outline-none"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -114,7 +118,7 @@ export function WelcomeModal() {
             </div>
             <div className="rounded-[1.1rem] border border-white/8 bg-white/[0.03] px-4 py-3">
               <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">Local Compute Guide</p>
-              <div className={`mt-2 rounded-[0.9rem] border px-3 py-2 text-xs ${localComputeTone}`}>
+              <div aria-live="polite" className={`mt-2 rounded-[0.9rem] border px-3 py-2 text-xs ${localComputeTone}`}>
                 {localComputeReady ? 'ComfyUI-ready path detected for local workflows.' : 'ComfyUI is not ready yet. Local compute needs setup or recovery.'}
               </div>
               <p className="mt-3 text-sm leading-6 text-white">
