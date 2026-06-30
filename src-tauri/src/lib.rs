@@ -2654,6 +2654,7 @@ fn url_encode_svg(value: &str) -> String {
         .collect()
 }
 
+#[allow(dead_code)] // retained for tests and as a fallback frame estimate
 fn estimate_total_frames(project_value: &Value) -> u32 {
     let frame_rate = project_value
         .get("settings")

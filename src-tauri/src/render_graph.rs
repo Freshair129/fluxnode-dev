@@ -258,6 +258,7 @@ fn quality_args(encoder: &str, preset: &Value) -> Vec<String> {
 /// input index.
 struct ResolvedClip {
     input_index: usize,
+    #[allow(dead_code)] // kept for debugging/inspection of the resolved graph
     source_path: String,
     start_time: f64,
     in_point: f64,
