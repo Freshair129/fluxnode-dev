@@ -15,6 +15,7 @@ import type {
 } from '../../domain/project/types'
 import { canOpenPathInShell } from '../../services/ipc/app-shell'
 import { useProjectStore } from '../../store/project-store'
+import { useModalA11y } from '../settings/useModalA11y'
 import { RenderJobProgress } from './RenderJobProgress'
 
 function getOsTargetVerdict(runtimeHealth: RuntimeHealth) {
@@ -1631,7 +1632,7 @@ export function SystemPanels() {
       <aside aria-label="System status and export controls" className="grid gap-4 xl:grid-cols-5">
       <section aria-label="Export queue" className="rounded-[1.5rem] border border-white/8 bg-[#151618]/90 p-4">
         <PanelHeading icon={Rocket} title="Export Queue" />
-        <p className="mt-3 text-sm text-[#cbd2dc]">
+        <p aria-live="polite" className="mt-3 text-sm text-[#cbd2dc]">
           {queue.length === 0 ? 'No render jobs yet.' : `${queue.length} render job(s) tracked in the project queue.`}
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
@@ -1808,7 +1809,7 @@ export function SystemPanels() {
 
       <section aria-label="Connectivity status" className="rounded-[1.5rem] border border-white/8 bg-[#151618]/90 p-4">
         <PanelHeading icon={Radio} title="Connectivity" />
-        <div className="mt-4 space-y-3">
+        <div aria-live="polite" className="mt-4 space-y-3">
           <StatusPill label={networkStatus === 'online' ? 'Online' : 'Offline'} tone={networkStatus === 'online' ? 'ok' : 'warn'} />
           <StatusPill label={`Mode: ${performanceMode.replace('_', ' ')}`} tone={performanceMode === 'balanced' ? 'ok' : 'warn'} />
           <StatusPill label={`Backend: ${runtimeHealth.backend}`} tone={runtimeHealth.status === 'ok' ? 'ok' : 'warn'} />
@@ -2248,9 +2249,7 @@ export function SystemPanels() {
             </p>
           </div>
         ) : null}
-        {proofExportStatus ? (
-          <p className="mt-2 text-xs leading-5 text-[#7f8792]">{proofExportStatus}</p>
-        ) : null}
+        <p aria-live="polite" className="mt-2 text-xs leading-5 text-[#7f8792]">{proofExportStatus ?? ''}</p>
         <p className="mt-2 text-xs leading-5 text-[#7f8792]">
           Archived coverage maps: {section11CoverageMapHistory.length}
         </p>
@@ -2420,10 +2419,11 @@ export function SystemPanels() {
             step={0.05}
             value={audio.masterVolume}
             onChange={(event) => setMasterVolume(Number(event.target.value))}
+            aria-label="Master volume"
             className="w-full accent-[#e0ff00]"
           />
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={toggleScrubEnabled} className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white">
+            <button type="button" onClick={toggleScrubEnabled} aria-pressed={audio.scrubEnabled} className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white">
               Scrub {audio.scrubEnabled ? 'On' : 'Off'}
             </button>
             <button type="button" onClick={cycleWaveformDensity} className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white">
@@ -2570,19 +2570,45 @@ function FailureInspectorModal({
   onRetry: (jobId: string) => void
   onResolveQuota: (errorId: string) => void
 }) {
-  if (!job && !quotaError) {
+  const isOpen = Boolean(job || quotaError)
+  const dialogRef = useModalA11y<HTMLElement>(isOpen)
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+      }
+    }
+
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [isOpen, onClose])
+
+  if (!isOpen) {
     return null
   }
 
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-      <section className="w-full max-w-2xl rounded-[1.75rem] border border-white/10 bg-[#111214] p-5 shadow-[0_30px_120px_rgba(0,0,0,0.55)]">
+      <section
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="failure-inspector-title"
+        tabIndex={-1}
+        className="w-full max-w-2xl rounded-[1.75rem] border border-white/10 bg-[#111214] p-5 shadow-[0_30px_120px_rgba(0,0,0,0.55)] outline-none"
+      >
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-[11px] uppercase tracking-[0.28em] text-[#7f8691]">
               {job?.errorCategory === 'cloud_quota' || quotaError ? 'Cloud Quota' : 'Render Failure'}
             </p>
-            <h3 className="mt-2 text-2xl font-semibold text-white">
+            <h3 id="failure-inspector-title" className="mt-2 text-2xl font-semibold text-white">
               {job?.name ?? 'Render issue'} inspector
             </h3>
           </div>
