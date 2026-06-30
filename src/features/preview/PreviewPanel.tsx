@@ -1,10 +1,13 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Film, HardDrive, Link2, PlayCircle, Sparkles } from 'lucide-react'
 import { useProjectStore } from '../../store/project-store'
 
 const PREVIEW_WIDTH = 960
 const PREVIEW_HEIGHT = 540
 const PREVIEW_PREFETCH_FRAMES = 30
+// Minimum gap between decode requests while the timeline is actively shuttling,
+// so rapid playhead ticks during playback/scrubbing don't flood the backend.
+const PREVIEW_DECODE_THROTTLE_MS = 120
 
 export function PreviewPanel() {
   const project = useProjectStore((state) => state.project)
@@ -73,17 +76,66 @@ export function PreviewPanel() {
       ? Object.keys(previewFrames).filter((key) => key.startsWith(`${selectedAsset.id}:${effectivePreviewSource}:`) && key.endsWith(`:${requestWidth}x${requestHeight}`)).length
       : 0
 
+  const lastDecodeAtRef = useRef(0)
+  const lastDecodedTimeRef = useRef<number | null>(null)
+  const trailingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const isVisualClip =
+    activeView === 'timeline' &&
+    !!selectedClip &&
+    !!selectedAsset &&
+    (selectedAsset.type === 'video' || selectedAsset.type === 'image')
+  const isPlaying = playbackState === 'playing' || playbackState === 'reverse'
+
   useEffect(() => {
-    if (activeView !== 'timeline' || !selectedClip || !selectedAsset) {
+    if (!isVisualClip) {
+      lastDecodedTimeRef.current = null
       return
     }
 
-    if (selectedAsset.type !== 'video' && selectedAsset.type !== 'image') {
+    // Only re-decode when the requested source time actually changes — avoids
+    // redundant decode calls when unrelated state updates re-run this effect.
+    if (requestedSourceTime !== null && requestedSourceTime === lastDecodedTimeRef.current) {
       return
     }
 
-    void loadPreviewFrameForSelectedClip(PREVIEW_WIDTH, PREVIEW_HEIGHT)
-  }, [activeView, loadPreviewFrameForSelectedClip, playhead, selectedAsset, selectedClip])
+    const runDecode = () => {
+      lastDecodeAtRef.current = Date.now()
+      lastDecodedTimeRef.current = requestedSourceTime
+      void loadPreviewFrameForSelectedClip(PREVIEW_WIDTH, PREVIEW_HEIGHT)
+    }
+
+    // Throttle while shuttling: cap decode frequency but always schedule a
+    // trailing decode so the final settled position still renders a fresh frame.
+    if (isPlaying) {
+      const elapsed = Date.now() - lastDecodeAtRef.current
+
+      if (elapsed >= PREVIEW_DECODE_THROTTLE_MS) {
+        runDecode()
+      } else {
+        if (trailingTimerRef.current) {
+          clearTimeout(trailingTimerRef.current)
+        }
+        trailingTimerRef.current = setTimeout(() => {
+          trailingTimerRef.current = null
+          runDecode()
+        }, PREVIEW_DECODE_THROTTLE_MS - elapsed)
+      }
+      return
+    }
+
+    // Paused / single seek: decode immediately for a responsive scrub.
+    runDecode()
+  }, [isVisualClip, isPlaying, loadPreviewFrameForSelectedClip, requestedSourceTime])
+
+  useEffect(
+    () => () => {
+      if (trailingTimerRef.current) {
+        clearTimeout(trailingTimerRef.current)
+      }
+    },
+    [],
+  )
 
   return (
     <section
