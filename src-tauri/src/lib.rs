@@ -1555,6 +1555,81 @@ mod proxy_tests {
     }
 }
 
+/// Decodes a real frame at `requested_time` (seconds) scaled to `width`x`height`
+/// using the bundled ffmpeg sidecar and returns a PNG `PreviewFrameData`.
+/// Falls back to the SVG placeholder from `build_preview_frame` when ffmpeg is
+/// missing or the extraction/encode fails, so callers never hard-crash.
+fn decode_preview_frame(
+    asset_id: String,
+    source_path: String,
+    requested_time: f64,
+    width: u32,
+    height: u32,
+) -> PreviewFrameData {
+    let bin = sidecar_path("ffmpeg");
+    if !bin.exists() {
+        return build_preview_frame(asset_id, source_path, requested_time, width, height);
+    }
+
+    let dest = std::env::temp_dir().join(format!(
+        "fluxnode-preview-{}-{}.png",
+        asset_id.bytes().fold(0_u32, |sum, byte| sum.wrapping_add(byte as u32)),
+        current_timestamp().replace([':', '.', '-'], "")
+    ));
+    let _ = fs::remove_file(&dest);
+
+    let result = (|| -> Result<Vec<u8>, String> {
+        let output = Command::new(&bin)
+            .args([
+                "-ss",
+                &format!("{requested_time}"),
+                "-i",
+                &source_path,
+                "-frames:v",
+                "1",
+                "-vf",
+                &format!("scale={width}:{height}"),
+                "-y",
+            ])
+            .arg(&dest)
+            .output()
+            .map_err(|error| format!("failed to launch ffmpeg ({}): {error}", bin.display()))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "ffmpeg exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+
+        let bytes = fs::read(&dest).map_err(|error| error.to_string())?;
+        if bytes.is_empty() {
+            return Err("ffmpeg produced an empty preview frame".to_string());
+        }
+        Ok(bytes)
+    })();
+
+    let _ = fs::remove_file(&dest);
+
+    match result {
+        Ok(bytes) => {
+            let data_url = format!("data:image/png;base64,{}", base64_encode(&bytes));
+            PreviewFrameData {
+                asset_id,
+                source_path,
+                requested_time,
+                width,
+                height,
+                mime_type: "image/png".to_string(),
+                data_url,
+                generated_at: current_timestamp(),
+            }
+        }
+        Err(_) => build_preview_frame(asset_id, source_path, requested_time, width, height),
+    }
+}
+
 #[tauri::command]
 fn video_decode_frame(
     asset_id: String,
@@ -1563,7 +1638,7 @@ fn video_decode_frame(
     width: u32,
     height: u32,
 ) -> Result<String, String> {
-    serde_json::to_string(&build_preview_frame(
+    serde_json::to_string(&decode_preview_frame(
         asset_id,
         source_path,
         requested_time,
@@ -1581,7 +1656,7 @@ fn video_seek(
     width: u32,
     height: u32,
 ) -> Result<String, String> {
-    serde_json::to_string(&build_preview_frame(
+    serde_json::to_string(&decode_preview_frame(
         asset_id,
         source_path,
         requested_time,
@@ -1589,6 +1664,106 @@ fn video_seek(
         height,
     ))
     .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod preview_decode_tests {
+    use super::*;
+
+    #[test]
+    fn video_decode_frame_returns_real_png_data_url() {
+        let ffmpeg = sidecar_path("ffmpeg");
+        if !ffmpeg.exists() {
+            eprintln!("skipping: ffmpeg sidecar not staged");
+            return;
+        }
+
+        let clip = std::env::temp_dir().join("fluxnode-preview-decode-test.mp4");
+        let _ = fs::remove_file(&clip);
+
+        let status = Command::new(&ffmpeg)
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x240:rate=25:duration=1",
+                "-c:v",
+                "mpeg4",
+                "-frames:v",
+                "25",
+            ])
+            .arg(&clip)
+            .status()
+            .expect("ffmpeg should launch");
+        assert!(status.success(), "ffmpeg failed to synthesize the test clip");
+
+        let json = video_decode_frame(
+            "preview-asset".to_string(),
+            clip.to_string_lossy().to_string(),
+            0.2,
+            160,
+            120,
+        )
+        .expect("video_decode_frame should succeed");
+
+        let frame: Value = serde_json::from_str(&json).expect("result should be valid JSON");
+        assert_eq!(frame["mimeType"], "image/png", "mime should be image/png");
+
+        let data_url = frame["dataUrl"].as_str().expect("dataUrl should be a string");
+        assert!(
+            data_url.starts_with("data:image/png;base64,"),
+            "data_url should be a PNG data URL, got: {}",
+            &data_url[..data_url.len().min(40)]
+        );
+
+        // Decode the base64 payload and verify the PNG magic bytes.
+        let payload = &data_url["data:image/png;base64,".len()..];
+        let decoded = base64_decode_str(payload).expect("payload should decode");
+        const PNG_MAGIC: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        assert!(
+            decoded.starts_with(&PNG_MAGIC),
+            "decoded payload should be a real PNG"
+        );
+
+        let _ = fs::remove_file(&clip);
+    }
+
+    /// Minimal standard-base64 decoder for the test (no padding tolerance needed
+    /// beyond the standard `=` scheme produced by `base64_encode`).
+    fn base64_decode_str(input: &str) -> Result<Vec<u8>, String> {
+        fn val(c: u8) -> Result<u32, String> {
+            match c {
+                b'A'..=b'Z' => Ok((c - b'A') as u32),
+                b'a'..=b'z' => Ok((c - b'a' + 26) as u32),
+                b'0'..=b'9' => Ok((c - b'0' + 52) as u32),
+                b'+' => Ok(62),
+                b'/' => Ok(63),
+                _ => Err(format!("invalid base64 byte: {c}")),
+            }
+        }
+        let bytes: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+        let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+        for chunk in bytes.chunks(4) {
+            if chunk.len() < 2 {
+                return Err("truncated base64 input".to_string());
+            }
+            let pad = chunk.iter().filter(|&&b| b == b'=').count();
+            let c0 = val(chunk[0])?;
+            let c1 = val(chunk[1])?;
+            let c2 = if chunk.len() > 2 && chunk[2] != b'=' { val(chunk[2])? } else { 0 };
+            let c3 = if chunk.len() > 3 && chunk[3] != b'=' { val(chunk[3])? } else { 0 };
+            let triple = (c0 << 18) | (c1 << 12) | (c2 << 6) | c3;
+            out.push(((triple >> 16) & 0xff) as u8);
+            if pad < 2 {
+                out.push(((triple >> 8) & 0xff) as u8);
+            }
+            if pad < 1 {
+                out.push((triple & 0xff) as u8);
+            }
+        }
+        Ok(out)
+    }
 }
 
 #[tauri::command]
