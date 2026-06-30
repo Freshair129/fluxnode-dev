@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, CheckCircle2, Cloud, Copy, Cpu, Link2, Move, Network, Plus, Search, Trash2, X } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Cloud, Copy, Cpu, Link2, Loader2, Move, Network, Plus, Search, Sparkles, Trash2, X } from 'lucide-react'
 import { NODE_PORT_DEFINITIONS } from '../../domain/workflow/node-definitions'
 import { validateConnectionAttempt } from '../../domain/workflow/validation'
 import type { NodeType, WorkflowNode, WorkflowState } from '../../domain/project/types'
 import { buildNodePreviewSource, useProjectStore } from '../../store/project-store'
+import { isTauriRuntime } from '../../services/ipc/tauri-runtime'
 import { useModalA11y } from '../settings/useModalA11y'
 
 const PORT_COLOR_MAP = {
@@ -119,7 +120,10 @@ export function WorkflowView() {
   const disconnectSelectedNodeEdges = useProjectStore((state) => state.disconnectSelectedNodeEdges)
   const loadPreviewFrameForSelectedNode = useProjectStore((state) => state.loadPreviewFrameForSelectedNode)
   const requestNodePreview = useProjectStore((state) => state.requestNodePreview)
+  const runAiNode = useProjectStore((state) => state.runAiNode)
+  const aiNodeGenerationInFlight = useProjectStore((state) => state.aiNodeGenerationInFlight)
   const nodePreviewFrames = useProjectStore((state) => state.nodePreviewFrames)
+  const isTauri = isTauriRuntime()
   const moveWorkflowNodes = useProjectStore((state) => state.moveWorkflowNodes)
   const connectWorkflowPorts = useProjectStore((state) => state.connectWorkflowPorts)
   const panWorkflowViewport = useProjectStore((state) => state.panWorkflowViewport)
@@ -1141,6 +1145,50 @@ export function WorkflowView() {
                           />
                         </div>
                       )}
+
+                      {!compact && selectedNodeIds[0] === node.id && isAiNode(node) ? (
+                        (() => {
+                          const generating = Boolean(aiNodeGenerationInFlight[node.id])
+                          const upscaleUnsupported = node.type === 'ai_upscale'
+
+                          return (
+                            <button
+                              type="button"
+                              disabled={!isTauri || generating}
+                              title={
+                                !isTauri
+                                  ? 'AI generation runs only in the desktop app.'
+                                  : upscaleUnsupported
+                                    ? 'AI Upscale is not supported yet — generation will report an error.'
+                                    : 'Run this node on your ComfyUI server.'
+                              }
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                void runAiNode(node.id)
+                              }}
+                              className={`mt-4 inline-flex w-full items-center justify-center gap-2 rounded-[1rem] border px-4 py-2 text-sm font-semibold transition ${
+                                generating
+                                  ? 'cursor-wait border-[#e0ff00]/30 bg-[#e0ff00]/10 text-[#f5ffd5]'
+                                  : !isTauri
+                                    ? 'cursor-not-allowed border-white/10 bg-white/5 text-[#7f8691] opacity-60'
+                                    : 'border-[#e0ff00]/40 bg-[#e0ff00] text-black hover:bg-[#eaff4d]'
+                              }`}
+                            >
+                              {generating ? (
+                                <>
+                                  <Loader2 size={16} className="animate-spin" />
+                                  Generating…
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles size={16} />
+                                  {upscaleUnsupported ? 'Generate (Upscale WIP)' : 'Generate'}
+                                </>
+                              )}
+                            </button>
+                          )
+                        })()
+                      ) : null}
 
                       {!compact && selectedNodeIds[0] === node.id && selectedNodePreviewFrame ? (
                         <div className="mt-4 overflow-hidden rounded-[1rem] border border-white/10 bg-black/40">
