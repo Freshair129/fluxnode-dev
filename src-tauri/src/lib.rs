@@ -5,11 +5,13 @@ use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, Once, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sysinfo::{Disks, System};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+
+mod render_graph;
 
 static ASSET_WATCH_STATE: OnceLock<Mutex<HashMap<String, WatchedAsset>>> = OnceLock::new();
 static ASSET_WATCH_THREAD: Once = Once::new();
@@ -1839,6 +1841,183 @@ fn start_export_job(
     .map_err(|error| error.to_string())
 }
 
+// --- real ffmpeg render execution -------------------------------------------
+
+static RENDER_PIDS: OnceLock<Mutex<HashMap<String, u32>>> = OnceLock::new();
+
+fn render_pids() -> &'static Mutex<HashMap<String, u32>> {
+    RENDER_PIDS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Force-kills a tracked render process (and its child encoders).
+fn kill_render_process(job_id: &str) {
+    let pid = render_pids()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(job_id).copied());
+    if let Some(pid) = pid {
+        #[cfg(target_os = "windows")]
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .output();
+        #[cfg(not(target_os = "windows"))]
+        let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
+        if let Ok(mut map) = render_pids().lock() {
+            map.remove(job_id);
+        }
+    }
+}
+
+/// Spawns ffmpeg for a compiled render plan and a monitor thread that streams
+/// real `-progress` output into the status file. The status file must already
+/// read `rendering` before this is called.
+fn spawn_ffmpeg_render(job_id: String, plan_args: Vec<String>, status_path: PathBuf) -> Result<(), String> {
+    let ffmpeg = sidecar_path("ffmpeg");
+    let mut args: Vec<String> = vec!["-nostats".into(), "-progress".into(), "pipe:1".into()];
+    args.extend(plan_args);
+
+    let mut child = Command::new(&ffmpeg)
+        .args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("failed to launch ffmpeg ({}): {error}", ffmpeg.display()))?;
+
+    let pid = child.id();
+    if let Ok(mut map) = render_pids().lock() {
+        map.insert(job_id.clone(), pid);
+    }
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    std::thread::spawn(move || {
+        // Drain stderr concurrently so ffmpeg never blocks on a full pipe.
+        let stderr_handle = stderr.map(|err| {
+            std::thread::spawn(move || {
+                use std::io::Read;
+                let mut buf = String::new();
+                let _ = BufReader::new(err).read_to_string(&mut buf);
+                buf
+            })
+        });
+
+        if let Some(out) = stdout {
+            for line in BufReader::new(out).lines().map_while(Result::ok) {
+                let Some(rest) = line.strip_prefix("frame=") else {
+                    continue;
+                };
+                let Ok(frame) = rest.trim().parse::<u32>() else {
+                    continue;
+                };
+                if let Ok(mut status) = read_render_status(&status_path) {
+                    // The job was cancelled/paused out from under us — stop here.
+                    if status.status == "cancelled" || status.status == "paused" {
+                        break;
+                    }
+                    let total = status.total_frames.max(1);
+                    status.current_frame = frame.min(total);
+                    status.progress =
+                        ((status.current_frame as f64 / total as f64) * 100.0).round() as u32;
+                    status.status = "rendering".to_string();
+                    status.estimated_time_remaining =
+                        Some(total.saturating_sub(status.current_frame));
+                    status.updated_at = current_timestamp();
+                    let _ = write_render_status(&status_path, &status);
+                }
+            }
+        }
+
+        let exit = child.wait();
+        if let Ok(mut map) = render_pids().lock() {
+            map.remove(&job_id);
+        }
+
+        if let Ok(mut status) = read_render_status(&status_path) {
+            // Respect a cancel/pause that already finalized the status.
+            if status.status == "cancelled" || status.status == "paused" {
+                return;
+            }
+            let success = matches!(&exit, Ok(code) if code.success());
+            if success {
+                status.status = "completed".to_string();
+                status.current_frame = status.total_frames;
+                status.progress = 100;
+                status.completed_at = Some(current_timestamp());
+                status.estimated_time_remaining = Some(0);
+                status.output_file_size = fs::metadata(&status.output_path).ok().map(|m| m.len());
+                status.error = None;
+            } else {
+                let detail = stderr_handle
+                    .and_then(|handle| handle.join().ok())
+                    .map(|log| {
+                        let tail: Vec<&str> = log.lines().filter(|l| !l.trim().is_empty()).collect();
+                        let start = tail.len().saturating_sub(4);
+                        tail[start..].join(" ")
+                    })
+                    .unwrap_or_default();
+                status.status = "failed".to_string();
+                status.completed_at = Some(current_timestamp());
+                status.error = Some(if detail.is_empty() {
+                    "ffmpeg render failed".to_string()
+                } else {
+                    detail
+                });
+            }
+            status.updated_at = current_timestamp();
+            let _ = write_render_status(&status_path, &status);
+        }
+    });
+
+    Ok(())
+}
+
+/// Rebuilds the render plan from a job's manifest and re-runs ffmpeg from the
+/// start. Used by resume/retry (a single ffmpeg encode cannot truly resume
+/// mid-stream, so we re-render — correctness over efficiency for the MVP).
+fn restart_render_from_manifest(app: &AppHandle, job_id: &str) -> Result<(), String> {
+    let project_dir = get_current_project_dir(app)?
+        .ok_or_else(|| "No active project directory is available".to_string())?;
+    let render_cache_dir = project_dir.join("cache").join("renders");
+    let manifest_path = render_cache_dir.join(format!("{job_id}.render.json"));
+    let status_path = render_cache_dir.join(format!("{job_id}.status.json"));
+
+    let manifest: Value =
+        serde_json::from_str(&fs::read_to_string(&manifest_path).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+    let project_value = manifest
+        .get("projectSnapshot")
+        .cloned()
+        .ok_or_else(|| "Render manifest is missing projectSnapshot".to_string())?;
+    let preset_value = manifest
+        .get("preset")
+        .cloned()
+        .ok_or_else(|| "Render manifest is missing preset".to_string())?;
+    let output_path = manifest
+        .get("outputPath")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Render manifest is missing outputPath".to_string())?
+        .to_string();
+
+    let plan = render_graph::build_render_plan(&project_value, &preset_value, &output_path)?;
+    let total_frames = plan.total_frames.max(1);
+
+    let mut status = read_render_status(&status_path)?;
+    status.status = "rendering".to_string();
+    status.current_frame = 0;
+    status.progress = 0;
+    status.total_frames = total_frames;
+    status.completed_at = None;
+    status.error = None;
+    status.output_file_size = None;
+    status.estimated_time_remaining = Some(total_frames);
+    status.updated_at = current_timestamp();
+    write_render_status(&status_path, &status)?;
+
+    spawn_ffmpeg_render(job_id.to_string(), plan.args, status_path)
+}
+
 #[tauri::command]
 fn render_start(
     app: AppHandle,
@@ -1879,32 +2058,36 @@ fn render_start(
     fs::create_dir_all(&output_dir).map_err(|error| error.to_string())?;
     let output_path = output_dir.join(format!("{project_id}-{job_id}.{output_extension}"));
 
-    let total_frames = estimate_total_frames(&project_value).max(1);
+    let output_str = output_path.to_string_lossy().to_string();
     let render_cache_dir = project_dir.join("cache").join("renders");
     fs::create_dir_all(&render_cache_dir).map_err(|error| error.to_string())?;
     let manifest_path = render_cache_dir.join(format!("{job_id}.render.json"));
     let status_path = render_cache_dir.join(format!("{job_id}.status.json"));
+
+    // Compile the timeline into a concrete multi-track ffmpeg invocation.
+    let plan = render_graph::build_render_plan(&project_value, &preset_value, &output_str)?;
+    let total_frames = plan.total_frames.max(1);
 
     let manifest = serde_json::json!({
         "jobId": job_id,
         "projectSnapshot": project_value,
         "audioOutput": describe_workflow_audio_output(&project_value),
         "preset": preset_value,
-        "outputPath": output_path.to_string_lossy(),
+        "outputPath": output_str,
         "startedAt": started_at,
         "totalFrames": total_frames
     });
 
     let status = RenderJobStatus {
         job_id: job_id.clone(),
-        status: "queued".to_string(),
+        status: "rendering".to_string(),
         progress: 0,
         current_frame: 0,
         total_frames,
         updated_at: started_at.clone(),
         completed_at: None,
         estimated_time_remaining: Some(total_frames),
-        output_path: output_path.to_string_lossy().to_string(),
+        output_path: output_str.clone(),
         output_file_size: None,
         error: None,
     };
@@ -1916,9 +2099,13 @@ fn render_start(
     .map_err(|error| error.to_string())?;
     write_render_status(&status_path, &status)?;
 
+    // Kick off the real encode in the background; progress streams into the
+    // status file and the frontend polls render_get_status.
+    spawn_ffmpeg_render(job_id.clone(), plan.args, status_path.clone())?;
+
     serde_json::to_string(&RenderJobStartResult {
         job_id,
-        output_path: output_path.to_string_lossy().to_string(),
+        output_path: output_str,
         manifest_path: manifest_path.to_string_lossy().to_string(),
         status_path: status_path.to_string_lossy().to_string(),
         started_at,
@@ -1932,44 +2119,9 @@ fn render_get_status(app: AppHandle, job_id: String) -> Result<String, String> {
     let project_dir = get_current_project_dir(&app)?
         .ok_or_else(|| "No active project directory is available".to_string())?;
     let status_path = project_dir.join("cache").join("renders").join(format!("{job_id}.status.json"));
-    let mut status = read_render_status(&status_path)?;
-
-    match status.status.as_str() {
-        "queued" => {
-            status.status = "rendering".to_string();
-            if status.current_frame == 0 {
-                status.current_frame = u32::min(12, status.total_frames);
-            }
-        }
-        "rendering" => {
-            status.current_frame = u32::min(status.total_frames, status.current_frame.saturating_add(u32::max(1, status.total_frames / 3)));
-            if status.current_frame >= status.total_frames {
-                status.status = "completed".to_string();
-                status.completed_at = Some(current_timestamp());
-                fs::write(
-                    &status.output_path,
-                    format!("FluxNode render artifact for job {}\n", status.job_id),
-                )
-                .map_err(|error| error.to_string())?;
-                status.output_file_size = fs::metadata(&status.output_path).ok().map(|value| value.len());
-                status.estimated_time_remaining = Some(0);
-            }
-        }
-        "paused" => {}
-        _ => {}
-    }
-
-    status.progress = if status.total_frames == 0 {
-        0
-    } else {
-        ((status.current_frame as f64 / status.total_frames as f64) * 100.0).round() as u32
-    };
-    status.updated_at = current_timestamp();
-    if status.status == "rendering" {
-      status.estimated_time_remaining = Some(status.total_frames.saturating_sub(status.current_frame));
-    }
-
-    write_render_status(&status_path, &status)?;
+    // The background render thread maintains the status file in real time;
+    // just read and return the latest snapshot.
+    let status = read_render_status(&status_path)?;
     serde_json::to_string(&status).map_err(|error| error.to_string())
 }
 
@@ -1979,11 +2131,17 @@ fn render_cancel(app: AppHandle, job_id: String) -> Result<(), String> {
         .ok_or_else(|| "No active project directory is available".to_string())?;
     let status_path = project_dir.join("cache").join("renders").join(format!("{job_id}.status.json"));
     let mut status = read_render_status(&status_path)?;
+    if status.status == "completed" {
+        return Ok(());
+    }
+    // Mark cancelled BEFORE killing so the monitor thread doesn't flip it to failed.
     status.status = "cancelled".to_string();
     status.updated_at = current_timestamp();
     status.completed_at = Some(current_timestamp());
     status.estimated_time_remaining = Some(0);
-    write_render_status(&status_path, &status)
+    write_render_status(&status_path, &status)?;
+    kill_render_process(&job_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1992,43 +2150,29 @@ fn render_pause(app: AppHandle, job_id: String) -> Result<(), String> {
         .ok_or_else(|| "No active project directory is available".to_string())?;
     let status_path = project_dir.join("cache").join("renders").join(format!("{job_id}.status.json"));
     let mut status = read_render_status(&status_path)?;
+    if status.status != "rendering" {
+        return Ok(());
+    }
+    // Mark paused BEFORE killing so the monitor thread leaves it paused.
     status.status = "paused".to_string();
     status.updated_at = current_timestamp();
     status.estimated_time_remaining = Some(status.total_frames.saturating_sub(status.current_frame));
-    write_render_status(&status_path, &status)
+    write_render_status(&status_path, &status)?;
+    kill_render_process(&job_id);
+    Ok(())
 }
 
 #[tauri::command]
 fn render_resume(app: AppHandle, job_id: String) -> Result<(), String> {
-    let project_dir = get_current_project_dir(&app)?
-        .ok_or_else(|| "No active project directory is available".to_string())?;
-    let status_path = project_dir.join("cache").join("renders").join(format!("{job_id}.status.json"));
-    let mut status = read_render_status(&status_path)?;
-    status.status = "queued".to_string();
-    status.updated_at = current_timestamp();
-    status.estimated_time_remaining = Some(status.total_frames.saturating_sub(status.current_frame));
-    write_render_status(&status_path, &status)
+    // A single ffmpeg encode cannot resume mid-stream, so re-render from the start.
+    restart_render_from_manifest(&app, &job_id)
 }
 
 #[tauri::command]
 fn render_retry(app: AppHandle, job_id: String, resume_from_current_frame: bool) -> Result<(), String> {
-    let project_dir = get_current_project_dir(&app)?
-        .ok_or_else(|| "No active project directory is available".to_string())?;
-    let status_path = project_dir.join("cache").join("renders").join(format!("{job_id}.status.json"));
-    let mut status = read_render_status(&status_path)?;
-
-    if !resume_from_current_frame {
-        status.current_frame = 0;
-        status.progress = 0;
-    }
-
-    status.status = "queued".to_string();
-    status.updated_at = current_timestamp();
-    status.completed_at = None;
-    status.output_file_size = None;
-    status.error = None;
-    status.estimated_time_remaining = Some(status.total_frames.saturating_sub(status.current_frame));
-    write_render_status(&status_path, &status)
+    // ffmpeg cannot resume a partial encode; always re-render from frame 0.
+    let _ = resume_from_current_frame;
+    restart_render_from_manifest(&app, &job_id)
 }
 
 #[tauri::command]
@@ -2877,5 +3021,101 @@ mod tests {
         assert!((duration - 1.0).abs() < 0.25, "duration ~1s, got {duration}");
 
         let _ = fs::remove_file(&out);
+    }
+}
+
+#[cfg(test)]
+mod render_pipeline_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn render_plan_produces_a_real_composited_video() {
+        let ffmpeg = sidecar_path("ffmpeg");
+        let ffprobe = sidecar_path("ffprobe");
+        if !ffmpeg.exists() || !ffprobe.exists() {
+            eprintln!("skipping: ffmpeg/ffprobe sidecars not staged");
+            return;
+        }
+
+        let dir = std::env::temp_dir();
+        let vsrc = dir.join("fluxnode-render-vsrc.mp4");
+        let asrc = dir.join("fluxnode-render-asrc.wav");
+        let out = dir.join("fluxnode-render-out.mp4");
+        for f in [&vsrc, &asrc, &out] {
+            let _ = fs::remove_file(f);
+        }
+
+        // Synthesize a 1s 320x240@25 video (with audio) and a 1s tone.
+        let ok_v = Command::new(&ffmpeg)
+            .args([
+                "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=1",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                "-c:v", "mpeg4", "-c:a", "aac", "-shortest",
+            ])
+            .arg(&vsrc)
+            .status()
+            .expect("ffmpeg should launch")
+            .success();
+        assert!(ok_v, "failed to synthesize the video source");
+        let ok_a = Command::new(&ffmpeg)
+            .args(["-y", "-f", "lavfi", "-i", "sine=frequency=220:duration=1"])
+            .arg(&asrc)
+            .status()
+            .expect("ffmpeg should launch")
+            .success();
+        assert!(ok_a, "failed to synthesize the audio source");
+
+        let project = json!({
+            "settings": { "resolution": { "width": 320, "height": 240 }, "frameRate": 25.0 },
+            "audio": { "masterVolume": 1.0 },
+            "assets": { "assets": {
+                "v": { "type": "video", "sourcePath": vsrc.to_string_lossy() },
+                "a": { "type": "audio", "sourcePath": asrc.to_string_lossy() }
+            }},
+            "timeline": { "tracks": [
+                { "type": "video", "muted": false, "solo": false, "volume": 1.0, "clips": [
+                    { "assetId": "v", "startTime": 0.0, "duration": 1.0, "inPoint": 0.0, "outPoint": 1.0,
+                      "speed": 1.0, "volume": 1.0, "opacity": 1.0,
+                      "transform": { "x": 0.0, "y": 0.0, "scaleX": 1.0, "scaleY": 1.0, "rotation": 0.0 } }
+                ]},
+                { "type": "audio", "muted": false, "solo": false, "volume": 1.0, "clips": [
+                    { "assetId": "a", "startTime": 0.0, "duration": 1.0, "inPoint": 0.0, "outPoint": 1.0,
+                      "speed": 1.0, "volume": 1.0, "opacity": 1.0,
+                      "transform": { "x": 0.0, "y": 0.0, "scaleX": 1.0, "scaleY": 1.0, "rotation": 0.0 } }
+                ]}
+            ]}
+        });
+        let preset = json!({
+            "format": "mp4", "videoCodec": "mpeg4", "audioCodec": "aac",
+            "resolution": { "width": 320, "height": 240 }, "framerate": 25, "quality": "medium"
+        });
+
+        let out_str = out.to_string_lossy().to_string();
+        let plan = crate::render_graph::build_render_plan(&project, &preset, &out_str)
+            .expect("build_render_plan should succeed");
+        assert_eq!(plan.total_frames, 25, "1s @ 25fps => 25 frames");
+
+        let result = Command::new(&ffmpeg)
+            .args(&plan.args)
+            .output()
+            .expect("ffmpeg should launch");
+        assert!(
+            result.status.success(),
+            "ffmpeg render failed: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+
+        let report = run_ffprobe(&out_str).expect("ffprobe should read the rendered output");
+        let probe =
+            probe_result_from_ffprobe(&report, fs::metadata(&out).map(|m| m.len()).unwrap_or(0));
+        assert_eq!(probe.width, Some(320), "composited canvas width");
+        assert_eq!(probe.height, Some(240), "composited canvas height");
+        let d = probe.duration.expect("rendered duration should be present");
+        assert!((d - 1.0).abs() < 0.4, "rendered duration ~1s, got {d}");
+
+        for f in [&vsrc, &asrc, &out] {
+            let _ = fs::remove_file(f);
+        }
     }
 }
