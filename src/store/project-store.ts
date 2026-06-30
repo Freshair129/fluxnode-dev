@@ -172,6 +172,7 @@ interface ProjectStoreState {
   generateProxyForAsset: (assetId: string) => Promise<void>
   generateProxyForSelectedClip: () => Promise<void>
   generateWaveformForAsset: (assetId: string, bucketCount?: number) => Promise<void>
+  ensureThumbnailForAsset: (assetId: string) => Promise<void>
   loadPreviewFrameForSelectedClip: (width?: number, height?: number) => Promise<void>
   loadPreviewFrameForSelectedNode: (width?: number, height?: number) => Promise<void>
   unlinkSelectedMedia: () => void
@@ -3546,6 +3547,24 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         createdAt: new Date().toISOString(),
       })
     }
+  },
+  ensureThumbnailForAsset: async (assetId) => {
+    const state = get()
+    const asset = state.project.assets.assets[assetId]
+
+    if (!asset || asset.status === 'missing' || asset.status === 'corrupt') {
+      return
+    }
+
+    if (state.assetThumbnails[assetId]) {
+      return
+    }
+
+    if (isMemoryHardLimited(state)) {
+      return
+    }
+
+    await generateThumbnailForAssetRecord(set, get, assetId)
   },
   loadPreviewFrameForSelectedClip: async (width = 960, height = 540) => {
     const state = get()
