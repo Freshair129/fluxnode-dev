@@ -12,6 +12,7 @@ use sysinfo::{Disks, System};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod render_graph;
+mod workflow_graph;
 
 static ASSET_WATCH_STATE: OnceLock<Mutex<HashMap<String, WatchedAsset>>> = OnceLock::new();
 static ASSET_WATCH_THREAD: Once = Once::new();
@@ -1632,6 +1633,53 @@ fn decode_preview_frame(
     }
 }
 
+/// Executes the workflow subgraph feeding `node_id` (deterministic VFX nodes via
+/// ffmpeg) and returns a real PNG preview frame of that node's output. Falls back
+/// to the SVG placeholder when compilation or ffmpeg fails (e.g. AI-only graphs).
+#[tauri::command]
+fn workflow_render_node(
+    project_json: String,
+    node_id: String,
+    width: u32,
+    height: u32,
+) -> Result<String, String> {
+    let project_value = serde_json::from_str::<Value>(&project_json).map_err(|e| e.to_string())?;
+
+    let temp_out = std::env::temp_dir().join(format!(
+        "fluxnode-node-{}-{}.mp4",
+        node_id.bytes().fold(0_u32, |sum, byte| sum.wrapping_add(byte as u32)),
+        current_timestamp().replace([':', '.', '-'], "")
+    ));
+    let temp_out_str = temp_out.to_string_lossy().to_string();
+    let _ = fs::remove_file(&temp_out);
+
+    let frame = (|| -> Result<PreviewFrameData, String> {
+        let bin = sidecar_path("ffmpeg");
+        if !bin.exists() {
+            return Err("ffmpeg sidecar not found".to_string());
+        }
+        let plan = workflow_graph::build_workflow_plan(&project_value, &node_id, &temp_out_str)?;
+        let output = Command::new(&bin)
+            .args(&plan.args)
+            .output()
+            .map_err(|e| format!("failed to launch ffmpeg: {e}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "ffmpeg failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        // Grab the first frame of the node's rendered output as the preview.
+        Ok(decode_preview_frame(node_id.clone(), temp_out_str.clone(), 0.0, width, height))
+    })();
+
+    let _ = fs::remove_file(&temp_out);
+
+    let result =
+        frame.unwrap_or_else(|_| build_preview_frame(node_id.clone(), String::new(), 0.0, width, height));
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn video_decode_frame(
     asset_id: String,
@@ -2937,6 +2985,7 @@ pub fn run() {
             start_export_job,
             video_decode_frame,
             video_seek,
+            workflow_render_node,
             window_toggle_fullscreen
         ])
         .run(tauri::generate_context!())
@@ -3118,5 +3167,62 @@ mod render_pipeline_tests {
         for f in [&vsrc, &asrc, &out] {
             let _ = fs::remove_file(f);
         }
+    }
+}
+
+#[cfg(test)]
+mod workflow_exec_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn workflow_render_node_produces_a_real_png_preview() {
+        let ffmpeg = sidecar_path("ffmpeg");
+        if !ffmpeg.exists() {
+            eprintln!("skipping: ffmpeg sidecar not staged");
+            return;
+        }
+
+        let vsrc = std::env::temp_dir().join("fluxnode-wf-src.mp4");
+        let _ = fs::remove_file(&vsrc);
+        let ok = Command::new(&ffmpeg)
+            .args([
+                "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=1", "-c:v", "mpeg4",
+            ])
+            .arg(&vsrc)
+            .status()
+            .expect("ffmpeg should launch")
+            .success();
+        assert!(ok, "failed to synthesize source");
+
+        // media_source -> transform -> output
+        let project = json!({
+            "settings": { "resolution": { "width": 160, "height": 120 }, "frameRate": 25.0 },
+            "audio": { "masterVolume": 1.0 },
+            "assets": { "assets": { "v": { "type": "video", "sourcePath": vsrc.to_string_lossy() } } },
+            "workflow": {
+                "nodes": [
+                    { "id": "m1", "type": "media_source", "bypassed": false, "data": { "assetId": "v" } },
+                    { "id": "t1", "type": "transform", "bypassed": false, "data": {} },
+                    { "id": "o1", "type": "output", "bypassed": false, "data": {} }
+                ],
+                "edges": [
+                    { "id": "e1", "source": "m1", "sourceHandle": "video", "target": "t1", "targetHandle": "input" },
+                    { "id": "e2", "source": "t1", "sourceHandle": "output", "target": "o1", "targetHandle": "video" }
+                ]
+            }
+        });
+
+        let result = workflow_render_node(project.to_string(), "o1".to_string(), 160, 120)
+            .expect("workflow_render_node should return");
+        let parsed: Value = serde_json::from_str(&result).expect("valid json");
+        let data_url = parsed.get("dataUrl").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            data_url.starts_with("data:image/png;base64,"),
+            "expected a real PNG node preview, got: {}",
+            &data_url[..data_url.len().min(40)]
+        );
+
+        let _ = fs::remove_file(&vsrc);
     }
 }
