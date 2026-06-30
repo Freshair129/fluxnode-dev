@@ -14,6 +14,7 @@ import {
   syncAssetWatchTargets,
 } from '../services/ipc/asset-watch'
 import { checkNetworkConnectivity } from '../services/connectivity/check-network'
+import { useTimelineAudio, type TimelineAudioClip } from '../services/audio'
 import { useProjectStore } from '../store/project-store'
 
 const TimelineView = lazy(() =>
@@ -83,6 +84,46 @@ export default function App() {
   const previousActiveViewRef = useRef(activeView)
 
   useKeyboardShortcuts()
+
+  // Map timeline clips with an audio stream onto the decoupled audio-engine
+  // input shape, then drive Web Audio playback in sync with the playhead.
+  const timelineAudioClips = useMemo<TimelineAudioClip[]>(() => {
+    const assetsById = project.assets.assets
+    const clips: TimelineAudioClip[] = []
+    for (const track of project.timeline.tracks) {
+      if (track.type === 'subtitle') {
+        continue
+      }
+      for (const clip of track.clips) {
+        const asset = assetsById[clip.assetId]
+        if (!asset || (asset.type !== 'audio' && asset.type !== 'video') || !asset.sourcePath) {
+          continue
+        }
+        clips.push({
+          id: clip.id,
+          sourcePath: asset.sourcePath,
+          startTime: clip.startTime,
+          inPoint: clip.inPoint,
+          outPoint: clip.outPoint,
+          volume: clip.volume,
+          speed: clip.speed,
+          trackMuted: track.muted,
+          trackSolo: track.solo,
+          trackVolume: track.volume,
+        })
+      }
+    }
+    return clips
+  }, [project.timeline.tracks, project.assets.assets])
+
+  useTimelineAudio({
+    clips: timelineAudioClips,
+    playhead: project.timeline.playhead,
+    isPlaying: playbackState === 'playing',
+    masterVolume: project.audio.masterVolume,
+    playbackRate,
+    enabled: !detachedPanel,
+  })
 
   useEffect(() => {
     let unlisten: (() => void) | null = null
