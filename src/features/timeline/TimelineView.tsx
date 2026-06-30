@@ -72,6 +72,7 @@ export function TimelineView() {
   const showSelectedClipInWorkflow = useProjectStore((state) => state.showSelectedClipInWorkflow)
   const waveformCache = useProjectStore((state) => state.waveformCache)
   const generateWaveformForAsset = useProjectStore((state) => state.generateWaveformForAsset)
+  const ensureThumbnailForAsset = useProjectStore((state) => state.ensureThumbnailForAsset)
   const relinkMissingAssetsFromFolder = useProjectStore((state) => state.relinkMissingAssetsFromFolder)
   const openDetachedPanel = useProjectStore((state) => state.openDetachedPanel)
   const setScrubPreviewState = useProjectStore((state) => state.setScrubPreviewState)
@@ -130,6 +131,19 @@ export function TimelineView() {
       void generateWaveformForAsset(assetId, audio.waveformDensity === 'compact' ? 24 : audio.waveformDensity === 'balanced' ? 40 : 64)
     })
   }, [audio.waveformDensity, generateWaveformForAsset, timeline.tracks])
+
+  useEffect(() => {
+    const videoAssetIds = timeline.tracks
+      .filter((track) => track.type !== 'audio')
+      .flatMap((track) => track.clips.map((clip) => clip.assetId))
+
+    const uniqueVideoAssetIds = [...new Set(videoAssetIds)]
+    uniqueVideoAssetIds.forEach((assetId) => {
+      if (!assetThumbnails[assetId]) {
+        void ensureThumbnailForAsset(assetId)
+      }
+    })
+  }, [assetThumbnails, ensureThumbnailForAsset, timeline.tracks])
 
   useEffect(() => {
     function closeMenu() {
@@ -599,9 +613,19 @@ export function TimelineView() {
                         >
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="flex items-center gap-3">
-                              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black/25 text-[#e0ff00]">
-                                <Clapperboard size={18} />
-                              </div>
+                              {track.type !== 'audio' && assetThumbnails[clip.assetId] ? (
+                                <div className="flex h-11 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-black/25">
+                                  <img
+                                    src={assetThumbnails[clip.assetId].thumbnailPath}
+                                    alt={asset?.name ?? clip.assetId}
+                                    className="h-full w-full object-cover"
+                                  />
+                                </div>
+                              ) : (
+                                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black/25 text-[#e0ff00]">
+                                  <Clapperboard size={18} />
+                                </div>
+                              )}
                               <div>
                                 <p className="text-sm font-semibold text-white">{asset?.name ?? clip.assetId}</p>
                                 <p className="text-xs text-[#afb6bf]">
@@ -628,7 +652,13 @@ export function TimelineView() {
                               density={audio.waveformDensity}
                               peaks={waveformCache[clip.assetId]?.peaks ?? null}
                             />
-                          ) : null}
+                          ) : (
+                            <Filmstrip
+                              clipDuration={clip.duration}
+                              thumbnailPath={assetThumbnails[clip.assetId]?.thumbnailPath ?? null}
+                              label={asset?.name ?? clip.assetId}
+                            />
+                          )}
                         </article>
                       )
                     })}
@@ -861,6 +891,48 @@ function KeyframeStrip({
             {property}
           </span>
         ))}
+      </div>
+    </div>
+  )
+}
+
+function Filmstrip({
+  clipDuration,
+  thumbnailPath,
+  label,
+}: {
+  clipDuration: number
+  thumbnailPath: string | null
+  label: string
+}) {
+  // Repeat the poster across the clip width to read as a filmstrip; degrades to a
+  // placeholder when no thumbnail is cached yet (e.g. browser mode or pending fetch).
+  const cellCount = Math.max(3, Math.min(8, Math.round(clipDuration / 1.5) || 3))
+
+  return (
+    <div className="mt-4 rounded-2xl border border-white/8 bg-black/20 p-3">
+      <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-[0.2em] text-[#7f8792]">
+        <span>Filmstrip</span>
+        <span>{clipDuration.toFixed(1)}s</span>
+      </div>
+      <div className="flex h-14 gap-1 overflow-hidden rounded-xl border border-white/8 bg-[#0f1012]">
+        {thumbnailPath
+          ? Array.from({ length: cellCount }, (_, index) => (
+              <div key={index} className="h-full flex-1 overflow-hidden">
+                <img
+                  src={thumbnailPath}
+                  alt={index === 0 ? label : ''}
+                  aria-hidden={index === 0 ? undefined : true}
+                  draggable={false}
+                  className="h-full w-full object-cover"
+                />
+              </div>
+            ))
+          : (
+            <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-[0.2em] text-[#7f8691]">
+              No Thumbnail
+            </div>
+          )}
       </div>
     </div>
   )
