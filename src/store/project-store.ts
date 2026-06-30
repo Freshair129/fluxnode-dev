@@ -67,6 +67,7 @@ import { buildFallbackProbe, probeAssetMetadata } from '../services/ipc/asset-pr
 import { generateAssetThumbnail } from '../services/ipc/thumbnail'
 import { decodePreviewFrame } from '../services/ipc/video-preview'
 import { renderNodePreview } from '../services/ipc/node-preview'
+import { generateComfyNode, pingComfy } from '../services/ipc/comfy'
 import { isTauriRuntime } from '../services/ipc/tauri-runtime'
 import { generateWaveformPeaks } from '../services/ipc/waveform'
 import { pickMediaFile, pickRelinkDirectory } from '../services/ipc/file-dialog'
@@ -104,6 +105,8 @@ interface ProjectStoreState {
   waveformCache: Record<string, WaveformCacheEntry>
   previewFrames: Record<string, PreviewFrameData>
   nodePreviewFrames: Record<string, PreviewFrameData>
+  aiNodeGenerationInFlight: Record<string, boolean>
+  comfyConnected: boolean | null
   assetThumbnails: Record<string, ThumbnailResult>
   workflowValidationIssues: WorkflowValidationIssue[]
   projectValidationIssues: ProjectValidationIssue[]
@@ -178,6 +181,8 @@ interface ProjectStoreState {
   loadPreviewFrameForSelectedClip: (width?: number, height?: number) => Promise<void>
   loadPreviewFrameForSelectedNode: (width?: number, height?: number) => Promise<void>
   requestNodePreview: (nodeId: string, width?: number, height?: number) => Promise<void>
+  runAiNode: (nodeId: string) => Promise<void>
+  pingComfyConnection: () => Promise<boolean>
   unlinkSelectedMedia: () => void
   showSelectedClipInWorkflow: () => void
   newProject: () => Promise<void>
@@ -2279,6 +2284,8 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   waveformCache: {},
   previewFrames: {},
   nodePreviewFrames: {},
+  aiNodeGenerationInFlight: {},
+  comfyConnected: null,
   assetThumbnails: {},
   ...getValidationState(createDefaultProject()),
   ui: {
@@ -3814,6 +3821,100 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     } finally {
       pendingNodePreviewRequests.delete(cacheKey)
     }
+  },
+  runAiNode: async (nodeId) => {
+    if (!isTauriRuntime()) {
+      return
+    }
+
+    const state = get()
+    const node = state.project.workflow.nodes.find((entry) => entry.id === nodeId)
+
+    if (!node || (node.type !== 'ai_generate' && node.type !== 'ai_upscale')) {
+      return
+    }
+
+    if (state.aiNodeGenerationInFlight[nodeId]) {
+      return
+    }
+
+    const cacheKey = buildNodePreviewSource(state.project.workflow, nodeId)
+
+    if (!cacheKey) {
+      return
+    }
+
+    const endpoint = state.preferences.comfyUiEndpoint
+    let projectJson: string
+
+    try {
+      projectJson = JSON.stringify(state.project)
+    } catch {
+      return
+    }
+
+    const nodeLabel = node.label ?? node.id
+
+    set((currentState) => ({
+      aiNodeGenerationInFlight: {
+        ...currentState.aiNodeGenerationInFlight,
+        [nodeId]: true,
+      },
+    }))
+
+    // Clear any prior execution failure for this node before retrying.
+    removeAppErrors(set, (error) => error.category === 'comfy_execution' && error.contextId === nodeId)
+
+    try {
+      const frame = await generateComfyNode(projectJson, nodeId, endpoint, 120)
+
+      set((currentState) => {
+        const nextNodePreviewFrames = {
+          ...currentState.nodePreviewFrames,
+          [cacheKey]: frame,
+        }
+
+        return {
+          ...trimRuntimeCachesForBudget({
+            ...currentState,
+            nodePreviewFrames: nextNodePreviewFrames,
+          }),
+          runtimeCacheMetrics: buildRuntimeCacheMetrics({
+            ...currentState,
+            nodePreviewFrames: nextNodePreviewFrames,
+          }),
+        }
+      })
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+
+      pushAppError(set, {
+        id: `error-${Date.now()}-${nodeId}`,
+        category: 'comfy_execution',
+        message: `ComfyUI generation failed for ${nodeId}.`,
+        userMessage: `${nodeLabel} could not be generated on ComfyUI.`,
+        recoverable: true,
+        suggestedAction:
+          'Confirm the ComfyUI endpoint in Settings is reachable, then verify the node prompt and inputs before retrying.',
+        actionLabel: 'Open Settings',
+        actionCommand: 'open_settings',
+        contextId: nodeId,
+        detail,
+        createdAt: new Date().toISOString(),
+      })
+    } finally {
+      set((currentState) => {
+        const nextInFlight = { ...currentState.aiNodeGenerationInFlight }
+        delete nextInFlight[nodeId]
+        return { aiNodeGenerationInFlight: nextInFlight }
+      })
+    }
+  },
+  pingComfyConnection: async () => {
+    const endpoint = get().preferences.comfyUiEndpoint
+    const connected = await pingComfy(endpoint)
+    set({ comfyConnected: connected })
+    return connected
   },
   unlinkSelectedMedia: () =>
     applyMutation(set, get, 'clip.unlink', 'Linked media unlinked', (project) => {
