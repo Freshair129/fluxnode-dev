@@ -148,17 +148,21 @@ export function PreviewPanel() {
           <h2 className="mt-2 font-display text-2xl font-semibold text-white">{previewTitle}</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[#98a1ad]">{previewSubtitle}</p>
         </div>
-        <div className="rounded-full border border-[#e0ff00]/20 bg-[#e0ff00]/10 px-4 py-2 text-xs uppercase tracking-[0.22em] text-[#f5ffd5]">
+        <div
+          aria-live="polite"
+          aria-label={`Playback ${playbackState} at ${playhead.toFixed(2)} seconds`}
+          className="rounded-full border border-[#e0ff00]/20 bg-[#e0ff00]/10 px-4 py-2 text-xs uppercase tracking-[0.22em] text-[#f5ffd5]"
+        >
           {playbackState} at {playhead.toFixed(2)}s
         </div>
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
         <div className="relative min-h-[280px] overflow-hidden rounded-[1.6rem] border border-white/8 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.16),transparent_35%),linear-gradient(180deg,#090a0c_0%,#13161b_100%)] p-5">
-          <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:42px_42px] opacity-20" />
+          <div aria-hidden="true" className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:42px_42px] opacity-20" />
           <div className="relative flex h-full flex-col justify-between">
             <div className="flex items-center gap-2 text-xs uppercase tracking-[0.22em] text-[#bfc7d2]">
-              <PlayCircle size={15} className="text-[#e0ff00]" />
+              <PlayCircle size={15} className="text-[#e0ff00]" aria-hidden="true" />
               Decoded preview frame
             </div>
 
@@ -177,7 +181,7 @@ export function PreviewPanel() {
                       <span>{project.settings.frameRate} fps</span>
                     </div>
                     <div className="text-center">
-                      <Film size={34} className="mx-auto text-[#e0ff00]" />
+                      <Film size={34} className="mx-auto text-[#e0ff00]" aria-hidden="true" />
                       <p className="mt-4 text-lg font-semibold text-white">{previewTitle}</p>
                       <p className="mt-2 text-sm leading-6 text-[#aab3bf]">
                         {effectivePreviewSource ?? routedWorkflowNode?.id ?? 'No preview source selected yet.'}
@@ -298,7 +302,7 @@ function MetricCard({
   return (
     <div className="rounded-[1.4rem] border border-white/8 bg-[#17181b] p-4">
       <div className="flex items-center gap-3">
-        <Icon size={18} className="text-[#e0ff00]" />
+        <Icon size={18} className="text-[#e0ff00]" aria-hidden="true" />
         <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">{label}</p>
       </div>
       <p className="mt-3 text-sm font-medium text-white">{value}</p>

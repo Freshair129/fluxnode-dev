@@ -111,3 +111,19 @@ select:focus-visible,
 .fluxnode-invalid-port {
   animation: fluxnode-invalid-port-shake 320ms ease-out;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .fluxnode-invalid-edge,
+  .fluxnode-invalid-port {
+    animation: none !important;
+  }
+}
