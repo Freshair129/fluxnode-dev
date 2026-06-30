@@ -372,6 +372,7 @@ fn color_correct_chain(data: &Value) -> Vec<String> {
 
 /// Compile the workflow into an ffmpeg argv that renders `target_node_id`'s
 /// output to `output_path`.
+#[allow(unused_assignments)] // label_counter's final increment is intentionally unread
 pub fn build_workflow_plan(
     project: &Value,
     target_node_id: &str,
