@@ -66,6 +66,8 @@ import { copyAssetIntoProject } from '../services/ipc/asset-copy'
 import { buildFallbackProbe, probeAssetMetadata } from '../services/ipc/asset-probe'
 import { generateAssetThumbnail } from '../services/ipc/thumbnail'
 import { decodePreviewFrame } from '../services/ipc/video-preview'
+import { renderNodePreview } from '../services/ipc/node-preview'
+import { isTauriRuntime } from '../services/ipc/tauri-runtime'
 import { generateWaveformPeaks } from '../services/ipc/waveform'
 import { pickMediaFile, pickRelinkDirectory } from '../services/ipc/file-dialog'
 import { loadAppPreferences, saveAppPreferences } from '../services/persistence/app-preferences'
@@ -175,6 +177,7 @@ interface ProjectStoreState {
   ensureThumbnailForAsset: (assetId: string) => Promise<void>
   loadPreviewFrameForSelectedClip: (width?: number, height?: number) => Promise<void>
   loadPreviewFrameForSelectedNode: (width?: number, height?: number) => Promise<void>
+  requestNodePreview: (nodeId: string, width?: number, height?: number) => Promise<void>
   unlinkSelectedMedia: () => void
   showSelectedClipInWorkflow: () => void
   newProject: () => Promise<void>
@@ -311,6 +314,7 @@ const recoveryTimers: Record<RecoveryKind, ReturnType<typeof window.setTimeout> 
 }
 const renderRetryTimers = new Map<string, ReturnType<typeof window.setTimeout>>()
 const pendingPreviewFrameRequests = new Set<string>()
+const pendingNodePreviewRequests = new Set<string>()
 
 function createIdleScrubPreviewState(): ScrubPreviewState {
   return {
@@ -1643,7 +1647,7 @@ function trimRuntimeCachesForBudget(
   }
 }
 
-function buildNodePreviewSource(workflow: FluxNodeProject['workflow'], nodeId: string) {
+export function buildNodePreviewSource(workflow: FluxNodeProject['workflow'], nodeId: string) {
   const node = workflow.nodes.find((entry) => entry.id === nodeId)
 
   if (!node) {
@@ -3756,6 +3760,59 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         actionCommand: 'clear_runtime_caches',
         createdAt: new Date().toISOString(),
       })
+    }
+  },
+  requestNodePreview: async (nodeId, width = 320, height = 200) => {
+    if (!isTauriRuntime()) {
+      return
+    }
+
+    const state = get()
+    const cacheKey = buildNodePreviewSource(state.project.workflow, nodeId)
+
+    if (!cacheKey) {
+      return
+    }
+
+    if (state.nodePreviewFrames[cacheKey] || pendingNodePreviewRequests.has(cacheKey)) {
+      return
+    }
+
+    pendingNodePreviewRequests.add(cacheKey)
+
+    let projectJson: string
+
+    try {
+      projectJson = JSON.stringify(state.project)
+    } catch {
+      pendingNodePreviewRequests.delete(cacheKey)
+      return
+    }
+
+    try {
+      const frame = await renderNodePreview(projectJson, nodeId, width, height)
+
+      set((currentState) => {
+        const nextNodePreviewFrames = {
+          ...currentState.nodePreviewFrames,
+          [cacheKey]: frame,
+        }
+
+        return {
+          ...trimRuntimeCachesForBudget({
+            ...currentState,
+            nodePreviewFrames: nextNodePreviewFrames,
+          }),
+          runtimeCacheMetrics: buildRuntimeCacheMetrics({
+            ...currentState,
+            nodePreviewFrames: nextNodePreviewFrames,
+          }),
+        }
+      })
+    } catch {
+      // Browser fallback / uncompilable graphs keep the existing placeholder.
+    } finally {
+      pendingNodePreviewRequests.delete(cacheKey)
     }
   },
   unlinkSelectedMedia: () =>

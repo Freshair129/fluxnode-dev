@@ -3,7 +3,7 @@ import { ArrowRight, CheckCircle2, Cloud, Copy, Cpu, Link2, Move, Network, Plus,
 import { NODE_PORT_DEFINITIONS } from '../../domain/workflow/node-definitions'
 import { validateConnectionAttempt } from '../../domain/workflow/validation'
 import type { NodeType, WorkflowNode, WorkflowState } from '../../domain/project/types'
-import { useProjectStore } from '../../store/project-store'
+import { buildNodePreviewSource, useProjectStore } from '../../store/project-store'
 import { useModalA11y } from '../settings/useModalA11y'
 
 const PORT_COLOR_MAP = {
@@ -118,6 +118,8 @@ export function WorkflowView() {
   const connectSelectedNodeToOutput = useProjectStore((state) => state.connectSelectedNodeToOutput)
   const disconnectSelectedNodeEdges = useProjectStore((state) => state.disconnectSelectedNodeEdges)
   const loadPreviewFrameForSelectedNode = useProjectStore((state) => state.loadPreviewFrameForSelectedNode)
+  const requestNodePreview = useProjectStore((state) => state.requestNodePreview)
+  const nodePreviewFrames = useProjectStore((state) => state.nodePreviewFrames)
   const moveWorkflowNodes = useProjectStore((state) => state.moveWorkflowNodes)
   const connectWorkflowPorts = useProjectStore((state) => state.connectWorkflowPorts)
   const panWorkflowViewport = useProjectStore((state) => state.panWorkflowViewport)
@@ -153,6 +155,22 @@ export function WorkflowView() {
   )
   const combinedIssues = [...projectValidationIssues, ...workflowValidationIssues]
   const selectedNode = workflow.nodes.find((node) => node.id === (selectedNodeIds[0] ?? null)) ?? null
+  const selectedNodePreviewSource = useMemo(
+    () => (selectedNode ? buildNodePreviewSource(workflow, selectedNode.id) : null),
+    [selectedNode, workflow],
+  )
+  const selectedNodePreviewFrame =
+    selectedNodePreviewSource ? nodePreviewFrames[selectedNodePreviewSource] ?? null : null
+
+  useEffect(() => {
+    if (!selectedNode || !selectedNodePreviewSource) {
+      return
+    }
+
+    void requestNodePreview(selectedNode.id)
+    // Re-request only when the upstream preview signature changes, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNode?.id, selectedNodePreviewSource, requestNodePreview])
 
   useEffect(() => {
     function closeMenu() {
@@ -1123,6 +1141,17 @@ export function WorkflowView() {
                           />
                         </div>
                       )}
+
+                      {!compact && selectedNodeIds[0] === node.id && selectedNodePreviewFrame ? (
+                        <div className="mt-4 overflow-hidden rounded-[1rem] border border-white/10 bg-black/40">
+                          <img
+                            src={selectedNodePreviewFrame.dataUrl}
+                            alt={`Rendered preview of ${node.label ?? node.id}`}
+                            className="block h-auto w-full object-cover"
+                            draggable={false}
+                          />
+                        </div>
+                      ) : null}
                     </article>
                   )
                 })}
