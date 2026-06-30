@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sysinfo::{Disks, System};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
+mod comfy;
 mod render_graph;
 mod workflow_graph;
 
@@ -1680,6 +1681,67 @@ fn workflow_render_node(
     serde_json::to_string(&result).map_err(|e| e.to_string())
 }
 
+/// Checks whether the user's ComfyUI server is reachable (BYOM).
+#[tauri::command]
+fn comfy_ping(endpoint: String) -> bool {
+    comfy::ping(&endpoint)
+}
+
+/// Executes an AI node against the user's local ComfyUI and returns the
+/// generated image as a real PNG `PreviewFrameData`.
+///
+/// MVP: text-to-image `ai_generate` (no input image). Image-conditioned nodes
+/// (`img2img` / `ai_upscale`) require uploading the input frame to ComfyUI,
+/// which needs reqwest's `multipart` feature — tracked as a follow-up.
+#[tauri::command]
+fn comfy_generate(
+    project_json: String,
+    node_id: String,
+    endpoint: String,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let project_value = serde_json::from_str::<Value>(&project_json).map_err(|e| e.to_string())?;
+    let node = project_value
+        .get("workflow")
+        .and_then(|w| w.get("nodes"))
+        .and_then(|n| n.as_array())
+        .ok_or_else(|| "Project workflow nodes are missing".to_string())?
+        .iter()
+        .find(|n| n.get("id").and_then(|v| v.as_str()) == Some(node_id.as_str()))
+        .ok_or_else(|| format!("Node {node_id} not found in the workflow"))?;
+    let node_type = node
+        .get("type")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Node type is missing".to_string())?;
+    let node_data = node.get("data").cloned().unwrap_or(Value::Null);
+
+    if !comfy::ping(&endpoint) {
+        return Err(format!(
+            "ComfyUI is not reachable at {endpoint}. Start ComfyUI and confirm the endpoint in Settings."
+        ));
+    }
+
+    let prompt = comfy::build_comfy_prompt(node_type, &node_data, None)?;
+    let prompt_id = comfy::submit_prompt(&endpoint, &prompt)?;
+    let image_ref = comfy::wait_for_output(&endpoint, &prompt_id, timeout_secs.max(5))?;
+    let bytes = comfy::fetch_image(&endpoint, &image_ref)?;
+    if bytes.is_empty() {
+        return Err("ComfyUI returned an empty image".to_string());
+    }
+
+    let frame = PreviewFrameData {
+        asset_id: node_id,
+        source_path: String::new(),
+        requested_time: 0.0,
+        width: 0,
+        height: 0,
+        mime_type: "image/png".to_string(),
+        data_url: format!("data:image/png;base64,{}", base64_encode(&bytes)),
+        generated_at: current_timestamp(),
+    };
+    serde_json::to_string(&frame).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn video_decode_frame(
     asset_id: String,
@@ -2983,6 +3045,8 @@ pub fn run() {
             save_app_preferences,
             shell_open_path,
             start_export_job,
+            comfy_ping,
+            comfy_generate,
             video_decode_frame,
             video_seek,
             workflow_render_node,
@@ -3224,5 +3288,19 @@ mod workflow_exec_tests {
         );
 
         let _ = fs::remove_file(&vsrc);
+    }
+
+    #[test]
+    fn comfy_generate_reports_unreachable_server() {
+        let project = json!({
+            "workflow": { "nodes": [
+                { "id": "g1", "type": "ai_generate", "bypassed": false,
+                  "data": { "prompt": "a cat", "negativePrompt": "", "model": "sd.ckpt", "steps": 20, "cfg": 7.0 } }
+            ], "edges": [] }
+        });
+        // Port 1 refuses connections — ping fails fast, so no ComfyUI is needed.
+        let err = comfy_generate(project.to_string(), "g1".to_string(), "http://127.0.0.1:1".to_string(), 5)
+            .expect_err("unreachable ComfyUI should error");
+        assert!(err.contains("not reachable"), "expected unreachable error, got: {err}");
     }
 }
