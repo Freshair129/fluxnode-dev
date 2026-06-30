@@ -15,6 +15,7 @@ import {
 } from '../services/ipc/asset-watch'
 import { checkNetworkConnectivity } from '../services/connectivity/check-network'
 import { useTimelineAudio, type TimelineAudioClip } from '../services/audio'
+import { ErrorToasts } from '../features/notifications/ErrorToasts'
 import { useProjectStore } from '../store/project-store'
 
 const TimelineView = lazy(() =>
@@ -539,6 +540,7 @@ export default function App() {
             <WorkspaceSharingModal />
           </Suspense>
         ) : null}
+        <ErrorToasts />
       </div>
     </div>
   )

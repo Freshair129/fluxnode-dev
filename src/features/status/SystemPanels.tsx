@@ -15,6 +15,7 @@ import type {
 } from '../../domain/project/types'
 import { canOpenPathInShell } from '../../services/ipc/app-shell'
 import { useProjectStore } from '../../store/project-store'
+import { RenderJobProgress } from './RenderJobProgress'
 
 function getOsTargetVerdict(runtimeHealth: RuntimeHealth) {
   if (runtimeHealth.backend !== 'tauri') {
@@ -1670,18 +1671,20 @@ export function SystemPanels() {
                 <span className="text-[11px] uppercase tracking-[0.2em] text-[#9ca3af]">{job.status}</span>
               </div>
               <p className="mt-2 text-xs text-[#9ca3af]">
-                {job.config.format.container.toUpperCase()} / {job.config.format.videoCodec ?? 'no-video'} / {job.config.format.audioCodec ?? 'no-audio'} / {job.config.format.quality} - {job.progress}% - {job.computeMode}
+                {job.config.format.container.toUpperCase()} / {job.config.format.videoCodec ?? 'no-video'} / {job.config.format.audioCodec ?? 'no-audio'} / {job.config.format.quality} - {job.computeMode}
               </p>
+              <RenderJobProgress job={job} />
               <p className="mt-2 text-[11px] leading-5 text-[#9ca3af]">
                 Audio {job.audioMode === 'muxed' ? 'muxed' : 'muted'} - {job.audioSourceSummary}
               </p>
               <p className="mt-2 text-[11px] leading-5 text-[#9ca3af]">
                 {job.config.resolution.width}x{job.config.resolution.height} @ {job.config.frameRate} fps - Range {typeof job.config.range === 'string' ? job.config.range : `${job.config.range.start}-${job.config.range.end}`} - Denoise {job.config.denoising ? 'on' : 'off'}
               </p>
-              <p className="mt-2 text-[11px] leading-5 text-[#9ca3af]">
-                Frame {job.currentFrame}/{job.totalFrames}
-                {job.outputFileSize !== null ? ` - ${(job.outputFileSize / 1024).toFixed(0)} KB` : ''}
-              </p>
+              {job.outputFileSize !== null ? (
+                <p className="mt-2 text-[11px] leading-5 text-[#9ca3af]">
+                  Output size {(job.outputFileSize / 1024).toFixed(0)} KB
+                </p>
+              ) : null}
               {job.autoRetryScheduledFor ? (
                 <p className="mt-2 text-[11px] leading-5 text-[#93c5fd]">
                   Auto retry {job.retryCount}/{job.maxAutoRetries}
@@ -1694,15 +1697,13 @@ export function SystemPanels() {
                   GPU fallback active{job.originalResolution ? ` · original ${job.originalResolution.width}x${job.originalResolution.height}` : ''}.
                 </p>
               ) : null}
-              <p className="mt-2 text-[11px] leading-5 text-[#9ca3af]">
-                {job.status === 'failed' || job.status === 'cancelled'
-                  ? job.retryCount > 0 && job.maxAutoRetries > 0
+              {job.status === 'failed' || job.status === 'cancelled' ? (
+                <p className="mt-2 text-[11px] leading-5 text-[#9ca3af]">
+                  {job.retryCount > 0 && job.maxAutoRetries > 0
                     ? `Auto recovery used ${job.retryCount}/${job.maxAutoRetries} attempt(s). Manual retry resumes from the last completed frame.`
-                    : 'Retry resumes from the last completed frame.'
-                  : job.estimatedTimeRemaining !== null
-                    ? `${job.estimatedTimeRemaining} frame units remaining`
-                    : 'ETA pending'}
-              </p>
+                    : 'Retry resumes from the last completed frame.'}
+                </p>
+              ) : null}
               {job.manifestPath ? (
                 <p className="mt-2 break-all text-[11px] leading-5 text-[#7f8792]">{job.manifestPath}</p>
               ) : null}

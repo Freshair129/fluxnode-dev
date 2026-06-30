@@ -726,9 +726,9 @@ function EmptyTimelineState({ onAddClip }: { onAddClip: () => void }) {
   return (
     <div className="flex h-full flex-col items-center justify-center rounded-[1.25rem] border border-dashed border-white/10 bg-white/[0.02] px-6 py-12 text-center">
       <ScissorsLineDashed size={28} className="text-[#e0ff00]" />
-      <h3 className="mt-4 text-xl font-semibold text-white">Drop media here or press Ctrl+I to import</h3>
+      <h3 className="mt-4 text-xl font-semibold text-white">Drop media here to start</h3>
       <p className="mt-2 max-w-md text-sm leading-6 text-[#8f97a2]">
-        The timeline foundation is ready for shared project state, persistence, and undoable clip mutations.
+        Drag video, audio, or images onto the timeline — or press Ctrl+I to import. Clips become editable, undoable tracks instantly.
       </p>
       <button
         type="button"
