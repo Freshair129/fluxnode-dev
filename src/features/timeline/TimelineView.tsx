@@ -315,7 +315,7 @@ export function TimelineView() {
       <div className="grid flex-1 gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
         <aside aria-label="Timeline controls and asset library" className="rounded-[1.5rem] border border-white/8 bg-[#17181b] p-4">
           <p className="text-xs uppercase tracking-[0.25em] text-[#7f8691]">Project Transport</p>
-          <div className="mt-4 grid gap-3 text-sm text-[#d7dce2]">
+          <div aria-live="polite" className="mt-4 grid gap-3 text-sm text-[#d7dce2]">
             <Metric label="Playhead" value={`${timeline.playhead.toFixed(1)}s`} />
             <Metric label="In / Out" value={`${timeline.inPoint ?? 0}s - ${timeline.outPoint ?? 0}s`} />
             <Metric label="Zoom" value={`${timeline.zoom.toFixed(1)}x`} />
@@ -338,6 +338,31 @@ export function TimelineView() {
             <div
               ref={scrubTrackRef}
               onPointerDown={(event) => beginScrub(event.clientX)}
+              onKeyDown={(event) => {
+                const span = Math.max(timelineEnd, 0.01)
+                const step = event.shiftKey ? span / 10 : Math.max(0.1, span / 100)
+
+                if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  setPlayhead(Math.min(span, timeline.playhead + step))
+                } else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  setPlayhead(Math.max(0, timeline.playhead - step))
+                } else if (event.key === 'Home') {
+                  event.preventDefault()
+                  setPlayhead(0)
+                } else if (event.key === 'End') {
+                  event.preventDefault()
+                  setPlayhead(span)
+                }
+              }}
+              role="slider"
+              tabIndex={0}
+              aria-label="Timeline scrubber"
+              aria-valuemin={0}
+              aria-valuemax={Number(Math.max(timelineEnd, 0).toFixed(2))}
+              aria-valuenow={Number(timeline.playhead.toFixed(2))}
+              aria-valuetext={`${timeline.playhead.toFixed(2)} seconds`}
               className="mt-3 h-4 cursor-ew-resize rounded-full border border-white/8 bg-[linear-gradient(90deg,rgba(59,130,246,0.18),rgba(224,255,0,0.22))]"
             >
               <div
@@ -396,6 +421,7 @@ export function TimelineView() {
                   step={0.05}
                   value={selectedTrack.volume}
                   onChange={(event) => setSelectedTrackVolume(Number(event.target.value))}
+                  aria-label={`Track volume, ${selectedTrack.volume.toFixed(2)} times`}
                   className="w-full accent-[#e0ff00]"
                 />
                 <label className="block text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">
@@ -408,6 +434,7 @@ export function TimelineView() {
                   step={0.05}
                   value={selectedTrack.pan}
                   onChange={(event) => setSelectedTrackPan(Number(event.target.value))}
+                  aria-label={`Track pan, ${selectedTrack.pan.toFixed(2)}`}
                   className="w-full accent-[#3b82f6]"
                 />
               </div>
@@ -534,7 +561,7 @@ export function TimelineView() {
           </div>
         </aside>
 
-        <div aria-label="Timeline tracks" className="rounded-[1.5rem] border border-white/8 bg-[#0d0e10] p-4">
+        <div role="group" aria-label="Timeline tracks" className="rounded-[1.5rem] border border-white/8 bg-[#0d0e10] p-4">
           {timeline.tracks.length === 0 ? (
             <EmptyTimelineState onAddClip={addDemoClip} />
           ) : (
@@ -623,7 +650,7 @@ export function TimelineView() {
                                 </div>
                               ) : (
                                 <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black/25 text-[#e0ff00]">
-                                  <Clapperboard size={18} />
+                                  <Clapperboard size={18} aria-hidden="true" />
                                 </div>
                               )}
                               <div>
@@ -671,6 +698,8 @@ export function TimelineView() {
       </div>
       {contextMenu ? (
         <div
+          role="menu"
+          aria-label={contextMenu.type === 'clip' ? 'Clip actions' : 'Track actions'}
           className="fixed z-30 min-w-52 rounded-[1rem] border border-white/10 bg-[#101113]/95 p-2 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(event) => event.stopPropagation()}
@@ -725,7 +754,7 @@ export function TimelineView() {
 function EmptyTimelineState({ onAddClip }: { onAddClip: () => void }) {
   return (
     <div className="flex h-full flex-col items-center justify-center rounded-[1.25rem] border border-dashed border-white/10 bg-white/[0.02] px-6 py-12 text-center">
-      <ScissorsLineDashed size={28} className="text-[#e0ff00]" />
+      <ScissorsLineDashed size={28} className="text-[#e0ff00]" aria-hidden="true" />
       <h3 className="mt-4 text-xl font-semibold text-white">Drop media here to start</h3>
       <p className="mt-2 max-w-md text-sm leading-6 text-[#8f97a2]">
         Drag video, audio, or images onto the timeline — or press Ctrl+I to import. Clips become editable, undoable tracks instantly.
@@ -820,6 +849,7 @@ function ContextAction({
   return (
     <button
       type="button"
+      role="menuitem"
       onClick={onClick}
       className={`block w-full rounded-xl px-3 py-2 text-left text-sm ${
         tone === 'danger'

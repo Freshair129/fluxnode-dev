@@ -61,7 +61,7 @@ export function Header() {
     >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-4">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(145deg,#e0ff00,#7cd100)] text-lg font-black text-black shadow-[0_0_36px_rgba(224,255,0,0.35)]">
+          <div aria-hidden="true" className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(145deg,#e0ff00,#7cd100)] text-lg font-black text-black shadow-[0_0_36px_rgba(224,255,0,0.35)]">
             F
           </div>
           <div>
@@ -90,12 +90,13 @@ export function Header() {
             aria-label={`Switch compute mode. Current mode ${computeMode}.`}
             className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-[#1a1a1b]/90 px-4 py-2 text-xs font-medium text-white transition hover:border-[#3b82f6]/50 disabled:cursor-not-allowed disabled:opacity-45"
           >
-            {computeMode === 'local' ? <Cpu size={14} className="text-[#e0ff00]" /> : <Cloud size={14} className="text-[#3b82f6]" />}
+            {computeMode === 'local' ? <Cpu size={14} className="text-[#e0ff00]" aria-hidden="true" /> : <Cloud size={14} className="text-[#3b82f6]" aria-hidden="true" />}
             {computeMode === 'local' ? 'Local Compute' : 'Cloud Compute'}
           </button>
           <button
             type="button"
             onClick={toggleProxyMode}
+            aria-pressed={proxyEnabled}
             aria-label={`Toggle proxy mode. Proxy mode is ${proxyEnabled ? 'on' : 'off'}.`}
             className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-medium transition ${
               proxyEnabled
@@ -135,18 +136,20 @@ export function Header() {
           <button
             type="button"
             onClick={openWorkspaceSharing}
+            aria-label={sharing.enabled ? `Workspace sharing enabled with ${activeCollaboratorCount} collaborator${activeCollaboratorCount === 1 ? '' : 's'}. Open sharing settings.` : 'Share workspace'}
             className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-medium ${
               sharing.enabled
                 ? 'border-[#3b82f6]/30 bg-[#3b82f6]/10 text-[#dbeafe]'
                 : 'border-white/10 bg-[#1a1a1b]/90 text-white'
             }`}
           >
-            <Users size={14} />
+            <Users size={14} aria-hidden="true" />
             {sharing.enabled ? `Share Workspace (${activeCollaboratorCount})` : 'Share Workspace'}
           </button>
           <button
             type="button"
             onClick={() => void (panelLayouts.preview.detached ? closeDetachedPanel('preview') : openDetachedPanel('preview'))}
+            aria-pressed={panelLayouts.preview.detached}
             aria-label={panelLayouts.preview.detached ? 'Reattach preview panel' : 'Detach preview panel'}
             className={`rounded-full border px-4 py-2 text-xs font-medium ${
               panelLayouts.preview.detached
@@ -159,6 +162,7 @@ export function Header() {
           <button
             type="button"
             onClick={() => void (panelLayouts.timeline.detached ? closeDetachedPanel('timeline') : openDetachedPanel('timeline'))}
+            aria-pressed={panelLayouts.timeline.detached}
             aria-label={panelLayouts.timeline.detached ? 'Reattach timeline panel' : 'Detach timeline panel'}
             className={`rounded-full border px-4 py-2 text-xs font-medium ${
               panelLayouts.timeline.detached
@@ -171,6 +175,7 @@ export function Header() {
           <button
             type="button"
             onClick={() => void (panelLayouts.inspector.detached ? closeDetachedPanel('inspector') : openDetachedPanel('inspector'))}
+            aria-pressed={panelLayouts.inspector.detached}
             aria-label={panelLayouts.inspector.detached ? 'Reattach inspector panel' : 'Detach inspector panel'}
             className={`rounded-full border px-4 py-2 text-xs font-medium ${
               panelLayouts.inspector.detached
@@ -183,9 +188,12 @@ export function Header() {
         </div>
       </div>
 
-      <div className="mt-3 flex flex-col gap-2 text-xs text-[#9ea4ae] md:flex-row md:items-center md:justify-between">
+      <div
+        aria-live="polite"
+        className="mt-3 flex flex-col gap-2 text-xs text-[#9ea4ae] md:flex-row md:items-center md:justify-between"
+      >
         <div className="inline-flex items-center gap-2">
-          <Sparkles size={14} className="text-[#e0ff00]" />
+          <Sparkles size={14} className="text-[#e0ff00]" aria-hidden="true" />
           <span>{statusMessage}</span>
         </div>
         <span>
@@ -202,8 +210,11 @@ export function Header() {
         {currentProjectPath ?? 'Project path not assigned yet. Use Save As to create a .fluxnode directory.'}
       </div>
       {networkStatus === 'offline' ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[1rem] border border-amber-300/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-50">
-          <WifiOff size={14} />
+        <div
+          role="status"
+          className="mt-3 flex flex-wrap items-center gap-2 rounded-[1rem] border border-amber-300/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-50"
+        >
+          <WifiOff size={14} aria-hidden="true" />
           <span>Offline mode active. Cloud compute is disabled and FluxNode will keep local editing, save/load, proxy, and local render paths available.</span>
           {offlineBlockedNodeCount > 0 ? (
             <span className="rounded-full border border-amber-200/20 px-2 py-1 text-[10px] uppercase tracking-[0.18em]">
