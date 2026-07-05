@@ -1,9 +1,17 @@
 # FluxNode — Embedded AI Copilot & Media Engine Adapter Design
 
-> **Status:** Draft / proposal
+> **Status:** Implemented — core layer live (§9 phases 1–3 + brain done). Not yet: in-app chat
+> UI panel, in-process llama.cpp backend (stub behind `--features llama`), sidecar binaries
+> (whisper/piper/sd not bundled), and runtime hardening of `--mcp`.
 > **Scope:** Turn FluxNode into an *agent-native* video editor — command it by text or voice
 > from inside the app, and expose it as a tool (MCP + CLI) that external agents can drive.
 > **Audience:** FluxNode maintainers.
+>
+> **What's live in code:** Action registry (30 actions) + `action_invoke`/`action_list`; the
+> `brain/` agent loop with write-tool gating (Ollama backend, E2E-verified: agent → `asset_probe`
+> → ffprobe → answer); the `media/` adapter + `MediaBroker` + `GpuArbiter` with comfy/sdcpp/
+> whisper/piper backends wired via `services::media_broker()`; the `rmcp` MCP server; and the
+> `agent_chat` command plus `--mcp` / `--agent` CLI modes.
 
 ---
 

@@ -154,6 +154,27 @@ Status meanings:
   - the timeline duplicate path now assigns the duplicated clip to the exact workflow node ID that was created for it, avoiding stale or mismatched clip-to-node references
   - runtime verification now confirms duplicating `sci-fi-scene-01.mp4` creates a second clip at `8.4s` linked to `node-media-03`, without colliding with the existing audio clip link on `node-media-02`
 
+### 13. AI Copilot & Agent Architecture
+
+- Status: `Partial`
+- Evidence:
+  - `docs/AI Copilot and Media Adapter Design.md`
+  - `docs/AI Copilot Binary Setup.md`
+  - `bench/wave1a/`
+  - `bench/wave3/`
+- Notes:
+  - the core layer is implemented and compiles in both the default build and under `--features llama`
+  - action registry (30 actions), the `action_invoke` / `action_list` / `agent_chat` commands, and the `brain/` agent loop with write-gating (Ollama backend) are present
+  - the `media/` adapter with `MediaBroker` and `GpuArbiter` is wired across comfy / sdcpp / whisper / piper backends
+  - `mcp.rs` (rmcp) exposes an MCP server, and `--mcp` and `--agent` CLI modes exist
+  - runtime-verified evidence: agent E2E (agent -> `asset_probe` -> real ffprobe -> natural-language answer) and Ollama tool-calling against the registry schema
+- Remaining verified gaps:
+  - no in-app chat UI panel yet; the brain is reachable only via command / CLI / MCP, with no UI surface
+  - the in-process llama.cpp backend is a stub (needs a C++ toolchain plus a GGUF model)
+  - sidecar binaries (whisper / piper / sd) are not bundled; they are registered opt-in via env vars
+  - `--mcp` is compile-verified but not runtime-tested
+  - media broker backends are wired, but full command-layer / UI exposure of media generation is minimal
+
 ## Approved-Doc-Gated Remaining Slices
 
 The previously approved remaining slices have now been implemented:
@@ -174,3 +195,5 @@ The repository is no longer missing any high-confidence feature slice from `MAST
 All previously identified implementation gaps for audio scrubbing, render resilience, and invalid connection feedback are now backed by repo evidence.
 
 The only section that still remains `Partial` is `Section 11 Performance & System Requirements`, where the repository contains strong guardrail implementations, browser-verified interaction and 4K/60 render proof paths, and optimization hooks, but not full cross-platform requirement-by-requirement benchmark proof for every numeric target.
+
+`Section 13 AI Copilot & Agent Architecture` is a new, separately-tracked feature set whose implemented core (action registry, agent loop, media broker, and MCP server) compiles and is partially runtime-verified, while its in-app chat UI, in-process llama backend, and bundled sidecar binaries are still pending.

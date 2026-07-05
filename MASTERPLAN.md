@@ -19,6 +19,7 @@
 10. [UX Essentials](#10-ux-essentials)
 11. [Performance & System Requirements](#11-performance--system-requirements)
 12. [Timeline ↔ Workflow Sync Protocol](#12-timeline--workflow-sync-protocol)
+13. [AI Copilot & Agent Architecture](#13-ai-copilot--agent-architecture)
 
 ---
 
@@ -1245,7 +1246,7 @@ GPU memory management:
 Target: smooth interaction with 100+ nodes
 
 Strategies:
-  1. React Flow virtualization (built-in) — only render visible nodes
+  1. Virtualize or otherwise limit visible workflow-node rendering so the UI does not fully re-render dense off-screen canvas content
   2. Edge rendering: use SVG for < 200 edges, switch to Canvas for 200+
   3. Node collapse: collapsed nodes render as compact chips
   4. Level-of-detail: at low zoom, hide node details, show only labels
@@ -1326,6 +1327,113 @@ Future consideration:
 
 ---
 
+## 13. AI Copilot & Agent Architecture
+
+FluxNode ฝัง AI copilot ที่ควบคุม editor ได้จริงผ่าน tool-calling agent — ไม่ใช่แค่ chat แต่
+สามารถเรียก capability ของแอป (import, probe, render, generate media) แทน user ได้ ทั้งหมดสร้าง
+บน **single source of truth** เดียว: Action Registry ที่ทุก access surface (UI, agent, MCP, CLU)
+derive ออกมาจากที่เดียวกัน
+
+### 13.1 Action Registry
+
+```
+src-tauri/src/action.rs — single source of truth ของทุก capability
+
+ทุก capability = 1 Action:
+  name    — canonical action id เช่น "asset_import", "render_start"
+  params  — JSON-Schema ของ input (validate ก่อน dispatch)
+  effect  — SideEffect: ReadOnly | Mutating | LongJob
+
+ปัจจุบันมี 30 actions ที่ wrap Tauri commands เดิม (§4) + media generation
+
+Derived (ไม่ define ซ้ำ — generate จาก registry):
+  - LLM tool schema     → agent เห็น tool อะไรบ้าง
+  - MCP tool list       → external agent เห็น tool อะไรบ้าง
+  - CLI subcommands     → headless invocation
+```
+
+`SideEffect` เป็น gate สำคัญของ agent loop (§13.2): `ReadOnly` รันได้เสมอ, `Mutating`/`LongJob`
+ต้องผ่าน `allow_writes`
+
+### 13.2 Brain & Agent Loop
+
+```
+src-tauri/src/brain/ — Brain trait + run_agent() tool-calling loop
+
+run_agent():
+  - LLM เลือก tool → validate params → gate ด้วย SideEffect
+  - ReadOnly         → รันเสมอ
+  - Mutating/LongJob → รันเฉพาะเมื่อ allow_writes = true
+  - loop จน LLM ตอบ final answer
+
+Backend:
+  - Default: Ollama (local qwen3.5:4b) — verified E2E จริง
+             (agent → asset_probe → ffprobe → answer)
+  - Stub:    in-process llama.cpp หลัง --features llama
+```
+
+### 13.3 Media Engine Adapter
+
+```
+src-tauri/src/media/ — per-modality traits + broker + GPU arbitration
+
+Traits (per modality):
+  ImageGenerator | VideoGenerator | Transcriber | SpeechSynthesizer
+
+MediaBroker:
+  - route request ไปยัง backend ที่เหมาะสม
+  - stable-diffusion.cpp (native)  → fast path
+  - ComfyUI                        → power path
+
+GpuArbiter:
+  - serialize brain model + diffusion model บน GPU เดียว
+  - unload brain ออกจาก VRAM ตอนรัน heavy job
+
+Backends: comfy | sdcpp | whisper | piper
+```
+
+Arbiter จำเป็นเพราะ brain (LLM) กับ diffusion แย่ง VRAM ตัวเดียวกัน — จึง serialize ไม่ให้ OOM
+(สอดคล้องกับ GPU memory management §11.3)
+
+### 13.4 MCP Server
+
+```
+src-tauri/src/mcp.rs (rmcp)
+
+- expose Action Registry (§13.1) ออกเป็น MCP tools ผ่าน stdio
+- ให้ external agent เรียก capability ของ FluxNode ได้
+```
+
+### 13.5 Access Surfaces
+
+```
+ทุก surface เรียก capability เดียวกันจาก registry:
+
+  App UI       → action_invoke command
+  In-app agent → agent_chat
+  MCP          → fluxnode --mcp
+  Headless CLI → fluxnode --agent "<msg>"
+```
+
+### 13.6 Implementation Status
+
+```
+Implemented:
+  ✓ core (action registry, brain loop, media adapter, mcp)
+  ✓ compiles: default + --features llama
+  ✓ agent E2E verified (Ollama backend)
+
+Not yet:
+  ✗ in-app chat UI panel
+  ✗ in-process llama.cpp impl (ยังเป็น stub)
+  ✗ bundled sidecar binaries (whisper / piper / sd)
+  ✗ runtime-hardened --mcp
+```
+
+รายละเอียดเต็ม ดู `docs/AI Copilot and Media Adapter Design.md` และ `docs/AI Copilot Binary Setup.md`
+
+---
+
 ## Implementation Priority Matrix
 
 ```
@@ -1345,5 +1453,6 @@ Future consideration:
 │ §7  Error Handling & Resilience     │ Phase 2  │ §4                    │
 │ §11 Performance & System Req        │ Phase 2  │ §4                    │
 │ §10 UX (multi-monitor, a11y)        │ Phase 3  │ §4                    │
+│ §13 AI Copilot & Agent Architecture │ Phase 2  │ §1.6, §4              │
 └─────────────────────────────────────┴──────────┴───────────────────────┘
 ```

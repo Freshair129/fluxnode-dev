@@ -31,6 +31,15 @@ FluxNode คือเครื่องมือตัดต่อวิดี�
 * **Camera/Shader Node:** ปรับแต่งค่า Camera (Ortho/Persp) และ Fragment Shader  
 * **Effects Compositor:** จุดรวมองค์ประกอบแสง สี เอฟเฟกต์ เพื่อสรุปเป็น Video Output
 
+### **3.4 AI Copilot / Agent-Native Editing**
+
+* **Conversational Copilot:** ผู้ช่วย AI ในตัวที่ผู้ใช้สั่งงานได้ด้วยการ **พิมพ์หรือพูด** เพื่อตรวจสอบและแก้ไขโปรเจกต์ เช่น "probe คลิปนี้", "สร้างภาพให้ Node นี้", "ถอดเสียงไฟล์เสียงนี้เป็นข้อความ" — ทำงานตัดต่อผ่านบทสนทนาแทนการคลิกทีละขั้น  
+* **Agent API & Headless CLI:** ความสามารถชุดเดียวกันถูกเปิดออกเป็น **API สำหรับ AI Agent ภายนอก (MCP)** และ **CLI แบบ Headless** ทำให้ FluxNode ถูกเขียนสคริปต์หรือขับเคลื่อนด้วยเครื่องมือ AI อื่นได้  
+* **AI Media Generation:** สร้างสื่อด้วย AI (ภาพ / เสียงพูด / การถอดเสียง) โดยส่งงานผ่าน Backend ที่เลือกเปลี่ยนได้ทั้งแบบ Local และ Server (stable-diffusion.cpp, ComfyUI, whisper, piper)  
+* **Gated Actions (Safety):** การกระทำที่เขียนทับข้อมูลหรือใช้เวลานาน (แก้ไขโปรเจกต์ / เริ่ม Render) ต้อง **ยืนยันก่อนทำเสมอ** เพื่อไม่ให้ Agent เปลี่ยนแปลงโปรเจกต์หรือสั่ง Render โดยไม่มีการควบคุม  
+* **Local-First & Private:** ทำงานแบบ Local-first ผ่านโมเดลบนเครื่อง (Local model via Ollama) จึงใช้งานได้แบบออฟไลน์และรักษาความเป็นส่วนตัวของข้อมูล  
+* **สถานะการพัฒนา (Status):** Core ของ AI Copilot ถูกพัฒนาแล้ว (Copilot core implemented); ส่วน UI Panel สำหรับแชทในแอปยังอยู่ระหว่างพัฒนา (in-app chat UI panel pending)
+
 ## **4\. แผนงานการพัฒนา (Roadmap)**
 
 ### **Phase 1: MVP (Core Foundation)**
@@ -56,3 +65,11 @@ FluxNode คือเครื่องมือตัดต่อวิดี�
 * **User Engagement:** ระยะเวลาที่ผู้ใช้งานอยู่ในระบบต่อเซสชัน  
 * **Adoption Rate:** สัดส่วนการใช้งานสลับไปมาระหว่าง Timeline และ Workflow  
 * **Performance:** อัตราความสำเร็จในการประมวลผลผ่าน Cloud API และความเสถียรของ Local Pipeline
+## 6. Implementation Status Note (2026-07-04)
+
+This PRD remains the product-direction document. The current repository implementation status is:
+
+- The repo now contains a functional React + Tauri application rather than design-only artifacts.
+- Core feature slices for timeline editing, workflow editing, audio, export, validation, onboarding, workspace sharing, and timeline-workflow sync are implemented.
+- The main remaining repo-level gap is Section 11 proof breadth across more OS targets and hardware tiers.
+- For current code-truth and audit status, see `MASTERPLAN Completion Audit.md`, `MASTERPLAN Performance Evidence Audit.md`, and `MASTERPLAN Remaining Work Report.html`.
