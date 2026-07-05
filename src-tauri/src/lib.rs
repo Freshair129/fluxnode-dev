@@ -3010,8 +3010,16 @@ fn iso_timestamp_now() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Headless MCP mode: expose the Action registry over stdio for external agents, then exit
+    // without ever starting the GUI. Invoked as `fluxnode --mcp` (spawned by an MCP client).
+    if std::env::args().any(|a| a == "--mcp") {
+        run_mcp();
+        return;
+    }
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            actions::action_invoke,
+            actions::action_list,
             append_wal_entry,
             app_quit,
             asset_copy_into_project,
@@ -3058,6 +3066,34 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running FluxNode");
+}
+
+/// Headless entry for `fluxnode --mcp`: builds an `AppHandle` (actions need it for app-dir I/O),
+/// then serves the Action registry over stdio via `rmcp`. Blocks until the client disconnects.
+///
+/// NOTE: compile-verified only — not yet runtime-tested. `Builder::build` may still create the
+/// configured window; if so, suppress it via the tauri.conf window config or close it here before
+/// serving. Never `println!` in this process — stdout is the JSON-RPC channel.
+fn run_mcp() {
+    let app = tauri::Builder::default()
+        .build(tauri::generate_context!())
+        .expect("failed to build FluxNode (mcp mode)");
+    let handle = app.handle().clone();
+
+    let registry = std::sync::Arc::new({
+        let mut reg = action::Registry::new();
+        actions::register_all(&mut reg);
+        reg
+    });
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime for mcp mode");
+
+    if let Err(err) = runtime.block_on(mcp::serve_stdio(registry, handle)) {
+        eprintln!("fluxnode mcp server error: {err}");
+    }
 }
 
 #[cfg(test)]

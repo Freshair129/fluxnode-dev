@@ -916,3 +916,38 @@ pub fn register_all(reg: &mut crate::action::Registry) {
     reg.register(Arc::new(LoadAppPreferences));
     reg.register(Arc::new(SaveAppPreferences));
 }
+
+/// Process-global registry, built once. The single source every caller (Tauri command below,
+/// MCP server, future agent loop) resolves actions through.
+pub fn registry() -> &'static crate::action::Registry {
+    static REG: OnceLock<crate::action::Registry> = OnceLock::new();
+    REG.get_or_init(|| {
+        let mut reg = crate::action::Registry::new();
+        register_all(&mut reg);
+        reg
+    })
+}
+
+/// Invoke an action by name — the universal entry point exposed to the frontend / agent.
+#[tauri::command]
+pub fn action_invoke(app: AppHandle, name: String, args: Value) -> Result<Value, String> {
+    registry().invoke(&app, &name, args)
+}
+
+/// List every registered action's metadata (name, description, JSON-Schema params, side effect)
+/// so a caller can build a tool list / palette.
+#[tauri::command]
+pub fn action_list() -> Value {
+    let actions: Vec<Value> = registry()
+        .defs()
+        .map(|d| {
+            json!({
+                "name": d.name,
+                "description": d.description,
+                "params": d.params,
+                "side_effect": format!("{:?}", d.side_effect),
+            })
+        })
+        .collect();
+    json!({ "actions": actions })
+}
