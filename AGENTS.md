@@ -52,6 +52,8 @@ Detection: `isTauriRuntime()` checks `window.__TAURI_INTERNALS__`
 
 ### AI Copilot / Agent Layer (`src-tauri/src/`)
 
+> **Handoff:** `HANDOFF.md` has the current status, verified-vs-pending list, run commands, and gotchas (updated 2026-07-06).
+
 An agent-native layer sits on top of the commands above (see `docs/AI Copilot and Media Adapter Design.md`):
 
 - `action.rs` — Action registry (single source of truth); every capability is an `Action` with a JSON-Schema `params` and a `SideEffect` (ReadOnly / Mutating / LongJob)

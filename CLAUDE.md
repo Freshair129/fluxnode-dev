@@ -68,6 +68,8 @@ Main Rust backend lives in `src-tauri/src/lib.rs`. Key capabilities:
 
 ### AI Copilot / Agent Layer
 
+> **Handoff:** see `HANDOFF.md` for current status (what's verified, pending work, gotchas) — last updated 2026-07-06. Core implemented + E2E-verified; UI panel, in-process llama.cpp, and sidecar binaries still pending.
+
 An agent-native layer wraps every command behind one registry (see `docs/AI Copilot and Media Adapter Design.md`):
 
 - `action.rs` — Action registry (SSOT): each capability is an `Action` (name + JSON-Schema params + `SideEffect`). The LLM tool schema, MCP tool list, and CLI all derive from it.
