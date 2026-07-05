@@ -118,15 +118,15 @@
     <section class="hero">
       <div class="badge warn">MASTERPLAN status: partial</div>
       <h1>Remaining Work Report</h1>
-      <p class="muted">Generated from the current repository audit on 2026-06-29. Most of <code>MASTERPLAN.md</code> is implemented; the last unresolved area is Section 11 proof breadth across real target environments.</p>
+      <p class="muted">Generated from the current repository audit on 2026-07-04. Most of <code>MASTERPLAN.md</code> is implemented. Two areas remain partial: <strong>Section 11</strong> proof breadth across real target environments, and the newly-added <strong>Section 13 (AI Copilot &amp; Agent Architecture)</strong> whose core is implemented but whose UI / in-process model / sidecar binaries are still pending.</p>
       <div class="grid cards">
         <div class="card">
           <h3>Completed</h3>
-          <p><strong>11 / 12</strong> major sections are marked implemented in the audit.</p>
+          <p><strong>§1&ndash;§12</strong> implemented; <strong>§13 (AI Copilot)</strong> core layer landed &amp; E2E-verified.</p>
         </div>
         <div class="card">
           <h3>Remaining</h3>
-          <p><strong>Section 11</strong> is still partial because cross-platform / target-hardware proof is not complete.</p>
+          <p><strong>§11</strong> (cross-platform / hardware proof) and <strong>§13</strong> surface work (chat UI, in-process llama.cpp, sidecar binaries) are still partial.</p>
         </div>
         <div class="card">
           <h3>Evidence UX</h3>
@@ -138,7 +138,7 @@
     <section class="card" style="margin-top:18px;">
       <h2>What is still unfinished</h2>
       <div class="callout">
-        <p><strong>Only one repo-level gap remains:</strong> full requirement-by-requirement proof for Section 11 across every listed OS target and realistic hardware class.</p>
+        <p><strong>Two areas remain partial:</strong> (1) full requirement-by-requirement proof for Section 11 across every listed OS target and realistic hardware class, and (2) the Section 13 AI Copilot surface work &mdash; in-app chat UI, in-process llama.cpp, and bundled sidecar binaries (the core registry / agent loop / media adapter / MCP are done and E2E-verified).</p>
       </div>
       <table class="table">
         <thead>
@@ -164,6 +164,26 @@
             <td>The evidence packet now transfers well, but it still needs real target-machine runs to close the loop.</td>
             <td>Imported proof history from external machines plus native runtime confirmations on those machines.</td>
           </tr>
+          <tr>
+            <td>§13 &mdash; In-app copilot UI</td>
+            <td>The agent is reachable via the <code>agent_chat</code> command, <code>--agent</code> CLI, and MCP, but there is no chat/voice panel in the editor UI.</td>
+            <td>A chat surface in <code>src/features/</code> that calls <code>agent_chat</code> and renders tool activity + answers.</td>
+          </tr>
+          <tr>
+            <td>§13 &mdash; In-process llama.cpp backend</td>
+            <td><code>brain/llama.rs</code> is a stub behind <code>--features llama</code>; <code>llama-cpp-2</code> needs a C++ toolchain (cmake + MSVC/clang + libclang) and a GGUF model.</td>
+            <td>A built <code>--features llama</code> binary running the in-process brain, matching the Ollama backend's E2E result.</td>
+          </tr>
+          <tr>
+            <td>§13 &mdash; Sidecar binaries</td>
+            <td>whisper / piper / sd binaries are not bundled; those media backends only register when opt-in env vars point at existing binaries.</td>
+            <td>Bundled sidecars in <code>src-tauri/binaries/</code> plus a verify run per <code>docs/AI Copilot Binary Setup.md</code>.</td>
+          </tr>
+          <tr>
+            <td>§13 &mdash; <code>--mcp</code> runtime test</td>
+            <td>The MCP server compiles and is wired, but has not been driven by a real MCP client (may need window suppression in headless mode).</td>
+            <td>An external MCP client listing + calling the registry tools over <code>fluxnode --mcp</code>.</td>
+          </tr>
         </tbody>
       </table>
     </section>
@@ -176,11 +196,16 @@
           <li>Audio system, export pipeline, validation, shortcuts, UX essentials</li>
           <li>Section 11 proof suite, 4K/60 render proof, proof history, import/export, and latest-proof summary</li>
           <li>Audit docs updated to reflect current repo evidence</li>
+          <li>§13 AI Copilot core: Action registry (30 actions), agent loop with write-gating (Ollama, E2E-verified), media adapter + GPU arbiter, MCP server, <code>--mcp</code>/<code>--agent</code> CLI</li>
         </ul>
       </div>
       <div class="card">
         <h2>Best next step</h2>
         <p>Run the Section 11 proof panel on each target OS, save the proof to project history, then import those records back into the archive bundle. That will close the last real gap in the audit.</p>
+      </div>
+      <div class="card">
+        <h2>Latest Validation</h2>
+        <p><code>npm run build</code>, <code>npm run lint</code>, and <code>npm test</code> currently pass on the checked-in code.</p>
       </div>
     </section>
 
@@ -189,6 +214,8 @@
       <div class="stack">
         <p><a href="MASTERPLAN Completion Audit.md">MASTERPLAN Completion Audit.md</a></p>
         <p><a href="MASTERPLAN Performance Evidence Audit.md">MASTERPLAN Performance Evidence Audit.md</a></p>
+        <p><a href="docs/AI Copilot and Media Adapter Design.md">docs/AI Copilot and Media Adapter Design.md</a></p>
+        <p><a href="docs/AI Copilot Binary Setup.md">docs/AI Copilot Binary Setup.md</a></p>
         <p><a href="src/features/status/SystemPanels.tsx">src/features/status/SystemPanels.tsx</a></p>
         <p><a href="src/store/project-store.ts">src/store/project-store.ts</a></p>
         <p><a href="src/domain/project/types.ts">src/domain/project/types.ts</a></p>

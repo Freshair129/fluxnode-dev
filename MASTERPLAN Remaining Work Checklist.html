@@ -527,16 +527,16 @@
         <div class="hero-side">
           <div class="status-chip-row">
             <span class="status-chip"><strong>สถานะ:</strong> เกือบครบ</span>
-            <span class="status-chip"><strong>เหลือหลัก ๆ:</strong> 1 กลุ่ม</span>
-            <span class="status-chip"><strong>โฟกัส:</strong> Section 11 proof</span>
-            <span class="status-chip"><strong>MASTERPLAN:</strong> 11/12 done</span>
+            <span class="status-chip"><strong>เหลือหลัก ๆ:</strong> 2 กลุ่ม</span>
+            <span class="status-chip"><strong>โฟกัส:</strong> §11 proof + §13 UI</span>
+            <span class="status-chip"><strong>MASTERPLAN:</strong> 11/13 done</span>
           </div>
           <p class="progress-note">โครงสร้าง, archive, import/export และ coverage map wiring ทำมาแล้ว ตอนนี้จุดที่ยังต้องเก็บเพิ่มคือหลักฐานข้าม OS / hardware จากเครื่องจริง</p>
         </div>
 
         <div class="progress-card">
           <div class="progress-top">
-            <strong>Section 11 gap progress</strong>
+            <strong>Remaining gap progress (§11 + §13)</strong>
             <span id="progressLabel">ประมาณ 0%</span>
           </div>
           <div class="bar" aria-hidden="true"><span id="progressBar"></span></div>
@@ -551,9 +551,9 @@
         <div class="panel-head">
           <div>
             <h2>MASTERPLAN ทั้งหมดในมุม checklist</h2>
-            <p class="panel-sub">ส่วนใหญ่ปิดแล้ว เหลือ Section 11 เป็นจุดเดียวที่ยังต้องเก็บ proof ข้ามเครื่องให้แน่น</p>
+            <p class="panel-sub">ส่วนใหญ่ปิดแล้ว เหลือ Section 11 (proof ข้ามเครื่อง) และ Section 13 (AI Copilot — core เสร็จ แต่ UI / in-process llama / sidecar binaries ยังต้องปิด)</p>
           </div>
-          <span class="pill ok">11 done / 1 partial</span>
+          <span class="pill ok">11 done / 2 partial</span>
         </div>
 
         <div class="section-grid">
@@ -653,6 +653,14 @@
             <h3>Timeline ↔ Workflow Sync Protocol</h3>
             <p>Linked clip/node sync and conflict-safe updates are evidenced in repo behavior.</p>
           </article>
+          <article class="section-card partial">
+            <div class="section-top">
+              <div class="section-num">Section 13</div>
+              <span class="pill warn">partial</span>
+            </div>
+            <h3>AI Copilot &amp; Agent Architecture</h3>
+            <p>Core done &amp; E2E-verified: action registry, agent loop with write-gating, media adapter + GPU arbiter, MCP server, <code>--mcp</code>/<code>--agent</code> CLI. Remaining: in-app chat UI, in-process llama.cpp, and bundled sidecar binaries.</p>
+          </article>
         </div>
       </div>
 
@@ -723,6 +731,57 @@
               </div>
             </div>
           </li>
+
+          <li class="item" data-key="copilot-ui">
+            <div class="box" aria-hidden="true"><input type="checkbox" aria-label="ต่อ UI chat/voice ในแอป"></div>
+            <div>
+              <h3>§13 — ต่อ UI chat/voice ในแอป</h3>
+              <p>agent เรียกได้แล้วผ่าน <code>agent_chat</code> / <code>--agent</code> / MCP แต่ยังไม่มี panel ในเอดิเตอร์ให้ผู้ใช้พิมพ์/พูดสั่งและเห็น tool activity</p>
+              <div class="meta">
+                <span class="tag warn">chat panel</span>
+                <span class="tag warn">voice</span>
+                <span class="tag blue">src/features/</span>
+              </div>
+            </div>
+          </li>
+
+          <li class="item" data-key="llama-inproc">
+            <div class="box" aria-hidden="true"><input type="checkbox" aria-label="build llama.cpp in-process"></div>
+            <div>
+              <h3>§13 — build llama.cpp in-process</h3>
+              <p><code>brain/llama.rs</code> เป็น stub หลัง <code>--features llama</code>; <code>llama-cpp-2</code> ต้องมี C++ toolchain (cmake + MSVC/clang + libclang) และ GGUF model ก่อน build ได้</p>
+              <div class="meta">
+                <span class="tag warn">cmake</span>
+                <span class="tag warn">libclang</span>
+                <span class="tag blue">GGUF model</span>
+              </div>
+            </div>
+          </li>
+
+          <li class="item" data-key="sidecar-bins">
+            <div class="box" aria-hidden="true"><input type="checkbox" aria-label="bundle sidecar binaries"></div>
+            <div>
+              <h3>§13 — bundle sidecar binaries (whisper/piper/sd)</h3>
+              <p>ยังไม่ได้ bundle; backends พวกนี้ register เฉพาะเมื่อ env var ชี้ไปที่ binary ที่มีจริง — ต้องใส่ลง <code>src-tauri/binaries/</code> + verify ตาม binary setup doc</p>
+              <div class="meta">
+                <span class="tag blue">whisper</span>
+                <span class="tag blue">piper</span>
+                <span class="tag blue">sd</span>
+              </div>
+            </div>
+          </li>
+
+          <li class="item" data-key="mcp-runtime">
+            <div class="box" aria-hidden="true"><input type="checkbox" aria-label="ทดสอบ --mcp กับ client จริง"></div>
+            <div>
+              <h3>§13 — ทดสอบ <code>--mcp</code> กับ MCP client จริง</h3>
+              <p>MCP server compile + wired แล้ว แต่ยังไม่ได้ให้ client จริงเรียก (อาจต้อง suppress window ตอน headless)</p>
+              <div class="meta">
+                <span class="tag warn">rmcp</span>
+                <span class="tag blue">stdio</span>
+              </div>
+            </div>
+          </li>
         </ul>
       </div>
 
@@ -771,6 +830,8 @@
         <div class="footer-links">
           <div class="link-card"><a href="MASTERPLAN%20Completion%20Audit.md">MASTERPLAN Completion Audit.md</a></div>
           <div class="link-card"><a href="MASTERPLAN%20Performance%20Evidence%20Audit.md">MASTERPLAN Performance Evidence Audit.md</a></div>
+          <div class="link-card"><a href="docs/AI%20Copilot%20and%20Media%20Adapter%20Design.md">docs/AI Copilot and Media Adapter Design.md</a></div>
+          <div class="link-card"><a href="docs/AI%20Copilot%20Binary%20Setup.md">docs/AI Copilot Binary Setup.md</a></div>
           <div class="link-card"><a href="src/features/status/SystemPanels.tsx">src/features/status/SystemPanels.tsx</a></div>
           <div class="link-card"><a href="src/store/project-store.ts">src/store/project-store.ts</a></div>
           <div class="link-card"><a href="src/domain/project/types.ts">src/domain/project/types.ts</a></div>
