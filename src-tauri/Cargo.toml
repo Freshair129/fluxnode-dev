@@ -9,6 +9,14 @@ edition = "2021"
 name = "fluxnode_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = []
+# In-process llama.cpp brain backend. OFF by default because llama-cpp-2 builds llama.cpp from
+# source and needs a C++ toolchain (cmake + MSVC/clang + libclang) plus a GGUF model. Enable with
+# `cargo build --features llama` on a machine with the toolchain, then add the `llama-cpp-2` dep
+# and flesh out `brain/llama.rs`. See docs/AI Copilot Binary Setup.md.
+llama = []
+
 [build-dependencies]
 tauri-build = { version = "2.0.2", features = [] }
 

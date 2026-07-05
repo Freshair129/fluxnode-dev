@@ -8,9 +8,11 @@
 //! Sync + blocking to match the codebase; async callers wrap in `spawn_blocking`.
 #![allow(dead_code)]
 
+#[cfg(feature = "llama")]
+pub mod llama;
 pub mod ollama;
 
-use crate::action::Registry;
+use crate::action::{Registry, SideEffect};
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
@@ -62,12 +64,17 @@ pub fn tools_from_registry(reg: &Registry) -> Vec<Value> {
 /// Run the agent loop: alternate model turns and tool executions until the model answers with
 /// text or `max_steps` is exhausted. Each requested tool is dispatched through the registry, and
 /// its JSON result (or `{ "error": ... }`) is fed back to the model.
+///
+/// Safety: when `allow_writes` is false, `Mutating` / `LongJob` tools are **not executed** — the
+/// model gets a "requires user confirmation" result instead, so it can plan but cannot mutate
+/// state or start jobs unsupervised. `ReadOnly` tools always run.
 pub fn run_agent(
     app: &AppHandle,
     reg: &Registry,
     brain: &dyn Brain,
     user_message: &str,
     max_steps: usize,
+    allow_writes: bool,
 ) -> Result<String, String> {
     let tools = tools_from_registry(reg);
     let mut messages = vec![
@@ -83,9 +90,20 @@ pub fn run_agent(
             BrainReply::Text(text) => return Ok(text),
             BrainReply::ToolCalls(calls) => {
                 for call in calls {
-                    let result = reg
-                        .invoke(app, &call.name, call.arguments.clone())
-                        .unwrap_or_else(|e| json!({ "error": e }));
+                    let gated = !allow_writes
+                        && matches!(
+                            reg.get(&call.name).map(|a| a.def().side_effect),
+                            Some(SideEffect::Mutating) | Some(SideEffect::LongJob)
+                        );
+                    let result = if gated {
+                        json!({ "error": format!(
+                            "'{}' is a write/long-running action and requires user confirmation; not executed",
+                            call.name
+                        ) })
+                    } else {
+                        reg.invoke(app, &call.name, call.arguments.clone())
+                            .unwrap_or_else(|e| json!({ "error": e }))
+                    };
                     messages.push(json!({
                         "role": "tool",
                         "name": call.name,

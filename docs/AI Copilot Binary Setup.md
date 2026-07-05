@@ -38,6 +38,22 @@ sd -M txt2img -m model.gguf -p "a ice wizard" -W 768 -H 512 --steps 20 -o out.pn
 If any command's real flags differ, update only the noted backend file — the trait contract and
 broker routing are unaffected.
 
+## In-process llama.cpp brain (`--features llama`)
+
+The default brain backend is **Ollama** (`brain/ollama.rs`, runtime-verified) — no build toolchain
+needed. The optional in-process backend (`brain/llama.rs`, behind the `llama` feature) is a
+**stub** until built on a machine with a C++ toolchain, because `llama-cpp-2` compiles llama.cpp
+from source.
+
+Prerequisites to implement/enable it:
+- **cmake**, a **C++ compiler** (MSVC `cl` / clang), and **libclang** (LLVM) for bindgen.
+- A **GGUF model** (e.g. `qwen3-4b-instruct-q4_k_m.gguf`) — reuse an Ollama blob or download.
+
+Then: add `llama-cpp-2 = { version = "…", optional = true }`, switch the feature to
+`llama = ["dep:llama-cpp-2"]`, flesh out `LlamaBrain` (load model → generate under a GBNF grammar
+that forces text-or-tool-call JSON → map to `BrainReply`), and build with `cargo build --features
+llama`. The `Brain` trait means no other code changes.
+
 ## whisper input caveat
 
 whisper.cpp accepts only 16 kHz mono 16-bit PCM WAV. `whisper.rs` has a `TODO(ffmpeg pre-convert)`

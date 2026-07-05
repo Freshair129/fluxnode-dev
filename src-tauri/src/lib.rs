@@ -18,6 +18,7 @@ mod comfy;
 mod mcp;
 mod media;
 mod render_graph;
+mod services;
 mod workflow_graph;
 
 static ASSET_WATCH_STATE: OnceLock<Mutex<HashMap<String, WatchedAsset>>> = OnceLock::new();
@@ -3014,19 +3015,49 @@ fn iso_timestamp_now() -> String {
 /// registry, letting the model call FluxNode tools to answer. `model` defaults to a local
 /// tool-calling model. Blocking — Tauri runs it off the UI thread.
 #[tauri::command]
-fn agent_chat(app: AppHandle, message: String, model: Option<String>) -> Result<String, String> {
-    let model = model.unwrap_or_else(|| "qwen3.5:4b".to_string());
-    let engine = brain::ollama::OllamaBrain::local(model);
-    brain::run_agent(&app, actions::registry(), &engine, &message, 8)
+fn agent_chat(
+    app: AppHandle,
+    message: String,
+    model: Option<String>,
+    allow_writes: Option<bool>,
+) -> Result<String, String> {
+    // Default: the shared brain (wired to the GPU arbiter). A custom model spins up a one-off.
+    let allow_writes = allow_writes.unwrap_or(false); // gate write/long tools unless opted in
+    match model {
+        None => brain::run_agent(
+            &app,
+            actions::registry(),
+            services::brain().as_ref(),
+            &message,
+            8,
+            allow_writes,
+        ),
+        Some(model) => {
+            let engine = brain::ollama::OllamaBrain::local(model);
+            brain::run_agent(&app, actions::registry(), &engine, &message, 8, allow_writes)
+        }
+    }
 }
 
 pub fn run() {
+    let args: Vec<String> = std::env::args().collect();
+
     // Headless MCP mode: expose the Action registry over stdio for external agents, then exit
     // without ever starting the GUI. Invoked as `fluxnode --mcp` (spawned by an MCP client).
-    if std::env::args().any(|a| a == "--mcp") {
+    if args.iter().any(|a| a == "--mcp") {
         run_mcp();
         return;
     }
+
+    // Headless agent mode: `fluxnode --agent "<message>" [--allow-writes]` runs one agent-loop
+    // turn against the live registry and prints the answer. End-to-end smoke test / scripting.
+    if let Some(i) = args.iter().position(|a| a == "--agent") {
+        let message = args.get(i + 1).cloned().unwrap_or_default();
+        let allow_writes = args.iter().any(|a| a == "--allow-writes");
+        run_agent_cli(&message, allow_writes);
+        return;
+    }
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             actions::action_invoke,
@@ -3105,6 +3136,28 @@ fn run_mcp() {
 
     if let Err(err) = runtime.block_on(mcp::serve_stdio(registry, handle)) {
         eprintln!("fluxnode mcp server error: {err}");
+    }
+}
+
+/// Headless entry for `fluxnode --agent "<message>" [--allow-writes]`: builds an `AppHandle`,
+/// runs one agent-loop conversation against the live registry via the shared brain, and prints
+/// the final answer to stdout. End-to-end smoke test without the GUI.
+fn run_agent_cli(message: &str, allow_writes: bool) {
+    let app = tauri::Builder::default()
+        .build(tauri::generate_context!())
+        .expect("failed to build FluxNode (agent mode)");
+    let handle = app.handle().clone();
+
+    match brain::run_agent(
+        &handle,
+        actions::registry(),
+        services::brain().as_ref(),
+        message,
+        8,
+        allow_writes,
+    ) {
+        Ok(answer) => println!("{answer}"),
+        Err(err) => eprintln!("agent error: {err}"),
     }
 }
 
