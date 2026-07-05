@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod action;
 mod actions;
+mod brain;
 mod comfy;
 mod mcp;
 mod media;
@@ -3009,6 +3010,16 @@ fn iso_timestamp_now() -> String {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Chat with the in-app copilot: runs the agent loop (Ollama brain) against the live Action
+/// registry, letting the model call FluxNode tools to answer. `model` defaults to a local
+/// tool-calling model. Blocking — Tauri runs it off the UI thread.
+#[tauri::command]
+fn agent_chat(app: AppHandle, message: String, model: Option<String>) -> Result<String, String> {
+    let model = model.unwrap_or_else(|| "qwen3.5:4b".to_string());
+    let engine = brain::ollama::OllamaBrain::local(model);
+    brain::run_agent(&app, actions::registry(), &engine, &message, 8)
+}
+
 pub fn run() {
     // Headless MCP mode: expose the Action registry over stdio for external agents, then exit
     // without ever starting the GUI. Invoked as `fluxnode --mcp` (spawned by an MCP client).
@@ -3020,6 +3031,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             actions::action_invoke,
             actions::action_list,
+            agent_chat,
             append_wal_entry,
             app_quit,
             asset_copy_into_project,
