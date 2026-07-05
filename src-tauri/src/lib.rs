@@ -11,7 +11,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sysinfo::{Disks, System};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
+mod action;
+mod actions;
 mod comfy;
+mod media;
 mod render_graph;
 mod workflow_graph;
 

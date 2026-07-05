@@ -92,6 +92,11 @@ fn build_generate(data: &Value, input_image_name: Option<&str>) -> Result<Value,
     let negative = read_str(data, "negativePrompt", "");
     let steps = read_u64(data, "steps", 20);
     let cfg = read_f64(data, "cfg", 7.0);
+    // Optional generation params; default to the historical hardcoded values so existing callers
+    // (workflow_render_node / comfy_generate) that omit them keep identical behaviour.
+    let width = read_u64(data, "width", 512);
+    let height = read_u64(data, "height", 512);
+    let seed = read_u64(data, "seed", 0);
 
     // Node id layout (string ids "1".."9"):
     //   1 CheckpointLoaderSimple
@@ -118,7 +123,7 @@ fn build_generate(data: &Value, input_image_name: Option<&str>) -> Result<Value,
         "5": {
             "class_type": "KSampler",
             "inputs": {
-                "seed": 0,
+                "seed": seed,
                 "steps": steps,
                 "cfg": cfg,
                 "sampler_name": "euler",
@@ -168,7 +173,7 @@ fn build_generate(data: &Value, input_image_name: Option<&str>) -> Result<Value,
                 "4".to_string(),
                 json!({
                     "class_type": "EmptyLatentImage",
-                    "inputs": { "width": 512, "height": 512, "batch_size": 1 }
+                    "inputs": { "width": width, "height": height, "batch_size": 1 }
                 }),
             );
         }
