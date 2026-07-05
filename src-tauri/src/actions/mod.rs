@@ -7,6 +7,7 @@
 #![allow(dead_code)]
 
 use crate::action::{Action, ActionDef, ActionResult, SideEffect};
+use crate::media::types::{FeatureSet, ImageRequest};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -915,6 +916,123 @@ pub fn register_all(reg: &mut crate::action::Registry) {
     reg.register(Arc::new(HealthPing));
     reg.register(Arc::new(LoadAppPreferences));
     reg.register(Arc::new(SaveAppPreferences));
+    // Media generation (routed through the shared MediaBroker + GpuArbiter).
+    reg.register(Arc::new(GenerateImage));
+    reg.register(Arc::new(Transcribe));
+    reg.register(Arc::new(Synthesize));
+}
+
+// ---------------------------------------------------------------------------
+// Media actions — route through the shared MediaBroker (services::media_broker).
+// ---------------------------------------------------------------------------
+
+pub struct GenerateImage;
+impl Action for GenerateImage {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "generate_image",
+            description: "Generate an image from a text prompt (routes to sd.cpp or ComfyUI).",
+            params: json!({
+                "type": "object",
+                "properties": {
+                    "prompt": { "type": "string" },
+                    "negative": { "type": "string" },
+                    "width": { "type": "integer", "minimum": 64, "default": 1024 },
+                    "height": { "type": "integer", "minimum": 64, "default": 1024 },
+                    "steps": { "type": "integer", "minimum": 1, "default": 20 },
+                    "seed": { "type": "integer" },
+                    "model_hint": { "type": "string" }
+                },
+                "required": ["prompt"]
+            }),
+            side_effect: SideEffect::LongJob,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let prompt = args
+            .get("prompt")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'prompt'".to_string())?
+            .to_string();
+        let req = ImageRequest {
+            prompt,
+            negative: args
+                .get("negative")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            width: args.get("width").and_then(Value::as_u64).unwrap_or(1024) as u32,
+            height: args.get("height").and_then(Value::as_u64).unwrap_or(1024) as u32,
+            steps: args.get("steps").and_then(Value::as_u64).unwrap_or(20) as u32,
+            seed: args.get("seed").and_then(Value::as_i64),
+            model_hint: args
+                .get("model_hint")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            features: FeatureSet::default(),
+            input: None,
+            mask: None,
+        };
+        let art = crate::services::media_broker().generate_image(app, req)?;
+        Ok(json!({ "asset_id": art.asset_id, "path": art.path, "kind": art.kind }))
+    }
+}
+
+pub struct Transcribe;
+impl Action for Transcribe {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "transcribe",
+            description: "Transcribe an audio file to text with timestamps (whisper.cpp).",
+            params: json!({
+                "type": "object",
+                "properties": { "audio_path": { "type": "string" } },
+                "required": ["audio_path"]
+            }),
+            side_effect: SideEffect::ReadOnly,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, args: Value) -> ActionResult {
+        let audio_path = args
+            .get("audio_path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'audio_path'".to_string())?;
+        let transcript = crate::services::media_broker().transcribe(audio_path)?;
+        serde_json::to_value(transcript).map_err(|e| format!("serialize transcript: {e}"))
+    }
+}
+
+pub struct Synthesize;
+impl Action for Synthesize {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "synthesize",
+            description: "Synthesize speech from text to a WAV file (Piper / SAPI).",
+            params: json!({
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string" },
+                    "voice": { "type": "string" }
+                },
+                "required": ["text"]
+            }),
+            side_effect: SideEffect::Mutating,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, args: Value) -> ActionResult {
+        let text = args
+            .get("text")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'text'".to_string())?;
+        let voice = args.get("voice").and_then(Value::as_str).unwrap_or("default");
+        let art = crate::services::media_broker().synth(text, voice)?;
+        Ok(json!({ "asset_id": art.asset_id, "path": art.path, "kind": art.kind }))
+    }
 }
 
 /// Process-global registry, built once. The single source every caller (Tauri command below,
