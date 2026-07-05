@@ -14,6 +14,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 mod action;
 mod actions;
 mod comfy;
+mod mcp;
 mod media;
 mod render_graph;
 mod workflow_graph;

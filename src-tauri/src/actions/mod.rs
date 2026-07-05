@@ -75,8 +75,844 @@ impl Action for AssetProbe {
     }
 }
 
-/// Register every wrapped command into the registry. Extend as more wrappers land.
+pub struct LoadProjectState;
+impl Action for LoadProjectState {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "load_project_state",
+            description: "Load the current project state.",
+            params: json!({ "type":"object", "properties":{} }),
+            side_effect: SideEffect::ReadOnly,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, _args: Value) -> ActionResult {
+        let project_json = crate::load_project_state(app.clone())?;
+        Ok(json!({ "project_json": project_json }))
+    }
+}
+
+pub struct OpenProjectAtPath;
+impl Action for OpenProjectAtPath {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "open_project_at_path",
+            description: "Open a project from a specific path.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "path":{"type":"string"}
+                },
+                "required":["path"]
+            }),
+            side_effect: SideEffect::Mutating,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let path = args
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'path'".to_string())?
+            .to_string();
+        let project_json = crate::open_project_at_path(app.clone(), path)?;
+        Ok(json!({ "project_json": project_json }))
+    }
+}
+
+pub struct CreateProjectAtPath;
+impl Action for CreateProjectAtPath {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "create_project_at_path",
+            description: "Create a project at a specific path.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "path":{"type":"string"},
+                    "project_json":{"type":"string"}
+                },
+                "required":["path","project_json"]
+            }),
+            side_effect: SideEffect::Mutating,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let path = args
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'path'".to_string())?
+            .to_string();
+        let project_json = args
+            .get("project_json")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'project_json'".to_string())?
+            .to_string();
+        let created_project_json = crate::create_project_at_path(app.clone(), path, project_json)?;
+        Ok(json!({ "project_json": created_project_json }))
+    }
+}
+
+pub struct SaveProjectState;
+impl Action for SaveProjectState {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "save_project_state",
+            description: "Save the current project state.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "project_json":{"type":"string"}
+                },
+                "required":["project_json"]
+            }),
+            side_effect: SideEffect::Mutating,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let project_json = args
+            .get("project_json")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'project_json'".to_string())?
+            .to_string();
+        crate::save_project_state(app.clone(), project_json)?;
+        Ok(json!({ "ok": true }))
+    }
+}
+
+pub struct SaveProjectStateAs;
+impl Action for SaveProjectStateAs {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "save_project_state_as",
+            description: "Save the current project state to a specific path.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "path":{"type":"string"},
+                    "project_json":{"type":"string"}
+                },
+                "required":["path","project_json"]
+            }),
+            side_effect: SideEffect::Mutating,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let path = args
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'path'".to_string())?
+            .to_string();
+        let project_json = args
+            .get("project_json")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'project_json'".to_string())?
+            .to_string();
+        crate::save_project_state_as(app.clone(), path, project_json)?;
+        Ok(json!({ "ok": true }))
+    }
+}
+
+pub struct AutosaveProjectState;
+impl Action for AutosaveProjectState {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "autosave_project_state",
+            description: "Autosave the current project state.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "project_json":{"type":"string"}
+                },
+                "required":["project_json"]
+            }),
+            side_effect: SideEffect::Mutating,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let project_json = args
+            .get("project_json")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'project_json'".to_string())?
+            .to_string();
+        let path = crate::autosave_project_state(app.clone(), project_json)?;
+        Ok(json!({ "path": path }))
+    }
+}
+
+pub struct LoadRecentProjects;
+impl Action for LoadRecentProjects {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "load_recent_projects",
+            description: "Load the recent projects list.",
+            params: json!({ "type":"object", "properties":{} }),
+            side_effect: SideEffect::ReadOnly,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, _args: Value) -> ActionResult {
+        let recent_projects = crate::load_recent_projects(app.clone())?;
+        let recent_projects = serde_json::from_str::<Value>(&recent_projects)
+            .unwrap_or_else(|_| Value::String(recent_projects));
+        Ok(json!({ "recent_projects": recent_projects }))
+    }
+}
+
+pub struct GetCurrentProjectPath;
+impl Action for GetCurrentProjectPath {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "get_current_project_path",
+            description: "Get the current project path.",
+            params: json!({ "type":"object", "properties":{} }),
+            side_effect: SideEffect::ReadOnly,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, _args: Value) -> ActionResult {
+        let path = crate::get_current_project_path(app.clone())?;
+        Ok(json!({ "path": path }))
+    }
+}
+
+pub struct MarkProjectOpened;
+impl Action for MarkProjectOpened {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "mark_project_opened",
+            description: "Mark a project as opened.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "project_json":{"type":"string"}
+                },
+                "required":["project_json"]
+            }),
+            side_effect: SideEffect::Mutating,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let project_json = args
+            .get("project_json")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'project_json'".to_string())?
+            .to_string();
+        crate::mark_project_opened(app.clone(), project_json)?;
+        Ok(json!({ "ok": true }))
+    }
+}
+
+pub struct AssetGenerateWaveform;
+impl Action for AssetGenerateWaveform {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "asset_generate_waveform",
+            description: "Generate waveform data for an asset.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "asset_id":{"type":"string"},
+                    "source_path":{"type":"string"},
+                    "bucket_count":{"type":"integer","minimum":0}
+                },
+                "required":["asset_id","source_path","bucket_count"]
+            }),
+            side_effect: SideEffect::Mutating,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let asset_id = args
+            .get("asset_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'asset_id'".to_string())?
+            .to_string();
+        let source_path = args
+            .get("source_path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'source_path'".to_string())?
+            .to_string();
+        let bucket_count = args
+            .get("bucket_count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "Missing or invalid 'bucket_count'".to_string())?;
+        let waveform =
+            crate::asset_generate_waveform(app.clone(), asset_id, source_path, bucket_count as usize)?;
+        let waveform = serde_json::from_str::<Value>(&waveform)
+            .unwrap_or_else(|_| Value::String(waveform));
+        Ok(json!({ "waveform": waveform }))
+    }
+}
+
+pub struct AssetGenerateThumbnail;
+impl Action for AssetGenerateThumbnail {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "asset_generate_thumbnail",
+            description: "Generate a thumbnail for an asset.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "asset_id":{"type":"string"},
+                    "source_path":{"type":"string"},
+                    "time":{"type":"number"}
+                },
+                "required":["asset_id","source_path","time"]
+            }),
+            side_effect: SideEffect::Mutating,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let asset_id = args
+            .get("asset_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'asset_id'".to_string())?
+            .to_string();
+        let source_path = args
+            .get("source_path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'source_path'".to_string())?
+            .to_string();
+        let time = args
+            .get("time")
+            .and_then(Value::as_f64)
+            .ok_or_else(|| "Missing or invalid 'time'".to_string())?;
+        let thumbnail = crate::asset_generate_thumbnail(app.clone(), asset_id, source_path, time)?;
+        let thumbnail = serde_json::from_str::<Value>(&thumbnail)
+            .unwrap_or_else(|_| Value::String(thumbnail));
+        Ok(json!({ "thumbnail": thumbnail }))
+    }
+}
+
+pub struct AssetCopyIntoProject;
+impl Action for AssetCopyIntoProject {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "asset_copy_into_project",
+            description: "Copy an asset into the current project.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "asset_id":{"type":"string"},
+                    "source_path":{"type":"string"}
+                },
+                "required":["asset_id","source_path"]
+            }),
+            side_effect: SideEffect::Mutating,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let asset_id = args
+            .get("asset_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'asset_id'".to_string())?
+            .to_string();
+        let source_path = args
+            .get("source_path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'source_path'".to_string())?
+            .to_string();
+        let path = crate::asset_copy_into_project(app.clone(), asset_id, source_path)?;
+        Ok(json!({ "path": path }))
+    }
+}
+
+pub struct AssetGenerateProxy;
+impl Action for AssetGenerateProxy {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "asset_generate_proxy",
+            description: "Generate a proxy for an asset.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "asset_id":{"type":"string"},
+                    "source_path":{"type":"string"},
+                    "target_width":{"type":"integer","minimum":0},
+                    "target_height":{"type":"integer","minimum":0}
+                },
+                "required":["asset_id","source_path","target_width","target_height"]
+            }),
+            side_effect: SideEffect::LongJob,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let asset_id = args
+            .get("asset_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'asset_id'".to_string())?
+            .to_string();
+        let source_path = args
+            .get("source_path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'source_path'".to_string())?
+            .to_string();
+        let target_width = args
+            .get("target_width")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "Missing or invalid 'target_width'".to_string())?;
+        let target_height = args
+            .get("target_height")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "Missing or invalid 'target_height'".to_string())?;
+        let proxy = crate::asset_generate_proxy(
+            app.clone(),
+            asset_id,
+            source_path,
+            target_width as u32,
+            target_height as u32,
+        )?;
+        let proxy = serde_json::from_str::<Value>(&proxy).unwrap_or_else(|_| Value::String(proxy));
+        Ok(json!({ "proxy": proxy }))
+    }
+}
+
+pub struct VideoDecodeFrame;
+impl Action for VideoDecodeFrame {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "video_decode_frame",
+            description: "Decode a video frame for an asset.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "asset_id":{"type":"string"},
+                    "source_path":{"type":"string"},
+                    "requested_time":{"type":"number"},
+                    "width":{"type":"integer","minimum":0},
+                    "height":{"type":"integer","minimum":0}
+                },
+                "required":["asset_id","source_path","requested_time","width","height"]
+            }),
+            side_effect: SideEffect::ReadOnly,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, args: Value) -> ActionResult {
+        let asset_id = args
+            .get("asset_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'asset_id'".to_string())?
+            .to_string();
+        let source_path = args
+            .get("source_path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'source_path'".to_string())?
+            .to_string();
+        let requested_time = args
+            .get("requested_time")
+            .and_then(Value::as_f64)
+            .ok_or_else(|| "Missing or invalid 'requested_time'".to_string())?;
+        let width = args
+            .get("width")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "Missing or invalid 'width'".to_string())?;
+        let height = args
+            .get("height")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "Missing or invalid 'height'".to_string())?;
+        let frame =
+            crate::video_decode_frame(asset_id, source_path, requested_time, width as u32, height as u32)?;
+        let frame = serde_json::from_str::<Value>(&frame).unwrap_or_else(|_| Value::String(frame));
+        Ok(json!({ "frame": frame }))
+    }
+}
+
+pub struct RenderStart;
+impl Action for RenderStart {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "render_start",
+            description: "Start a render job.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "job_id":{"type":"string"},
+                    "project_json":{"type":"string"},
+                    "preset_json":{"type":"string"}
+                },
+                "required":["job_id","project_json","preset_json"]
+            }),
+            side_effect: SideEffect::LongJob,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let job_id = args
+            .get("job_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'job_id'".to_string())?
+            .to_string();
+        let project_json = args
+            .get("project_json")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'project_json'".to_string())?
+            .to_string();
+        let preset_json = args
+            .get("preset_json")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'preset_json'".to_string())?
+            .to_string();
+        let render = crate::render_start(app.clone(), job_id, project_json, preset_json)?;
+        let render = serde_json::from_str::<Value>(&render).unwrap_or_else(|_| Value::String(render));
+        Ok(json!({ "render": render }))
+    }
+}
+
+pub struct RenderGetStatus;
+impl Action for RenderGetStatus {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "render_get_status",
+            description: "Get the current render status.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "job_id":{"type":"string"}
+                },
+                "required":["job_id"]
+            }),
+            side_effect: SideEffect::ReadOnly,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let job_id = args
+            .get("job_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'job_id'".to_string())?
+            .to_string();
+        let status = crate::render_get_status(app.clone(), job_id)?;
+        let status = serde_json::from_str::<Value>(&status).unwrap_or_else(|_| Value::String(status));
+        Ok(json!({ "status": status }))
+    }
+}
+
+pub struct RenderCancel;
+impl Action for RenderCancel {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "render_cancel",
+            description: "Cancel a render job.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "job_id":{"type":"string"}
+                },
+                "required":["job_id"]
+            }),
+            side_effect: SideEffect::Mutating,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let job_id = args
+            .get("job_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'job_id'".to_string())?
+            .to_string();
+        crate::render_cancel(app.clone(), job_id)?;
+        Ok(json!({ "ok": true }))
+    }
+}
+
+pub struct RenderPause;
+impl Action for RenderPause {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "render_pause",
+            description: "Pause a render job.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "job_id":{"type":"string"}
+                },
+                "required":["job_id"]
+            }),
+            side_effect: SideEffect::Mutating,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let job_id = args
+            .get("job_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'job_id'".to_string())?
+            .to_string();
+        crate::render_pause(app.clone(), job_id)?;
+        Ok(json!({ "ok": true }))
+    }
+}
+
+pub struct RenderResume;
+impl Action for RenderResume {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "render_resume",
+            description: "Resume a render job.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "job_id":{"type":"string"}
+                },
+                "required":["job_id"]
+            }),
+            side_effect: SideEffect::Mutating,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let job_id = args
+            .get("job_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'job_id'".to_string())?
+            .to_string();
+        crate::render_resume(app.clone(), job_id)?;
+        Ok(json!({ "ok": true }))
+    }
+}
+
+pub struct StartExportJob;
+impl Action for StartExportJob {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "start_export_job",
+            description: "Start an export job.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "job_id":{"type":"string"},
+                    "project_json":{"type":"string"},
+                    "preset_json":{"type":"string"}
+                },
+                "required":["job_id","project_json","preset_json"]
+            }),
+            side_effect: SideEffect::LongJob,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let job_id = args
+            .get("job_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'job_id'".to_string())?
+            .to_string();
+        let project_json = args
+            .get("project_json")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'project_json'".to_string())?
+            .to_string();
+        let preset_json = args
+            .get("preset_json")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'preset_json'".to_string())?
+            .to_string();
+        let export_job = crate::start_export_job(app.clone(), job_id, project_json, preset_json)?;
+        let export_job = serde_json::from_str::<Value>(&export_job)
+            .unwrap_or_else(|_| Value::String(export_job));
+        Ok(json!({ "export_job": export_job }))
+    }
+}
+
+pub struct ComfyPing;
+impl Action for ComfyPing {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "comfy_ping",
+            description: "Ping a ComfyUI endpoint.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "endpoint":{"type":"string"}
+                },
+                "required":["endpoint"]
+            }),
+            side_effect: SideEffect::ReadOnly,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, args: Value) -> ActionResult {
+        let endpoint = args
+            .get("endpoint")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'endpoint'".to_string())?
+            .to_string();
+        Ok(json!({ "alive": crate::comfy_ping(endpoint) }))
+    }
+}
+
+pub struct ComfyGenerate;
+impl Action for ComfyGenerate {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "comfy_generate",
+            description: "Run a ComfyUI generation request.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "project_json":{"type":"string"},
+                    "node_id":{"type":"string"},
+                    "endpoint":{"type":"string"},
+                    "timeout_secs":{"type":"integer","minimum":0}
+                },
+                "required":["project_json","node_id","endpoint","timeout_secs"]
+            }),
+            side_effect: SideEffect::LongJob,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, args: Value) -> ActionResult {
+        let project_json = args
+            .get("project_json")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'project_json'".to_string())?
+            .to_string();
+        let node_id = args
+            .get("node_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'node_id'".to_string())?
+            .to_string();
+        let endpoint = args
+            .get("endpoint")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'endpoint'".to_string())?
+            .to_string();
+        let timeout_secs = args
+            .get("timeout_secs")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "Missing or invalid 'timeout_secs'".to_string())?;
+        let result = crate::comfy_generate(project_json, node_id, endpoint, timeout_secs)?;
+        let result = serde_json::from_str::<Value>(&result).unwrap_or_else(|_| Value::String(result));
+        Ok(json!({ "result": result }))
+    }
+}
+
+pub struct HealthPing;
+impl Action for HealthPing {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "health_ping",
+            description: "Return current app health information.",
+            params: json!({ "type":"object", "properties":{} }),
+            side_effect: SideEffect::ReadOnly,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, _args: Value) -> ActionResult {
+        let health = crate::health_ping(app.clone())?;
+        let health = serde_json::from_str::<Value>(&health).unwrap_or_else(|_| Value::String(health));
+        Ok(json!({ "health": health }))
+    }
+}
+
+pub struct LoadAppPreferences;
+impl Action for LoadAppPreferences {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "load_app_preferences",
+            description: "Load application preferences.",
+            params: json!({ "type":"object", "properties":{} }),
+            side_effect: SideEffect::ReadOnly,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, _args: Value) -> ActionResult {
+        let preferences = crate::load_app_preferences(app.clone())?;
+        let preferences = serde_json::from_str::<Value>(&preferences)
+            .unwrap_or_else(|_| Value::String(preferences));
+        Ok(json!({ "preferences": preferences }))
+    }
+}
+
+pub struct SaveAppPreferences;
+impl Action for SaveAppPreferences {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "save_app_preferences",
+            description: "Save application preferences.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "preferences_json":{"type":"string"}
+                },
+                "required":["preferences_json"]
+            }),
+            side_effect: SideEffect::Mutating,
+        })
+    }
+
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
+        let preferences_json = args
+            .get("preferences_json")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Missing or invalid 'preferences_json'".to_string())?
+            .to_string();
+        crate::save_app_preferences(app.clone(), preferences_json)?;
+        Ok(json!({ "ok": true }))
+    }
+}
+
+/// Register every wrapped command into the registry.
 pub fn register_all(reg: &mut crate::action::Registry) {
     reg.register(Arc::new(InspectAssetPath));
     reg.register(Arc::new(AssetProbe));
+    reg.register(Arc::new(LoadProjectState));
+    reg.register(Arc::new(OpenProjectAtPath));
+    reg.register(Arc::new(CreateProjectAtPath));
+    reg.register(Arc::new(SaveProjectState));
+    reg.register(Arc::new(SaveProjectStateAs));
+    reg.register(Arc::new(AutosaveProjectState));
+    reg.register(Arc::new(LoadRecentProjects));
+    reg.register(Arc::new(GetCurrentProjectPath));
+    reg.register(Arc::new(MarkProjectOpened));
+    reg.register(Arc::new(AssetGenerateWaveform));
+    reg.register(Arc::new(AssetGenerateThumbnail));
+    reg.register(Arc::new(AssetCopyIntoProject));
+    reg.register(Arc::new(AssetGenerateProxy));
+    reg.register(Arc::new(VideoDecodeFrame));
+    reg.register(Arc::new(RenderStart));
+    reg.register(Arc::new(RenderGetStatus));
+    reg.register(Arc::new(RenderCancel));
+    reg.register(Arc::new(RenderPause));
+    reg.register(Arc::new(RenderResume));
+    reg.register(Arc::new(StartExportJob));
+    reg.register(Arc::new(ComfyPing));
+    reg.register(Arc::new(ComfyGenerate));
+    reg.register(Arc::new(HealthPing));
+    reg.register(Arc::new(LoadAppPreferences));
+    reg.register(Arc::new(SaveAppPreferences));
 }
