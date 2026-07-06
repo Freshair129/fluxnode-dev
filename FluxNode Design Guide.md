@@ -35,14 +35,15 @@
 ## **Page 5: Tech Architecture (The Engine)**
 
 * **Headline:** High-Performance Stack  
-* **Frontend:** React \+ Tailwind CSS \+ React Flow  
+* **Frontend:** React \+ Tailwind CSS \+ custom Timeline / Workflow UI  
 * **Logic/State:** Zustand  
-* **The Core:** Rust (Engine) \+ Python (AI Pipeline)  
-* **Connectivity:** WebSockets (Real-time render updates)  
+* **The Core:** Rust (Tauri backend) \+ TypeScript domain/store logic  
+* **AI Integration:** Optional user-run ComfyUI via desktop-only commands  
+* **Connectivity:** Tauri IPC \+ HTTP polling / fetch-based health checks  
 * **Bridge:** Tauri (Desktop Native Experience)
 
 ## **Page 6: Roadmap**
 
-* **Phase 1: MVP** \- Core Timeline & View Switching.  
-* **Phase 2: Workflow** \- Node-based Canvas & Local ComfyUI integration.  
-* **Phase 3: Scale** \- Professional Sharing & 4K/60fps Rendering.
+* **Phase 1: Implemented** \- Core Timeline, View Switching, persistence, audio, export, validation, and onboarding.  
+* **Phase 2: Implemented in repo** \- Node-based canvas, local ComfyUI integration hooks, proof tooling, and workflow performance guardrails.  
+* **Phase 3: In progress** \- Cross-machine proof breadth for Section 11, plus further desktop-product polish.

@@ -2,16 +2,20 @@
 
 ## Purpose
 
-This document translates the current design-only repository into an implementation-ready foundation slice aligned with `MASTERPLAN.md`, the PRD, and the SRS.
+This document records the originally approved foundation slice that translated the early design-only repository into an implementation-ready architecture aligned with `MASTERPLAN.md`, the PRD, and the SRS.
 
 It is intentionally limited to the minimum architecture needed to start building FluxNode without locking the project into premature Phase 2 or Phase 3 decisions.
 
 ## Current Repo Truth
 
-- The repository has no runnable app scaffold.
-- There is no package manager config, TypeScript config, Tailwind config, or Tauri shell.
-- There is no project state implementation, persistence layer, or node/timeline engine.
-- `fluxnode_mockup.tsx` is a static proof of concept, not an integrated application.
+- Historical context when this spec was written:
+  - The repository had no runnable app scaffold.
+  - There was no package manager config, TypeScript config, Tailwind config, or Tauri shell.
+  - There was no project state implementation, persistence layer, or node/timeline engine.
+  - `fluxnode_mockup.tsx` was a static proof of concept, not an integrated application.
+- Current status:
+  - This foundation slice has since been implemented.
+  - For current repo-backed status, see `MASTERPLAN Completion Audit.md`.
 
 ## Complexity Classification
 
