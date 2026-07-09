@@ -19,6 +19,23 @@ const CATEGORY_LABELS: Record<ErrorCategory, string> = {
 
 const MAX_VISIBLE_TOASTS = 4
 
+// Categories that represent a stopped/blocked or potentially destructive
+// state get an assertive, role="alert" announcement. Everything else
+// (transient connectivity blips, offline asset states, etc.) is announced
+// politely so it doesn't interrupt whatever the screen reader is doing.
+const HIGH_SEVERITY_CATEGORIES = new Set<ErrorCategory>([
+  'gpu_oom',
+  'disk_full',
+  'memory_pressure',
+  'asset_corrupt',
+  'cloud_auth',
+  'render_failed',
+])
+
+function getToastSeverity(category: ErrorCategory): 'high' | 'normal' {
+  return HIGH_SEVERITY_CATEGORIES.has(category) ? 'high' : 'normal'
+}
+
 /**
  * Floating, accessible toast stack that surfaces recoverable `appErrors` from the
  * store. Each toast exposes the suggested recovery action (wired to
@@ -38,14 +55,17 @@ export function ErrorToasts() {
 
   return (
     <div
-      aria-live="assertive"
       aria-label="Error notifications"
       className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-3"
     >
-      {visible.map((error) => (
+      {visible.map((error) => {
+        const severity = getToastSeverity(error.category)
+
+        return (
         <article
           key={error.id}
-          role="alert"
+          role={severity === 'high' ? 'alert' : 'status'}
+          aria-live={severity === 'high' ? 'assertive' : 'polite'}
           className="pointer-events-auto overflow-hidden rounded-2xl border border-red-400/20 bg-[#1c1c1e]/95 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.45)] backdrop-blur-md"
         >
           <div className="flex items-start gap-3">
@@ -64,7 +84,7 @@ export function ErrorToasts() {
                 <button
                   type="button"
                   onClick={() => void performAppErrorAction(error.id)}
-                  className="mt-3 rounded-full bg-[#e0ff00] px-4 py-1.5 text-xs font-semibold text-black transition hover:brightness-95"
+                  className="mt-3 rounded-full bg-accent px-4 py-1.5 text-xs font-semibold text-black transition hover:brightness-95"
                 >
                   {error.actionLabel}
                 </button>
@@ -80,7 +100,8 @@ export function ErrorToasts() {
             </button>
           </div>
         </article>
-      ))}
+        )
+      })}
       {hiddenCount > 0 ? (
         <p className="pointer-events-none pr-2 text-right text-[11px] text-[#7f8792]">
           +{hiddenCount} more notification{hiddenCount === 1 ? '' : 's'} in the status panel

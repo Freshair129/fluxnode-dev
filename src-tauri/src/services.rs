@@ -15,14 +15,22 @@ use crate::media::backends::whisper::WhisperBackend;
 use crate::media::gpu::{BrainVram, GpuArbiter};
 use crate::media::MediaBroker;
 
-/// Default local tool-calling model for the in-app brain.
-pub const DEFAULT_BRAIN_MODEL: &str = "qwen3.5:4b";
+/// Default local tool-calling model for the in-app brain. `qwen3.5:4b` is not a real Ollama tag
+/// (Ollama's Qwen3 line is `qwen3:*`, no ".5"); overridable via `FLUXNODE_BRAIN_MODEL` for
+/// anyone pinned to a different local tag.
+pub const DEFAULT_BRAIN_MODEL: &str = "qwen3:4b";
 
 /// The shared brain instance (also implements `BrainVram`).
 pub fn brain() -> Arc<OllamaBrain> {
     static BRAIN: OnceLock<Arc<OllamaBrain>> = OnceLock::new();
     BRAIN
-        .get_or_init(|| Arc::new(OllamaBrain::local(DEFAULT_BRAIN_MODEL)))
+        .get_or_init(|| {
+            let model = std::env::var("FLUXNODE_BRAIN_MODEL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_BRAIN_MODEL.to_string());
+            Arc::new(OllamaBrain::local(model))
+        })
         .clone()
 }
 

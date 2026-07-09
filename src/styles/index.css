@@ -1,14 +1,49 @@
 @import "tailwindcss";
 
+/*
+ * FluxNode design tokens (see "FluxNode Design Guide.md").
+ * Tailwind v4 turns every `--color-*` custom property below into a real
+ * utility (e.g. `--color-accent` -> `bg-accent`, `text-accent/20`,
+ * `border-accent/45`, ...), so prefer these over new hardcoded hex values.
+ * Fonts declared here fall back to system UI fonts — see the note further
+ * down for why Inter/Geist are not currently self-hosted.
+ */
 @theme {
-  --font-display: "Inter", "Segoe UI", sans-serif;
-  --font-sans: "Geist", "Segoe UI", sans-serif;
+  --font-display: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Geist", "Segoe UI", system-ui, sans-serif;
+
+  /* Surfaces */
+  --color-bg: #0d0d0d;
+  --color-surface: #1c1c1e;
+  --color-surface-2: #17181b;
+  --color-surface-3: #111214;
+  --color-panel: #0d0e10;
+
+  /* Brand */
+  --color-accent: #e0ff00;
+  --color-accent-soft: #f5ffd5;
+  --color-cloud: #3b82f6;
+
+  /* Semantic */
+  --color-success: #34d399;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+
+  /* Text */
+  --color-text-primary: #ffffff;
+  /* Bumped from the previous #7f8691 — that shade fell at/below 4.5:1 AA
+     contrast at the 10px uppercase label size it's used at everywhere. */
+  --color-text-secondary: #a2abb6;
+
+  /* Borders */
+  --color-border-subtle: rgba(255, 255, 255, 0.08);
+  --color-border: rgba(255, 255, 255, 0.1);
 }
 
 :root {
   font-family: var(--font-sans);
-  color: #ffffff;
-  background: #0d0d0d;
+  color: var(--color-text-primary);
+  background: var(--color-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -42,18 +77,18 @@ textarea:focus-visible,
 select:focus-visible,
 [role="button"]:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid #e0ff00;
+  outline: 2px solid var(--color-accent);
   outline-offset: 3px;
 }
 
 [role="button"],
 [tabindex]:not([tabindex="-1"]) {
-  outline-color: #e0ff00;
+  outline-color: var(--color-accent);
 }
 
 ::selection {
   background: rgba(224, 255, 0, 0.28);
-  color: #ffffff;
+  color: var(--color-text-primary);
 }
 
 @keyframes fluxnode-invalid-edge-snapback {

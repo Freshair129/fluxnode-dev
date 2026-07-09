@@ -1,0 +1,94 @@
+name: Release
+
+# Triggered by pushing a tag like `v0.1.0`. Documents the intended cross-platform release
+# shape even though, as of this writing, only the Windows path has been built and verified:
+#
+# - `src-tauri/tauri.conf.json` currently only configures `bundle.targets: ["nsis", "msi"]`
+#   (Windows installers). macOS (.app/.dmg) and Linux (.deb/.AppImage/.rpm) bundle targets
+#   still need to be added there before the macos-latest/ubuntu-latest legs of this matrix
+#   will produce anything.
+# - `externalBin` ships `binaries/ffmpeg` + `binaries/ffprobe`, fetched today via
+#   `scripts/fetch-ffmpeg.ps1` (Windows-only, gitignored, not committed). A macOS/Linux
+#   equivalent (e.g. `scripts/fetch-ffmpeg.sh`) is still needed so those runners can populate
+#   `src-tauri/binaries/` before `tauri-action` bundles the app.
+# - Code signing is optional and off by default (see `SIGNING.md`). Populate the secrets
+#   referenced below to enable it; the workflow runs unsigned if they're unset.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ''
+          - platform: macos-latest
+            args: ''
+          - platform: ubuntu-latest
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Tauri Linux system dependencies
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            libssl-dev
+
+      - name: Install dependencies
+        run: npm ci
+
+      # NOTE: fetches the ffmpeg/ffprobe sidecars only on Windows today. macOS/Linux need a
+      # scripts/fetch-ffmpeg.sh (or similar) that populates src-tauri/binaries/ with the
+      # equivalent externalBin targets before `tauri-action` will produce a working bundle.
+      - name: Fetch ffmpeg sidecars (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: ./scripts/fetch-ffmpeg.ps1
+
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Windows code signing (see SIGNING.md) — unset means the build stays unsigned.
+          # TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD are for the Tauri
+          # updater signature, not Authenticode; wire real Authenticode signing (certificate
+          # thumbprint or Azure Trusted Signing) directly in tauri.conf.json per SIGNING.md
+          # once a certificate is provisioned.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS notarization — no-ops unless these secrets are populated.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'FluxNode ${{ github.ref_name }}'
+          releaseBody: 'See CHANGELOG.md for details.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

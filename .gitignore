@@ -37,3 +37,7 @@ src-tauri/binaries/
 .agents/
 .playwright-cli/
 .claude/
+
+# Generated status/report HTML (regenerate from STATUS.md / MASTERPLAN docs, do not commit)
+MASTERPLAN Remaining Work Report.html
+MASTERPLAN Remaining Work Checklist.html

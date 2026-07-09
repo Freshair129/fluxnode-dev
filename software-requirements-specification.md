@@ -73,4 +73,4 @@ This SRS remains the system-target document. The current repository implementati
 - Vitest is configured with current test coverage for workflow node-definition invariants and audio scheduling logic.
 - The AI Copilot layer (§3.5) is core-implemented: action registry, in-app tool-calling agent (local Ollama default), MCP (stdio) + headless CLI (`--agent`, `--mcp`), media broker, write-gating (`allow_writes`), and GPU resource arbitration are in code. Pending: the voice-input UI surface and an in-process llama.cpp backend.
 - The main unfinished area is not feature absence, but Section 11 proof breadth across multiple OS targets and hardware tiers.
-- For the latest repo-backed status, see `MASTERPLAN Completion Audit.md` and `MASTERPLAN Performance Evidence Audit.md`.
+- For the latest repo-backed status, see `STATUS.md`, `masterplan-completion-audit.md`, and `masterplan-performance-evidence-audit.md`.

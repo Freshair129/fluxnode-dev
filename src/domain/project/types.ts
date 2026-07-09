@@ -1,3 +1,5 @@
+import type { Patch } from 'immer'
+
 export interface FluxNodeProject {
   version: string
   meta: ProjectMeta
@@ -541,7 +543,10 @@ export interface WalEntry {
   timestamp: string
   type: string
   label: string
+  /** Full project snapshot. Only present on periodic "base" entries — most entries carry `patches` instead. */
   projectSnapshot?: FluxNodeProject
+  /** Immer forward patches that replay the change represented by this entry against the prior WAL state. */
+  patches?: Patch[]
 }
 
 export interface OutputState {
@@ -661,6 +666,7 @@ export interface AppError {
     | 'replace_media'
     | 'remove_selected_clip'
     | 'inspect_node'
+    | 'save_project'
   contextId?: string | null
   detail?: string | null
   resetAt?: string | null
@@ -709,6 +715,7 @@ export interface AppVersionInfo {
 export interface AppUpdateManifest {
   version: string
   downloadUrl: string | null
+  sha256: string | null
   notes: string | null
   publishedAt: string | null
   channel: string | null
@@ -720,6 +727,7 @@ export interface AppUpdateState {
   versionInfo: AppVersionInfo
   latestVersion: string | null
   downloadUrl: string | null
+  sha256: string | null
   downloadedFilePath: string | null
   notes: string | null
   publishedAt: string | null

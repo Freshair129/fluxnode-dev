@@ -1,5 +1,10 @@
 # MASTERPLAN Performance Evidence Audit
 
+> **Author self-assessment, not externally verified.** This document was written by the same
+> team/agent that implemented the work it grades. Treat its verdicts as a starting point for
+> review, not as independent QA sign-off. See `STATUS.md` for the living, cross-referenced
+> status summary.
+
 ## Purpose
 
 This document narrows `Section 11 Performance & System Requirements` into two buckets:

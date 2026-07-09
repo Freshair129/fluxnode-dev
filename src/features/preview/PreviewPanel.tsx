@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Film, HardDrive, Link2, PlayCircle, Sparkles } from 'lucide-react'
 import { useProjectStore } from '../../store/project-store'
+import { StatCard as MetricCard } from '../../components/StatCard'
 
 const PREVIEW_WIDTH = 960
 const PREVIEW_HEIGHT = 540
@@ -144,14 +145,14 @@ export function PreviewPanel() {
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] uppercase tracking-[0.28em] text-[#7f8691]">Preview Monitor</p>
+          <p className="text-[11px] uppercase tracking-[0.28em] text-text-secondary">Preview Monitor</p>
           <h2 className="mt-2 font-display text-2xl font-semibold text-white">{previewTitle}</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[#98a1ad]">{previewSubtitle}</p>
         </div>
         <div
           aria-live="polite"
           aria-label={`Playback ${playbackState} at ${playhead.toFixed(2)} seconds`}
-          className="rounded-full border border-[#e0ff00]/20 bg-[#e0ff00]/10 px-4 py-2 text-xs uppercase tracking-[0.22em] text-[#f5ffd5]"
+          className="rounded-full border border-accent/20 bg-accent/10 px-4 py-2 text-xs uppercase tracking-[0.22em] text-[#f5ffd5]"
         >
           {playbackState} at {playhead.toFixed(2)}s
         </div>
@@ -162,7 +163,7 @@ export function PreviewPanel() {
           <div aria-hidden="true" className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:42px_42px] opacity-20" />
           <div className="relative flex h-full flex-col justify-between">
             <div className="flex items-center gap-2 text-xs uppercase tracking-[0.22em] text-[#bfc7d2]">
-              <PlayCircle size={15} className="text-[#e0ff00]" aria-hidden="true" />
+              <PlayCircle size={15} className="text-accent" aria-hidden="true" />
               Decoded preview frame
             </div>
 
@@ -172,7 +173,7 @@ export function PreviewPanel() {
                   <img
                     src={previewFrame.dataUrl}
                     alt={`${previewTitle} preview`}
-                    className="h-full w-full object-cover"
+                    className="h-full w-full object-contain bg-black"
                   />
                 ) : (
                   <div className="flex h-full flex-col justify-between p-4">
@@ -181,7 +182,7 @@ export function PreviewPanel() {
                       <span>{project.settings.frameRate} fps</span>
                     </div>
                     <div className="text-center">
-                      <Film size={34} className="mx-auto text-[#e0ff00]" aria-hidden="true" />
+                      <Film size={34} className="mx-auto text-accent" aria-hidden="true" />
                       <p className="mt-4 text-lg font-semibold text-white">{previewTitle}</p>
                       <p className="mt-2 text-sm leading-6 text-[#aab3bf]">
                         {effectivePreviewSource ?? routedWorkflowNode?.id ?? 'No preview source selected yet.'}
@@ -259,7 +260,7 @@ export function PreviewPanel() {
             <button
               type="button"
               onClick={() => void generateProxyForSelectedClip()}
-              className="rounded-[1.2rem] border border-[#e0ff00]/20 bg-[#e0ff00]/10 px-4 py-3 text-left text-sm text-[#f5ffd5]"
+              className="rounded-[1.2rem] border border-accent/20 bg-accent/10 px-4 py-3 text-left text-sm text-[#f5ffd5]"
             >
               Generate proxy for this clip
             </button>
@@ -288,25 +289,3 @@ export function PreviewPanel() {
   )
 }
 
-function MetricCard({
-  icon: Icon,
-  label,
-  value,
-  note,
-}: {
-  icon: React.ComponentType<{ size?: number; className?: string }>
-  label: string
-  value: string
-  note: string
-}) {
-  return (
-    <div className="rounded-[1.4rem] border border-white/8 bg-[#17181b] p-4">
-      <div className="flex items-center gap-3">
-        <Icon size={18} className="text-[#e0ff00]" aria-hidden="true" />
-        <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">{label}</p>
-      </div>
-      <p className="mt-3 text-sm font-medium text-white">{value}</p>
-      <p className="mt-2 break-all text-xs leading-5 text-[#9ca3af]">{note}</p>
-    </div>
-  )
-}

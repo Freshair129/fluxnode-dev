@@ -30,14 +30,14 @@ impl Action for InspectAssetPath {
         })
     }
 
-    fn run(&self, _app: &AppHandle, args: Value) -> ActionResult {
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
         let path = args
             .get("path")
             .and_then(Value::as_str)
             .ok_or_else(|| "Missing or invalid 'path'".to_string())?
             .to_string();
 
-        let inspection = crate::inspect_asset_path(path)?;
+        let inspection = crate::inspect_asset_path(app.clone(), path)?;
         let inspection =
             serde_json::from_str::<Value>(&inspection).unwrap_or_else(|_| Value::String(inspection));
 
@@ -62,14 +62,14 @@ impl Action for AssetProbe {
         })
     }
 
-    fn run(&self, _app: &AppHandle, args: Value) -> ActionResult {
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
         let path = args
             .get("path")
             .and_then(Value::as_str)
             .ok_or_else(|| "Missing or invalid 'path'".to_string())?
             .to_string();
 
-        let probe = crate::asset_probe(path)?;
+        let probe = crate::asset_probe_blocking(app, path)?;
         let probe = serde_json::from_str::<Value>(&probe).unwrap_or_else(|_| Value::String(probe));
 
         Ok(json!({ "probe": probe }))
@@ -354,7 +354,7 @@ impl Action for AssetGenerateWaveform {
             .and_then(Value::as_u64)
             .ok_or_else(|| "Missing or invalid 'bucket_count'".to_string())?;
         let waveform =
-            crate::asset_generate_waveform(app.clone(), asset_id, source_path, bucket_count as usize)?;
+            crate::asset_generate_waveform_blocking(app, asset_id, source_path, bucket_count as usize)?;
         let waveform = serde_json::from_str::<Value>(&waveform)
             .unwrap_or_else(|_| Value::String(waveform));
         Ok(json!({ "waveform": waveform }))
@@ -396,7 +396,7 @@ impl Action for AssetGenerateThumbnail {
             .get("time")
             .and_then(Value::as_f64)
             .ok_or_else(|| "Missing or invalid 'time'".to_string())?;
-        let thumbnail = crate::asset_generate_thumbnail(app.clone(), asset_id, source_path, time)?;
+        let thumbnail = crate::asset_generate_thumbnail_blocking(app, asset_id, source_path, time)?;
         let thumbnail = serde_json::from_str::<Value>(&thumbnail)
             .unwrap_or_else(|_| Value::String(thumbnail));
         Ok(json!({ "thumbnail": thumbnail }))
@@ -478,8 +478,8 @@ impl Action for AssetGenerateProxy {
             .get("target_height")
             .and_then(Value::as_u64)
             .ok_or_else(|| "Missing or invalid 'target_height'".to_string())?;
-        let proxy = crate::asset_generate_proxy(
-            app.clone(),
+        let proxy = crate::asset_generate_proxy_blocking(
+            app,
             asset_id,
             source_path,
             target_width as u32,
@@ -535,8 +535,13 @@ impl Action for VideoDecodeFrame {
             .get("height")
             .and_then(Value::as_u64)
             .ok_or_else(|| "Missing or invalid 'height'".to_string())?;
-        let frame =
-            crate::video_decode_frame(asset_id, source_path, requested_time, width as u32, height as u32)?;
+        let frame = crate::video_decode_frame_blocking(
+            asset_id,
+            source_path,
+            requested_time,
+            width as u32,
+            height as u32,
+        )?;
         let frame = serde_json::from_str::<Value>(&frame).unwrap_or_else(|_| Value::String(frame));
         Ok(json!({ "frame": frame }))
     }
@@ -762,13 +767,13 @@ impl Action for ComfyPing {
         })
     }
 
-    fn run(&self, _app: &AppHandle, args: Value) -> ActionResult {
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
         let endpoint = args
             .get("endpoint")
             .and_then(Value::as_str)
             .ok_or_else(|| "Missing or invalid 'endpoint'".to_string())?
             .to_string();
-        Ok(json!({ "alive": crate::comfy_ping(endpoint) }))
+        Ok(json!({ "alive": crate::comfy_ping(app.clone(), endpoint) }))
     }
 }
 
@@ -793,7 +798,7 @@ impl Action for ComfyGenerate {
         })
     }
 
-    fn run(&self, _app: &AppHandle, args: Value) -> ActionResult {
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
         let project_json = args
             .get("project_json")
             .and_then(Value::as_str)
@@ -813,7 +818,9 @@ impl Action for ComfyGenerate {
             .get("timeout_secs")
             .and_then(Value::as_u64)
             .ok_or_else(|| "Missing or invalid 'timeout_secs'".to_string())?;
-        let result = crate::comfy_generate(project_json, node_id, endpoint, timeout_secs)?;
+        let allow_remote = crate::read_allow_remote_comfy(app);
+        let result =
+            crate::comfy_generate_blocking(project_json, node_id, endpoint, timeout_secs, allow_remote)?;
         let result = serde_json::from_str::<Value>(&result).unwrap_or_else(|_| Value::String(result));
         Ok(json!({ "result": result }))
     }
@@ -1047,9 +1054,19 @@ pub fn registry() -> &'static crate::action::Registry {
 }
 
 /// Invoke an action by name — the universal entry point exposed to the frontend / agent.
+///
+/// `allow_writes` defaults to `false` (read-only) unless the caller explicitly passes `true` —
+/// `Registry::invoke` is the single write gate (see `action::Registry::invoke`), so this command
+/// can no longer be used to bypass confirmation for `Mutating`/`LongJob` actions the way it could
+/// before the gate lived only in `brain::run_agent`.
 #[tauri::command]
-pub fn action_invoke(app: AppHandle, name: String, args: Value) -> Result<Value, String> {
-    registry().invoke(&app, &name, args)
+pub fn action_invoke(
+    app: AppHandle,
+    name: String,
+    args: Value,
+    allow_writes: Option<bool>,
+) -> Result<Value, String> {
+    registry().invoke(&app, &name, args, allow_writes.unwrap_or(false))
 }
 
 /// List every registered action's metadata (name, description, JSON-Schema params, side effect)

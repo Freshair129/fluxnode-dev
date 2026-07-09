@@ -1,5 +1,10 @@
 # MASTERPLAN Completion Audit
 
+> **Author self-assessment, not externally verified.** This document was written by the same
+> team/agent that implemented the work it grades. Treat its "Implemented" verdicts as a
+> starting point for review, not as independent QA sign-off. See `STATUS.md` for the
+> living, cross-referenced status summary.
+
 ## Purpose
 
 This document records the current completion status of `MASTERPLAN.md` against the actual repository state.
@@ -134,7 +139,7 @@ Status meanings:
   - `src/features/inspector/DetachedInspectorPanel.tsx`
   - `src/services/ipc/runtime-health.ts`
   - `src-tauri/src/lib.rs`
-  - `MASTERPLAN Performance Evidence Audit.md`
+  - `masterplan-performance-evidence-audit.md`
 - Notes:
   - memory soft/hard limits, cache eviction, GPU guarded mode, VRAM thresholds, preview downscaling, timeline preview prefetch buffering, node preview caps, dense-edge Canvas fallback, runtime health telemetry, a requirement-level system audit panel that now covers OS, CPU, RAM, GPU, disk, and display floors with version-aware OS checks for the explicit desktop targets, portable proof JSON export, persisted proof history, proof import from JSON, proof import for the combined proof-history bundle, downloadable proof-history bundles with latest summary and compatibility matrix, downloadable Section 11 coverage map export, next missing capture target hints, archived coverage-map metadata in project state, saved proof-history bundles that now include coverage-map history, self-describing Section 11 bundles with version/kind/manifest metadata, auto-persisted proof snapshots from Section 11 runs, a latest-proof summary for quick inspection, explicit intended and runtime target-profile metadata on saved proof records, an explicit target-profile selector for capture tagging, a hardware-tier matrix for entry/balanced/high evidence tracking, a combined OS + hardware coverage grid, an in-app proof suite for repeated sampling, 16ms node-data batching, lazy-loaded workspace chunks, runtime view-switch telemetry, a built-in 120-node large-canvas benchmark scene, benchmark-safe unlinking of stale timeline/workflow references, workflow fit-to-view measurement hooks, benchmark pan/zoom interaction proof hooks, a dedicated 4K 60 export preset path, and browser-verified end-to-end proof flows for both the Section 11 suite and 4K/60 render path all have direct evidence
 - Remaining verified gaps:
@@ -179,12 +184,12 @@ Status meanings:
 
 The previously approved remaining slices have now been implemented:
 
-1. `Phase 1 Render Resilience Implementation Spec.md`
+1. `phase-1-render-resilience-implementation-spec.md`
    - render queue auto-retry/backoff
    - GPU OOM render fallback
    - queue-visible retry state
 
-2. `Phase 1 Audio Scrubbing and Validation Feedback Spec.md`
+2. `phase-1-audio-scrubbing-and-validation-feedback-spec.md`
    - slow/fast/shuttle scrub behavior
    - invalid connection tooltip/shake feedback
 

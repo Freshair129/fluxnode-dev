@@ -69,10 +69,81 @@ impl Registry {
     }
 
     /// The universal entry point for agent / MCP / CLI: invoke an action by name.
-    pub fn invoke(&self, app: &AppHandle, name: &str, args: Value) -> ActionResult {
+    ///
+    /// `allow_writes` is the single write gate every caller goes through — regardless of
+    /// whether the call came from the in-app agent loop, `action_invoke` (frontend/agent), or the
+    /// MCP server. When `false`, `Mutating` and `LongJob` actions are refused before `run` is
+    /// ever called; only `ReadOnly` actions execute. This mirrors (and now backs) the gating that
+    /// used to live only in `brain::run_agent`, which let `action_invoke` and the MCP server
+    /// bypass it entirely.
+    pub fn invoke(&self, app: &AppHandle, name: &str, args: Value, allow_writes: bool) -> ActionResult {
         let action = self
             .get(name)
             .ok_or_else(|| format!("unknown action: {name}"))?;
+
+        if !allow_writes && matches!(action.def().side_effect, SideEffect::Mutating | SideEffect::LongJob) {
+            return Err(format!(
+                "'{name}' is a write/long-running action and requires user confirmation; not executed"
+            ));
+        }
+
+        Self::validate_args(action.def(), &args)?;
         action.run(app, args)
+    }
+
+    /// Lightweight JSON-Schema-ish validation: for each property listed in `required`, checks the
+    /// arg is present and (when the schema declares a `type`) roughly type-matches. This is not a
+    /// full JSON Schema validator — it exists to reject obviously-malformed calls (missing
+    /// required params, a string where a number was declared) before an action's `run` starts
+    /// doing real I/O, without pulling in a schema-validation dependency.
+    fn validate_args(def: &ActionDef, args: &Value) -> Result<(), String> {
+        let Some(schema) = def.params.as_object() else {
+            return Ok(());
+        };
+        let properties = schema.get("properties").and_then(Value::as_object);
+        let required = schema.get("required").and_then(Value::as_array);
+
+        if let Some(required) = required {
+            for name in required.iter().filter_map(Value::as_str) {
+                if args.get(name).is_none() {
+                    return Err(format!("'{}' is missing required parameter '{name}'", def.name));
+                }
+            }
+        }
+
+        if let Some(properties) = properties {
+            for (key, prop_schema) in properties {
+                let Some(value) = args.get(key) else {
+                    continue;
+                };
+                let Some(expected_type) = prop_schema.get("type").and_then(Value::as_str) else {
+                    continue;
+                };
+                if !json_type_matches(expected_type, value) {
+                    return Err(format!(
+                        "'{}' parameter '{key}' should be of type '{expected_type}'",
+                        def.name
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Whether `value`'s JSON kind matches a JSON-Schema `type` keyword. `integer` accepts any whole
+/// `number` (JSON has no separate integer type). Unknown `expected` strings are treated as a
+/// pass (this is a lightweight check, not a schema validator).
+fn json_type_matches(expected: &str, value: &Value) -> bool {
+    match expected {
+        "string" => value.is_string(),
+        "number" => value.is_number(),
+        "integer" => value.as_f64().map(|n| n.fract() == 0.0).unwrap_or(false),
+        "boolean" => value.is_boolean(),
+        "object" => value.is_object(),
+        "array" => value.is_array(),
+        "null" => value.is_null(),
+        _ => true,
     }
 }

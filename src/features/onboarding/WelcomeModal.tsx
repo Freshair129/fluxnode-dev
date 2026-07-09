@@ -1,4 +1,4 @@
-import { FolderOpen, Layers3, WandSparkles, X } from 'lucide-react'
+import { FolderOpen, Layers3, Link2, WandSparkles, X } from 'lucide-react'
 import { useEffect } from 'react'
 import { pickProjectDirectory } from '../../services/ipc/file-dialog'
 import type { ProjectTemplateId } from '../../domain/project/defaults'
@@ -71,7 +71,7 @@ export function WelcomeModal() {
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.35em] text-[#e0ff00]">Welcome to FluxNode</p>
+            <p className="text-[11px] uppercase tracking-[0.35em] text-accent">Welcome to FluxNode</p>
             <h2 id="welcome-modal-title" className="mt-2 font-display text-3xl font-semibold tracking-tight text-white">
               Timeline speed, workflow depth, one shared project model.
             </h2>
@@ -92,7 +92,7 @@ export function WelcomeModal() {
         <div className="mt-6 rounded-[1.5rem] border border-white/10 bg-black/20 p-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="max-w-2xl">
-              <p className="text-[11px] uppercase tracking-[0.28em] text-[#7f8691]">Quick Setup</p>
+              <p className="text-[11px] uppercase tracking-[0.28em] text-text-secondary">Quick Setup</p>
               <p className="mt-3 text-sm leading-6 text-[#9ca3af]">
                 Choose where FluxNode should start its project pickers, then check whether local compute can use the desktop runtime.
               </p>
@@ -104,7 +104,7 @@ export function WelcomeModal() {
               <button
                 type="button"
                 onClick={() => void handleChooseDefaultDirectory()}
-                className="rounded-full bg-[#e0ff00] px-4 py-2 text-sm font-semibold text-black transition hover:brightness-95"
+                className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-black transition hover:brightness-95"
               >
                 Choose Default Directory
               </button>
@@ -112,12 +112,12 @@ export function WelcomeModal() {
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <div className="rounded-[1.1rem] border border-white/8 bg-white/[0.03] px-4 py-3">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">Desktop Runtime</p>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">Desktop Runtime</p>
               <p className="mt-2 text-sm text-white">{runtimeHealth.backend}</p>
               <p className="mt-2 text-xs text-[#9ca3af]">Health {runtimeHealth.status}</p>
             </div>
             <div className="rounded-[1.1rem] border border-white/8 bg-white/[0.03] px-4 py-3">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">Local Compute Guide</p>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">Local Compute Guide</p>
               <div aria-live="polite" className={`mt-2 rounded-[0.9rem] border px-3 py-2 text-xs ${localComputeTone}`}>
                 {localComputeReady ? 'ComfyUI-ready path detected for local workflows.' : 'ComfyUI is not ready yet. Local compute needs setup or recovery.'}
               </div>
@@ -144,6 +144,32 @@ export function WelcomeModal() {
           </div>
         </div>
 
+        <div className="mt-6 rounded-[1.5rem] border border-accent/20 bg-accent/5 p-5">
+          <p className="text-[11px] uppercase tracking-[0.28em] text-accent">How FluxNode Fits Together</p>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-[#d7dce2]">
+            FluxNode is two connected views of one project, not two separate apps.
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="rounded-[1.1rem] border border-white/8 bg-black/20 px-4 py-3">
+              <p className="text-sm font-semibold text-white">Timeline</p>
+              <p className="mt-2 text-sm leading-6 text-[#9ca3af]">
+                Arrange clips in time — cut, trim, and sequence video, audio, and image tracks like a standard editor.
+              </p>
+            </div>
+            <div className="rounded-[1.1rem] border border-white/8 bg-black/20 px-4 py-3">
+              <p className="text-sm font-semibold text-white">Workflow</p>
+              <p className="mt-2 text-sm leading-6 text-[#9ca3af]">
+                A node pipeline for AI and VFX — wire media, shaders, and AI generation nodes into an output.
+              </p>
+            </div>
+          </div>
+          <p className="mt-4 inline-flex items-center gap-2 text-xs leading-5 text-[#9ca3af]">
+            <Link2 size={14} className="shrink-0 text-accent" aria-hidden="true" />
+            A clip and its node stay linked — edit either side and "Show in Workflow" / "Show in Timeline" jumps you
+            straight to its counterpart.
+          </p>
+        </div>
+
         <div className="mt-6 grid gap-4 md:grid-cols-3">
           {templates.map((template) => {
             const Icon = template.icon
@@ -153,13 +179,13 @@ export function WelcomeModal() {
                 key={template.name}
                 className="rounded-[1.5rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5"
               >
-                <Icon size={20} className="text-[#e0ff00]" />
+                <Icon size={20} className="text-accent" />
                 <h3 className="mt-4 text-lg font-semibold text-white">{template.name}</h3>
                 <p className="mt-2 text-sm leading-6 text-[#9ca3af]">{template.description}</p>
                 <button
                   type="button"
                   onClick={() => void applyTemplate(template.id)}
-                  className="mt-5 rounded-full bg-[#e0ff00] px-4 py-2 text-sm font-semibold text-black transition hover:brightness-95"
+                  className="mt-5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-black transition hover:brightness-95"
                 >
                   Start Template
                 </button>
@@ -170,14 +196,14 @@ export function WelcomeModal() {
 
         {recentProjects.length > 0 ? (
           <div className="mt-6 rounded-[1.5rem] border border-white/10 bg-black/20 p-5">
-            <p className="text-[11px] uppercase tracking-[0.28em] text-[#7f8691]">Recent Projects</p>
+            <p className="text-[11px] uppercase tracking-[0.28em] text-text-secondary">Recent Projects</p>
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               {recentProjects.slice(0, 4).map((project) => (
                 <button
                   key={project.path}
                   type="button"
                   onClick={() => void openProjectFromPath(project.path)}
-                  className="rounded-[1.1rem] border border-white/8 bg-white/[0.03] px-4 py-3 text-left transition hover:border-[#e0ff00]/25"
+                  className="rounded-[1.1rem] border border-white/8 bg-white/[0.03] px-4 py-3 text-left transition hover:border-accent/25"
                 >
                   <div className="flex gap-3">
                     <div className="flex h-14 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/8 bg-[#111214]">
@@ -188,13 +214,13 @@ export function WelcomeModal() {
                           className="h-full w-full object-cover"
                         />
                       ) : (
-                        <span className="text-[10px] uppercase tracking-[0.2em] text-[#7f8691]">No Thumb</span>
+                        <span className="text-[10px] uppercase tracking-[0.2em] text-text-secondary">No Thumb</span>
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-white">{project.name}</p>
                       <p className="mt-1 text-xs text-[#9ca3af]">{new Date(project.lastOpened).toLocaleString()}</p>
-                      <p className="mt-2 break-all text-[11px] leading-5 text-[#7f8691]">{project.path}</p>
+                      <p className="mt-2 break-all text-[11px] leading-5 text-text-secondary">{project.path}</p>
                     </div>
                   </div>
                 </button>
@@ -207,11 +233,11 @@ export function WelcomeModal() {
           <button
             type="button"
             onClick={dismissWelcome}
-            className="rounded-full bg-[#e0ff00] px-5 py-3 text-sm font-semibold text-black transition hover:brightness-95"
+            className="rounded-full bg-accent px-5 py-3 text-sm font-semibold text-black transition hover:brightness-95"
           >
             Continue Current Project
           </button>
-          <span className="text-xs text-[#7f8691]">Template selection now creates ready-to-edit project shapes backed by the shared FluxNode store.</span>
+          <span className="text-xs text-text-secondary">Template selection now creates ready-to-edit project shapes backed by the shared FluxNode store.</span>
         </div>
       </section>
     </div>

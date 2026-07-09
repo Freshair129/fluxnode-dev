@@ -76,6 +76,7 @@ An agent-native layer sits on top of the commands above (see `docs/AI Copilot an
 
 - Core feature slices from `MASTERPLAN.md` are implemented across timeline editing, workflow editing, audio, export, resilience, shortcuts, onboarding, workspace sharing, and timeline-workflow sync.
 - The main remaining repo-level gap is Section 11 proof breadth across more OS targets and hardware tiers, not missing product features.
+- See `STATUS.md` for the living, honest summary of implemented vs. pending across the whole repo (pulls from `HANDOFF.md` and the `masterplan-*` audit docs).
 
 ## Conventions
 

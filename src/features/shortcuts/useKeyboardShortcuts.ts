@@ -12,7 +12,8 @@ import {
 } from '../../services/shortcuts/shortcut-config'
 import { useProjectStore } from '../../store/project-store'
 
-export function useKeyboardShortcuts() {
+export function useKeyboardShortcuts(options?: { onOpenShortcutsHelp?: () => void }) {
+  const { onOpenShortcutsHelp } = options ?? {}
   const activeView = useProjectStore((state) => state.ui.activeView)
   const keybindings = useProjectStore((state) => state.preferences.keybindings)
   const setActiveView = useProjectStore((state) => state.setActiveView)
@@ -67,9 +68,26 @@ export function useKeyboardShortcuts() {
         return
       }
 
+      // A bare Tab (no modifiers) must always be left to the browser for native
+      // focus traversal (WCAG 2.1.1). No command may ever bind to it, no matter
+      // what a future keybinding remap does — this guard is intentionally ahead
+      // of the generic `matches()` dispatch below.
+      if (event.key === 'Tab' && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
+        return
+      }
+
       if (matches('global.toggleView', 'global', event)) {
         event.preventDefault()
         setActiveView(activeView === 'timeline' ? 'workflow' : 'timeline')
+        return
+      }
+
+      // F1 is a conventional "show help" key on desktop apps; it isn't part
+      // of the rebindable keybindings table since it always maps to the same
+      // command, unlike '?' which goes through the normal binding lookup.
+      if (event.key === 'F1' || matches('global.openShortcutsHelp', 'global', event)) {
+        event.preventDefault()
+        onOpenShortcutsHelp?.()
         return
       }
 
@@ -369,6 +387,7 @@ export function useKeyboardShortcuts() {
     keybindings,
     openProjectFromPath,
     importAssetFromPath,
+    onOpenShortcutsHelp,
     openNodePicker,
     openSettings,
     pausePlayback,

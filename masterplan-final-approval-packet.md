@@ -1,12 +1,16 @@
 # MASTERPLAN Final Approval Packet
 
+> **Author self-assessment, not externally verified.** "Approval" here means the author/agent
+> considered the scope complete, not that an independent reviewer signed off. See `STATUS.md`
+> for the living, cross-referenced status summary.
+
 ## Purpose
 
 This document records the final approved implementation slices that were executed to close the biggest remaining gaps in `MASTERPLAN.md`.
 
 ## Current Completion Summary
 
-According to `MASTERPLAN Completion Audit.md`:
+According to `masterplan-completion-audit.md`:
 
 - Strongly implemented:
   - `Section 1 Data Model & Schema`
@@ -30,7 +34,7 @@ According to `MASTERPLAN Completion Audit.md`:
 
 Source doc:
 
-- `Phase 1 Render Resilience Implementation Spec.md`
+- `phase-1-render-resilience-implementation-spec.md`
 
 Implemented for:
 
@@ -52,7 +56,7 @@ Risk:
 
 Source doc:
 
-- `Phase 1 Audio Scrubbing and Validation Feedback Spec.md`
+- `phase-1-audio-scrubbing-and-validation-feedback-spec.md`
 
 Implemented for:
 

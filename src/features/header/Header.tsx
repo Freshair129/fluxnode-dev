@@ -1,10 +1,12 @@
-import { Cloud, Cpu, FolderOpen, Redo2, Save, SaveAll, Settings2, Sparkles, Undo2, Users, WifiOff } from 'lucide-react'
+import { Cloud, Cpu, FolderOpen, Redo2, Save, SaveAll, Settings2, Sparkles, Undo2, WifiOff } from 'lucide-react'
 import {
   createProjectWithPicker,
   openProjectWithPicker,
   saveProjectAsWithPicker,
 } from '../../services/project-file-actions'
 import { useProjectStore } from '../../store/project-store'
+import { IconButton } from '../../components/IconButton'
+import { Menu, MenuItem } from '../../components/Menu'
 
 export function Header() {
   const projectName = useProjectStore((state) => state.project.meta.name)
@@ -61,7 +63,7 @@ export function Header() {
     >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-4">
-          <div aria-hidden="true" className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(145deg,#e0ff00,#7cd100)] text-lg font-black text-black shadow-[0_0_36px_rgba(224,255,0,0.35)]">
+          <div aria-hidden="true" className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(145deg,var(--color-accent),#7cd100)] text-lg font-black text-black shadow-[0_0_36px_rgba(224,255,0,0.35)]">
             F
           </div>
           <div>
@@ -70,7 +72,7 @@ export function Header() {
               <h1 className="font-display text-lg font-semibold tracking-tight text-white md:text-xl">
                 {projectName}
               </h1>
-              <span className="rounded-full border border-[#e0ff00]/20 bg-[#e0ff00]/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.25em] text-[#e0ff00]">
+              <span className="rounded-full border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.25em] text-accent">
                 phase 1
               </span>
             </div>
@@ -90,7 +92,7 @@ export function Header() {
             aria-label={`Switch compute mode. Current mode ${computeMode}.`}
             className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-[#1a1a1b]/90 px-4 py-2 text-xs font-medium text-white transition hover:border-[#3b82f6]/50 disabled:cursor-not-allowed disabled:opacity-45"
           >
-            {computeMode === 'local' ? <Cpu size={14} className="text-[#e0ff00]" aria-hidden="true" /> : <Cloud size={14} className="text-[#3b82f6]" aria-hidden="true" />}
+            {computeMode === 'local' ? <Cpu size={14} className="text-accent" aria-hidden="true" /> : <Cloud size={14} className="text-[#3b82f6]" aria-hidden="true" />}
             {computeMode === 'local' ? 'Local Compute' : 'Cloud Compute'}
           </button>
           <button
@@ -100,7 +102,7 @@ export function Header() {
             aria-label={`Toggle proxy mode. Proxy mode is ${proxyEnabled ? 'on' : 'off'}.`}
             className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-medium transition ${
               proxyEnabled
-                ? 'border-[#e0ff00]/25 bg-[#e0ff00]/10 text-[#f5ffd5]'
+                ? 'border-accent/25 bg-accent/10 text-[#f5ffd5]'
                 : 'border-white/10 bg-[#1a1a1b]/90 text-white'
             }`}
           >
@@ -133,58 +135,35 @@ export function Header() {
           <IconButton label="Open settings" onClick={openSettings}>
             <Settings2 size={16} />
           </IconButton>
-          <button
-            type="button"
-            onClick={openWorkspaceSharing}
-            aria-label={sharing.enabled ? `Workspace sharing enabled with ${activeCollaboratorCount} collaborator${activeCollaboratorCount === 1 ? '' : 's'}. Open sharing settings.` : 'Share workspace'}
-            className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-medium ${
-              sharing.enabled
-                ? 'border-[#3b82f6]/30 bg-[#3b82f6]/10 text-[#dbeafe]'
-                : 'border-white/10 bg-[#1a1a1b]/90 text-white'
-            }`}
-          >
-            <Users size={14} aria-hidden="true" />
-            {sharing.enabled ? `Share Workspace (${activeCollaboratorCount})` : 'Share Workspace'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void (panelLayouts.preview.detached ? closeDetachedPanel('preview') : openDetachedPanel('preview'))}
-            aria-pressed={panelLayouts.preview.detached}
-            aria-label={panelLayouts.preview.detached ? 'Reattach preview panel' : 'Detach preview panel'}
-            className={`rounded-full border px-4 py-2 text-xs font-medium ${
-              panelLayouts.preview.detached
-                ? 'border-[#e0ff00]/25 bg-[#e0ff00]/10 text-[#f5ffd5]'
-                : 'border-white/10 bg-[#1a1a1b]/90 text-white'
-            }`}
-          >
-            {panelLayouts.preview.detached ? 'Reattach Preview' : 'Detach Preview'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void (panelLayouts.timeline.detached ? closeDetachedPanel('timeline') : openDetachedPanel('timeline'))}
-            aria-pressed={panelLayouts.timeline.detached}
-            aria-label={panelLayouts.timeline.detached ? 'Reattach timeline panel' : 'Detach timeline panel'}
-            className={`rounded-full border px-4 py-2 text-xs font-medium ${
-              panelLayouts.timeline.detached
-                ? 'border-[#e0ff00]/25 bg-[#e0ff00]/10 text-[#f5ffd5]'
-                : 'border-white/10 bg-[#1a1a1b]/90 text-white'
-            }`}
-          >
-            {panelLayouts.timeline.detached ? 'Reattach Timeline' : 'Detach Timeline'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void (panelLayouts.inspector.detached ? closeDetachedPanel('inspector') : openDetachedPanel('inspector'))}
-            aria-pressed={panelLayouts.inspector.detached}
-            aria-label={panelLayouts.inspector.detached ? 'Reattach inspector panel' : 'Detach inspector panel'}
-            className={`rounded-full border px-4 py-2 text-xs font-medium ${
-              panelLayouts.inspector.detached
-                ? 'border-[#e0ff00]/25 bg-[#e0ff00]/10 text-[#f5ffd5]'
-                : 'border-white/10 bg-[#1a1a1b]/90 text-white'
-            }`}
-          >
-            {panelLayouts.inspector.detached ? 'Reattach Inspector' : 'Detach Inspector'}
-          </button>
+          <Menu label="More workspace actions">
+            <MenuItem
+              label={sharing.enabled ? `Share Workspace (${activeCollaboratorCount})` : 'Share Workspace'}
+              onClick={openWorkspaceSharing}
+              pressed={sharing.enabled}
+            />
+            <div role="separator" className="my-1 border-t border-white/8" />
+            <MenuItem
+              label="Detach Preview"
+              pressed={panelLayouts.preview.detached}
+              onClick={() =>
+                void (panelLayouts.preview.detached ? closeDetachedPanel('preview') : openDetachedPanel('preview'))
+              }
+            />
+            <MenuItem
+              label="Detach Timeline"
+              pressed={panelLayouts.timeline.detached}
+              onClick={() =>
+                void (panelLayouts.timeline.detached ? closeDetachedPanel('timeline') : openDetachedPanel('timeline'))
+              }
+            />
+            <MenuItem
+              label="Detach Inspector"
+              pressed={panelLayouts.inspector.detached}
+              onClick={() =>
+                void (panelLayouts.inspector.detached ? closeDetachedPanel('inspector') : openDetachedPanel('inspector'))
+              }
+            />
+          </Menu>
         </div>
       </div>
 
@@ -193,7 +172,7 @@ export function Header() {
         className="mt-3 flex flex-col gap-2 text-xs text-[#9ea4ae] md:flex-row md:items-center md:justify-between"
       >
         <div className="inline-flex items-center gap-2">
-          <Sparkles size={14} className="text-[#e0ff00]" aria-hidden="true" />
+          <Sparkles size={14} className="text-accent" aria-hidden="true" />
           <span>{statusMessage}</span>
         </div>
         <span>
@@ -251,26 +230,3 @@ function ModeButton({
   )
 }
 
-function IconButton({
-  children,
-  disabled = false,
-  label,
-  onClick,
-}: {
-  children: React.ReactNode
-  disabled?: boolean
-  label: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-[#1a1a1b]/90 text-white transition hover:border-white/20 disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      {children}
-    </button>
-  )
-}

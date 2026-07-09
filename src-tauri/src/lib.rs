@@ -2,8 +2,8 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, Once, OnceLock};
@@ -18,6 +18,7 @@ mod comfy;
 mod mcp;
 mod media;
 mod render_graph;
+mod security;
 mod services;
 mod workflow_graph;
 
@@ -198,6 +199,10 @@ struct AppUpdateManifest {
     notes: Option<String>,
     published_at: Option<String>,
     channel: Option<String>,
+    /// Hex-encoded SHA-256 of the file at `download_url`. Required (not `Option` in practice —
+    /// see `check_for_app_update`) so `download_app_update` can verify the downloaded bytes
+    /// before writing them to disk. See `SIGNING.md` for the full threat-model note.
+    sha256: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -211,6 +216,7 @@ struct AppUpdateCheckResult {
     published_at: Option<String>,
     checked_at: String,
     channel: Option<String>,
+    sha256: Option<String>,
 }
 
 #[tauri::command]
@@ -341,7 +347,7 @@ fn load_project_state(app: AppHandle) -> Result<Option<String>, String> {
 
 #[tauri::command]
 fn open_project_at_path(app: AppHandle, path: String) -> Result<Option<String>, String> {
-    let project_dir = normalize_project_dir(&path);
+    let project_dir = security::ensure_allowed_path(&app, &normalize_project_dir(&path))?;
 
     if !project_dir.exists() {
         return Ok(None);
@@ -359,7 +365,7 @@ fn open_project_at_path(app: AppHandle, path: String) -> Result<Option<String>, 
 
 #[tauri::command]
 fn create_project_at_path(app: AppHandle, path: String, project_json: String) -> Result<String, String> {
-    let project_dir = normalize_project_dir(&path);
+    let project_dir = security::ensure_allowed_path(&app, &normalize_project_dir(&path))?;
     write_project_state_to_dir(&app, &project_dir, &project_json, true)?;
     Ok(project_dir.to_string_lossy().to_string())
 }
@@ -372,7 +378,7 @@ fn save_project_state(app: AppHandle, project_json: String) -> Result<(), String
 
 #[tauri::command]
 fn save_project_state_as(app: AppHandle, path: String, project_json: String) -> Result<(), String> {
-    let project_dir = normalize_project_dir(&path);
+    let project_dir = security::ensure_allowed_path(&app, &normalize_project_dir(&path))?;
     write_project_state_to_dir(&app, &project_dir, &project_json, true)
 }
 
@@ -385,9 +391,13 @@ fn autosave_project_state(app: AppHandle, project_json: String) -> Result<String
     let timestamp = current_timestamp();
     let snapshot_id = format!("snapshot-{timestamp}");
     let snapshot_path = autosave_dir.join(format!("{snapshot_id}.json"));
-    fs::write(snapshot_path, &project_json).map_err(|error| error.to_string())?;
+    security::atomic_write(&snapshot_path, project_json.as_bytes()).map_err(|error| error.to_string())?;
 
     trim_autosave_snapshots(&autosave_dir)?;
+    // The autosave snapshot is now a durable recovery source, so the crash-recovery WAL can be
+    // truncated too — previously only explicit saves cleared it, letting the WAL grow across a
+    // long session of nothing-but-autosaves (mirrors LocalProjectRepository.autosave).
+    truncate_wal(&project_dir)?;
 
     let snapshot = serde_json::json!({
         "id": snapshot_id,
@@ -398,18 +408,106 @@ fn autosave_project_state(app: AppHandle, project_json: String) -> Result<String
     serde_json::to_string(&snapshot).map_err(|error| error.to_string())
 }
 
+// The crash-recovery WAL is a bounded ring buffer: at most WAL_LIMIT entries are kept per
+// project. Every WAL_SNAPSHOT_INTERVAL-th entry embeds a full project snapshot; the rest carry
+// only immer forward patches. The TypeScript store hands us BOTH a full `projectSnapshot` and
+// `patches` on every entry (see appendWalSafely in project-store.ts) and leaves it to the
+// repository to decide what to actually persist — so, mirroring LocalProjectRepository, we drop
+// the redundant per-entry snapshot most of the time. Because WAL_SNAPSHOT_INTERVAL < WAL_LIMIT,
+// any trimmed window of the ring buffer still contains at least one snapshot, so recovery can
+// always reconstruct the latest state without re-baselining on trim.
+const WAL_LIMIT: usize = 50;
+const WAL_SNAPSHOT_INTERVAL: usize = 10;
+
 #[tauri::command]
 fn append_wal_entry(app: AppHandle, entry_json: String) -> Result<(), String> {
     let project_dir = get_or_create_project_dir_from_wal(&app, &entry_json)?;
     ensure_project_structure(&project_dir)?;
     let wal_path = project_dir.join("autosave").join("wal.jsonl");
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(wal_path)
-        .map_err(|error| error.to_string())?;
 
-    writeln!(file, "{entry_json}").map_err(|error| error.to_string())
+    let existing = read_wal_lines(&wal_path)?;
+    let next_lines = build_bounded_wal_lines(existing, &entry_json)?;
+
+    let mut body = next_lines.join("\n");
+    if !body.is_empty() {
+        body.push('\n');
+    }
+    // atomic_write fsyncs the temp file before renaming it into place, so the entry is durable on
+    // disk before we return success — the WAL exists specifically to survive a crash.
+    security::atomic_write(&wal_path, body.as_bytes()).map_err(|error| error.to_string())
+}
+
+/// Reads the WAL file into its non-empty JSONL lines (empty vec when the file is absent).
+fn read_wal_lines(wal_path: &Path) -> Result<Vec<String>, String> {
+    if !wal_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let content = fs::read_to_string(wal_path).map_err(|error| error.to_string())?;
+    Ok(content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.to_string())
+        .collect())
+}
+
+/// Appends one entry to the WAL line list, deciding whether to persist a full snapshot or just
+/// patches, then trims the result to the most recent WAL_LIMIT entries (ring buffer). Pure so it
+/// is unit-testable without an AppHandle or filesystem.
+fn build_bounded_wal_lines(existing: Vec<String>, entry_json: &str) -> Result<Vec<String>, String> {
+    let entry = serde_json::from_str::<Value>(entry_json).map_err(|error| error.to_string())?;
+
+    // Count how many entries sit after the most recent embedded snapshot. If there is no snapshot
+    // yet (fresh/truncated WAL) or the gap has reached the interval, embed a fresh one.
+    let mut since_snapshot = 0usize;
+    let mut found_snapshot = false;
+    for line in existing.iter().rev() {
+        if let Ok(value) = serde_json::from_str::<Value>(line) {
+            if value.get("projectSnapshot").is_some() {
+                found_snapshot = true;
+                break;
+            }
+        }
+        since_snapshot += 1;
+    }
+
+    let has_snapshot = entry
+        .get("projectSnapshot")
+        .map_or(false, |value| !value.is_null());
+    let embed_snapshot = has_snapshot && (!found_snapshot || since_snapshot >= WAL_SNAPSHOT_INTERVAL);
+
+    let mut stored = serde_json::Map::new();
+    for key in ["id", "timestamp", "type", "label"] {
+        if let Some(value) = entry.get(key) {
+            stored.insert(key.to_string(), value.clone());
+        }
+    }
+    if embed_snapshot {
+        stored.insert(
+            "projectSnapshot".to_string(),
+            entry.get("projectSnapshot").cloned().unwrap_or(Value::Null),
+        );
+    } else {
+        stored.insert(
+            "patches".to_string(),
+            entry
+                .get("patches")
+                .cloned()
+                .unwrap_or_else(|| Value::Array(Vec::new())),
+        );
+    }
+
+    let stored_line =
+        serde_json::to_string(&Value::Object(stored)).map_err(|error| error.to_string())?;
+
+    let mut lines = existing;
+    lines.push(stored_line);
+    if lines.len() > WAL_LIMIT {
+        let overflow = lines.len() - WAL_LIMIT;
+        lines.drain(0..overflow);
+    }
+
+    Ok(lines)
 }
 
 #[tauri::command]
@@ -429,8 +527,8 @@ fn get_current_project_path(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn inspect_asset_path(path: String) -> Result<String, String> {
-    let path_buf = PathBuf::from(&path);
+fn inspect_asset_path(app: AppHandle, path: String) -> Result<String, String> {
+    let path_buf = security::ensure_allowed_path(&app, Path::new(&path))?;
     let metadata = fs::metadata(&path_buf).ok();
     let exists = metadata.is_some();
     let is_file = metadata.as_ref().map(|value| value.is_file()).unwrap_or(false);
@@ -652,9 +750,19 @@ fn probe_result_from_extension(extension: &str, file_size: u64) -> AssetProbeRes
     }
 }
 
+// Heavy: shells out to ffprobe. Run off the main thread (see `asset_probe`).
 #[tauri::command]
-fn asset_probe(path: String) -> Result<String, String> {
-    let path_buf = PathBuf::from(&path);
+async fn asset_probe(app: AppHandle, path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || asset_probe_blocking(&app, path))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+/// Synchronous body shared by the `asset_probe` command (via `spawn_blocking`) and the
+/// action-registry wrapper (`actions::AssetProbe`), so both paths get the same path containment.
+fn asset_probe_blocking(app: &AppHandle, path: String) -> Result<String, String> {
+    let path_buf = security::ensure_allowed_path(app, Path::new(&path))?;
+    let resolved_path = path_buf.to_string_lossy().to_string();
     let metadata = fs::metadata(&path_buf).ok();
     let file_size = metadata.as_ref().map(|value| value.len()).unwrap_or(0);
     let extension = path_buf
@@ -664,7 +772,7 @@ fn asset_probe(path: String) -> Result<String, String> {
         .unwrap_or_default();
 
     // Real metadata via ffprobe; fall back to extension heuristics only if it fails.
-    let probe = match run_ffprobe(&path) {
+    let probe = match run_ffprobe(&resolved_path) {
         Ok(report) => probe_result_from_ffprobe(&report, file_size),
         Err(_) => probe_result_from_extension(&extension, file_size),
     };
@@ -747,14 +855,28 @@ fn waveform_peaks_from_f32le(bytes: &[u8], bucket_count: usize) -> Option<Vec<Wa
     Some(peaks)
 }
 
+// Heavy: shells out to ffmpeg to decode audio for waveform peaks. Run off the main thread.
 #[tauri::command]
-fn asset_generate_waveform(
+async fn asset_generate_waveform(
     app: AppHandle,
     asset_id: String,
     source_path: String,
     bucket_count: usize,
 ) -> Result<String, String> {
-    let project_dir = get_current_project_dir(&app)?
+    tokio::task::spawn_blocking(move || {
+        asset_generate_waveform_blocking(&app, asset_id, source_path, bucket_count)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn asset_generate_waveform_blocking(
+    app: &AppHandle,
+    asset_id: String,
+    source_path: String,
+    bucket_count: usize,
+) -> Result<String, String> {
+    let project_dir = get_current_project_dir(app)?
         .or_else(|| ensure_app_dir(&app).ok().map(|dir| dir.join("workspace").join("unsaved.fluxnode")))
         .ok_or_else(|| "Unable to resolve project directory for waveform cache".to_string())?;
     ensure_project_structure(&project_dir)?;
@@ -937,14 +1059,28 @@ mod waveform_tests {
     }
 }
 
+// Heavy: shells out to ffmpeg to extract/scale a frame. Run off the main thread.
 #[tauri::command]
-fn asset_generate_thumbnail(
+async fn asset_generate_thumbnail(
     app: AppHandle,
     asset_id: String,
     source_path: String,
     time: f64,
 ) -> Result<String, String> {
-    let project_dir = get_current_project_dir(&app)?
+    tokio::task::spawn_blocking(move || {
+        asset_generate_thumbnail_blocking(&app, asset_id, source_path, time)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn asset_generate_thumbnail_blocking(
+    app: &AppHandle,
+    asset_id: String,
+    source_path: String,
+    time: f64,
+) -> Result<String, String> {
+    let project_dir = get_current_project_dir(app)?
         .or_else(|| ensure_app_dir(&app).ok().map(|dir| dir.join("workspace").join("unsaved.fluxnode")))
         .ok_or_else(|| "Unable to resolve project directory for thumbnail generation".to_string())?;
     ensure_project_structure(&project_dir)?;
@@ -1081,7 +1217,7 @@ fn asset_copy_into_project(app: AppHandle, asset_id: String, source_path: String
         .ok_or_else(|| "Unable to resolve project directory for asset copy".to_string())?;
     ensure_project_structure(&project_dir)?;
 
-    let source = PathBuf::from(&source_path);
+    let source = security::ensure_allowed_path(&app, Path::new(&source_path))?;
     if !source.exists() {
         return Err(format!("Source asset does not exist: {source_path}"));
     }
@@ -1112,10 +1248,17 @@ fn fs_pick_media_file(initial_directory: Option<String>) -> Result<Option<String
         dialog = dialog.set_directory(directory);
     }
 
-    Ok(dialog
+    let picked = dialog
         .add_filter("Media", &["mp4", "mov", "mkv", "webm", "wav", "mp3", "flac", "aac", "png", "jpg", "jpeg", "webp"])
-        .pick_file()
-        .map(|path| path.to_string_lossy().to_string()))
+        .pick_file();
+
+    // The user explicitly chose this path via a native dialog — legitimize it (and its parent
+    // directory) as an allowed root for subsequent path-containment checks this session.
+    if let Some(path) = &picked {
+        security::register_picked_path(path);
+    }
+
+    Ok(picked.map(|path| path.to_string_lossy().to_string()))
 }
 
 #[tauri::command]
@@ -1125,17 +1268,26 @@ fn fs_pick_directory(initial_directory: Option<String>) -> Result<Option<String>
         dialog = dialog.set_directory(directory);
     }
 
-    Ok(dialog
-        .pick_folder()
-        .map(|path| path.to_string_lossy().to_string()))
+    let picked = dialog.pick_folder();
+
+    if let Some(path) = &picked {
+        security::register_picked_path(path);
+    }
+
+    Ok(picked.map(|path| path.to_string_lossy().to_string()))
 }
 
 #[tauri::command]
 fn load_app_preferences(app: AppHandle) -> Result<String, String> {
     let preferences_path = app_preferences_path(&app)?;
+    // Defense in depth: the path is always app-dir-derived (never caller-supplied), but routing
+    // it through the same containment check as every other path-taking command guards against a
+    // future regression that lets a caller influence it.
+    let preferences_path = security::ensure_allowed_path(&app, &preferences_path)
+        .unwrap_or(preferences_path);
 
     if !preferences_path.exists() {
-        return Ok(r#"{"defaultProjectDirectory":null,"comfyUiEndpoint":"http://127.0.0.1:8188","cloudApiKey":"","updateChannel":"stable","updateManifestUrl":null}"#.to_string());
+        return Ok(r#"{"defaultProjectDirectory":null,"comfyUiEndpoint":"http://127.0.0.1:8188","cloudApiKey":"","updateChannel":"stable","updateManifestUrl":null,"allowRemoteComfy":false}"#.to_string());
     }
 
     fs::read_to_string(preferences_path).map_err(|error| error.to_string())
@@ -1144,7 +1296,76 @@ fn load_app_preferences(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn save_app_preferences(app: AppHandle, preferences_json: String) -> Result<(), String> {
     let preferences_path = app_preferences_path(&app)?;
-    fs::write(preferences_path, preferences_json).map_err(|error| error.to_string())
+    let preferences_path = security::ensure_allowed_path(&app, &preferences_path)
+        .unwrap_or(preferences_path);
+
+    // Route `cloudApiKey` through the OS keychain instead of persisting it to preferences.json
+    // in plaintext: if the incoming payload carries a (non-empty) key, stash it via `keyring`
+    // and rewrite the on-disk field to an empty string. Best-effort parse: if the payload isn't
+    // the expected JSON object, fall through and write it unchanged (matches prior behavior).
+    let sanitized_json = match serde_json::from_str::<Value>(&preferences_json) {
+        Ok(mut value) => {
+            if let Some(obj) = value.as_object_mut() {
+                if let Some(key) = obj.get("cloudApiKey").and_then(Value::as_str) {
+                    let key = key.to_string();
+                    if let Err(error) = store_cloud_api_key(&key) {
+                        // Non-fatal: preferences still save; the key just isn't persisted.
+                        eprintln!("failed to store cloud API key in the OS keychain: {error}");
+                    }
+                    obj.insert("cloudApiKey".to_string(), Value::String(String::new()));
+                }
+            }
+            serde_json::to_string(&value).unwrap_or_else(|_| preferences_json.clone())
+        }
+        Err(_) => preferences_json,
+    };
+
+    security::atomic_write(&preferences_path, sanitized_json.as_bytes()).map_err(|error| error.to_string())
+}
+
+const CLOUD_API_KEY_SERVICE: &str = "com.fluxnode.app";
+const CLOUD_API_KEY_ACCOUNT: &str = "cloud-api-key";
+
+/// Stores (or clears, when `key` is empty) the cloud API key in the OS credential store
+/// (Windows Credential Manager / macOS Keychain / Linux Secret Service, via the `keyring`
+/// crate) instead of writing it to `preferences.json` in plaintext.
+fn store_cloud_api_key(key: &str) -> Result<(), String> {
+    let entry =
+        keyring::Entry::new(CLOUD_API_KEY_SERVICE, CLOUD_API_KEY_ACCOUNT).map_err(|error| error.to_string())?;
+    if key.trim().is_empty() {
+        return match entry.delete_password() {
+            Ok(()) => Ok(()),
+            Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error.to_string()),
+        };
+    }
+    entry.set_password(key).map_err(|error| error.to_string())
+}
+
+/// Reads the cloud API key back from the OS credential store. Returns `""` (not an error) when
+/// nothing has been stored yet.
+fn read_cloud_api_key() -> Result<String, String> {
+    let entry =
+        keyring::Entry::new(CLOUD_API_KEY_SERVICE, CLOUD_API_KEY_ACCOUNT).map_err(|error| error.to_string())?;
+    match entry.get_password() {
+        Ok(password) => Ok(password),
+        Err(keyring::Error::NoEntry) => Ok(String::new()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Explicitly set the cloud API key (OS keychain-backed). Prefer this over embedding the key in
+/// the `save_app_preferences` payload when the frontend only needs to update the key itself.
+#[tauri::command]
+fn set_cloud_api_key(key: String) -> Result<(), String> {
+    store_cloud_api_key(&key)
+}
+
+/// Reads the cloud API key back out of the OS keychain (never out of preferences.json, which
+/// only ever stores an empty placeholder for this field — see `save_app_preferences`).
+#[tauri::command]
+fn get_cloud_api_key() -> Result<String, String> {
+    read_cloud_api_key()
 }
 
 #[tauri::command]
@@ -1152,12 +1373,21 @@ fn get_app_version() -> Result<String, String> {
     Ok(env!("CARGO_PKG_VERSION").to_string())
 }
 
+/// Checks a remote update manifest for a newer version.
+///
+/// Hardening (see also `download_app_update` and `SIGNING.md`): the manifest URL must be
+/// `https://`, the response body is size-capped, and a `sha256` field is required in the
+/// manifest so the eventual download can be integrity-checked before it's written to disk.
+/// NOTE: this is *download verification*, not *publisher authentication* — it proves the
+/// downloaded bytes match what the manifest said, not that the manifest itself came from
+/// FluxNode. The proper long-term fix is `tauri-plugin-updater` with a signed update artifact.
 #[tauri::command]
 fn check_for_app_update(manifest_url: String) -> Result<String, String> {
     let trimmed_url = manifest_url.trim();
     if trimmed_url.is_empty() {
         return Err("Update manifest URL is not configured.".to_string());
     }
+    security::ensure_https_url(trimmed_url)?;
 
     let client = Client::builder()
         .timeout(Duration::from_secs(8))
@@ -1169,13 +1399,23 @@ fn check_for_app_update(manifest_url: String) -> Result<String, String> {
         .send()
         .map_err(|error| error.to_string())?;
     let response = response.error_for_status().map_err(|error| error.to_string())?;
-    let manifest = response
-        .json::<AppUpdateManifest>()
-        .map_err(|error| error.to_string())?;
+    let body = security::read_capped_bytes(response, security::MAX_JSON_RESPONSE_BYTES)?;
+    let manifest: AppUpdateManifest = serde_json::from_slice(&body).map_err(|error| error.to_string())?;
 
     let latest_version = manifest.version.trim().to_string();
     if latest_version.is_empty() {
         return Err("Update manifest is missing a version field.".to_string());
+    }
+
+    let download_url = manifest.download_url.and_then(normalize_optional_string);
+    if let Some(url) = &download_url {
+        security::ensure_https_url(url)?;
+    }
+    let sha256 = manifest.sha256.and_then(normalize_optional_string);
+    if download_url.is_some() && sha256.is_none() {
+        return Err(
+            "Update manifest is missing a required 'sha256' field for the download URL.".to_string(),
+        );
     }
 
     let current_version = env!("CARGO_PKG_VERSION").to_string();
@@ -1183,25 +1423,39 @@ fn check_for_app_update(manifest_url: String) -> Result<String, String> {
         update_available: compare_versions(&latest_version, &current_version) > 0,
         current_version,
         latest_version,
-        download_url: manifest.download_url.and_then(normalize_optional_string),
+        download_url,
         notes: manifest.notes.and_then(normalize_optional_string),
         published_at: manifest.published_at.and_then(normalize_optional_string),
         checked_at: iso_timestamp_now(),
         channel: manifest.channel.and_then(normalize_optional_string),
+        sha256,
     };
 
     serde_json::to_string(&result).map_err(|error| error.to_string())
 }
 
+/// Downloads an update package after checking its integrity against `expected_sha256` (from the
+/// manifest returned by `check_for_app_update`).
+///
+/// Hardening: HTTPS-only, response body size-capped, output filename derived from a
+/// whitelist-charset basename (never the raw URL) so a malicious/compromised manifest can't
+/// escape the updates directory, and the downloaded bytes are rejected if they don't match the
+/// expected SHA-256 hash. This is still *not* publisher signature verification — see the note on
+/// `check_for_app_update` and `SIGNING.md`.
 #[tauri::command]
-fn download_app_update(app: AppHandle, download_url: String) -> Result<String, String> {
+fn download_app_update(app: AppHandle, download_url: String, expected_sha256: String) -> Result<String, String> {
     let trimmed_url = download_url.trim();
     if trimmed_url.is_empty() {
         return Err("Update download URL is not available.".to_string());
     }
+    security::ensure_https_url(trimmed_url)?;
+    let expected_sha256 = expected_sha256.trim().to_lowercase();
+    if expected_sha256.is_empty() {
+        return Err("An expected SHA-256 hash is required to download an update.".to_string());
+    }
 
     let client = Client::builder()
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_secs(120))
         .build()
         .map_err(|error| error.to_string())?;
     let response = client
@@ -1209,26 +1463,21 @@ fn download_app_update(app: AppHandle, download_url: String) -> Result<String, S
         .send()
         .map_err(|error| error.to_string())?;
     let response = response.error_for_status().map_err(|error| error.to_string())?;
-    let bytes = response.bytes().map_err(|error| error.to_string())?;
+    let bytes = security::read_capped_bytes(response, security::MAX_DOWNLOAD_BYTES)?;
+
+    let actual_sha256 = security::sha256_hex(&bytes);
+    if actual_sha256 != expected_sha256 {
+        return Err(format!(
+            "Downloaded update failed integrity check (expected sha256 {expected_sha256}, got {actual_sha256}); refusing to write it to disk"
+        ));
+    }
 
     let updates_dir = ensure_app_dir(&app)?.join("updates");
     fs::create_dir_all(&updates_dir).map_err(|error| error.to_string())?;
 
-    let file_name = trimmed_url
-        .rsplit('/')
-        .next()
-        .and_then(|segment| {
-            let trimmed = segment.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed)
-            }
-        })
-        .unwrap_or("fluxnode-update.bin");
-
+    let file_name = security::sanitize_download_filename(trimmed_url, "fluxnode-update.bin");
     let output_path = updates_dir.join(file_name);
-    fs::write(&output_path, &bytes).map_err(|error| error.to_string())?;
+    security::atomic_write(&output_path, &bytes).map_err(|error| error.to_string())?;
 
     Ok(output_path.to_string_lossy().to_string())
 }
@@ -1251,11 +1500,13 @@ fn app_quit(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn shell_open_path(path: String) -> Result<(), String> {
+fn shell_open_path(app: AppHandle, path: String) -> Result<(), String> {
+    let resolved = security::ensure_shell_openable(&app, Path::new(&path))?;
+
     #[cfg(target_os = "windows")]
     {
         Command::new("explorer")
-            .arg(path)
+            .arg(&resolved)
             .spawn()
             .map_err(|error| error.to_string())?;
         return Ok(());
@@ -1264,7 +1515,7 @@ fn shell_open_path(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         Command::new("open")
-            .arg(path)
+            .arg(&resolved)
             .spawn()
             .map_err(|error| error.to_string())?;
         return Ok(());
@@ -1273,7 +1524,7 @@ fn shell_open_path(path: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         Command::new("xdg-open")
-            .arg(path)
+            .arg(&resolved)
             .spawn()
             .map_err(|error| error.to_string())?;
         return Ok(());
@@ -1460,15 +1711,30 @@ fn transcode_proxy(
     Ok(())
 }
 
+// Heavy: shells out to ffmpeg to transcode a proxy. Run off the main thread.
 #[tauri::command]
-fn asset_generate_proxy(
+async fn asset_generate_proxy(
     app: AppHandle,
     asset_id: String,
     source_path: String,
     target_width: u32,
     target_height: u32,
 ) -> Result<String, String> {
-    let project_dir = get_current_project_dir(&app)?
+    tokio::task::spawn_blocking(move || {
+        asset_generate_proxy_blocking(&app, asset_id, source_path, target_width, target_height)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn asset_generate_proxy_blocking(
+    app: &AppHandle,
+    asset_id: String,
+    source_path: String,
+    target_width: u32,
+    target_height: u32,
+) -> Result<String, String> {
+    let project_dir = get_current_project_dir(app)?
         .or_else(|| ensure_app_dir(&app).ok().map(|dir| dir.join("workspace").join("unsaved.fluxnode")))
         .ok_or_else(|| "Unable to resolve project directory for proxy generation".to_string())?;
     ensure_project_structure(&project_dir)?;
@@ -1643,8 +1909,20 @@ fn decode_preview_frame(
 /// Executes the workflow subgraph feeding `node_id` (deterministic VFX nodes via
 /// ffmpeg) and returns a real PNG preview frame of that node's output. Falls back
 /// to the SVG placeholder when compilation or ffmpeg fails (e.g. AI-only graphs).
+// Heavy: compiles a workflow subgraph and shells out to ffmpeg. Run off the main thread.
 #[tauri::command]
-fn workflow_render_node(
+async fn workflow_render_node(
+    project_json: String,
+    node_id: String,
+    width: u32,
+    height: u32,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || workflow_render_node_blocking(project_json, node_id, width, height))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn workflow_render_node_blocking(
     project_json: String,
     node_id: String,
     width: u32,
@@ -1687,9 +1965,32 @@ fn workflow_render_node(
     serde_json::to_string(&result).map_err(|e| e.to_string())
 }
 
+/// Reads the `allowRemoteComfy` preference (defaults to `false`). Used by the SSRF guard in
+/// `comfy_ping`/`comfy_generate` — see `security::ensure_safe_comfy_endpoint`.
+fn read_allow_remote_comfy(app: &AppHandle) -> bool {
+    let Ok(path) = app_preferences_path(app) else {
+        return false;
+    };
+    let Ok(contents) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&contents) else {
+        return false;
+    };
+    value.get("allowRemoteComfy").and_then(Value::as_bool).unwrap_or(false)
+}
+
 /// Checks whether the user's ComfyUI server is reachable (BYOM).
+///
+/// SSRF guard: `endpoint` is caller-supplied, so it's validated as loopback/private-LAN unless
+/// the user opted into `allowRemoteComfy` — otherwise this would let a caller point FluxNode's
+/// HTTP client at an arbitrary host (see `security::ensure_safe_comfy_endpoint`).
 #[tauri::command]
-fn comfy_ping(endpoint: String) -> bool {
+fn comfy_ping(app: AppHandle, endpoint: String) -> bool {
+    let allow_remote = read_allow_remote_comfy(&app);
+    if security::ensure_safe_comfy_endpoint(&endpoint, allow_remote).is_err() {
+        return false;
+    }
     comfy::ping(&endpoint)
 }
 
@@ -1699,13 +2000,33 @@ fn comfy_ping(endpoint: String) -> bool {
 /// MVP: text-to-image `ai_generate` (no input image). Image-conditioned nodes
 /// (`img2img` / `ai_upscale`) require uploading the input frame to ComfyUI,
 /// which needs reqwest's `multipart` feature — tracked as a follow-up.
+///
+/// Heavy (polls ComfyUI + fetches the image over HTTP) — run off the main thread.
 #[tauri::command]
-fn comfy_generate(
+async fn comfy_generate(
+    app: AppHandle,
     project_json: String,
     node_id: String,
     endpoint: String,
     timeout_secs: u64,
 ) -> Result<String, String> {
+    let allow_remote = read_allow_remote_comfy(&app);
+    tokio::task::spawn_blocking(move || {
+        comfy_generate_blocking(project_json, node_id, endpoint, timeout_secs, allow_remote)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn comfy_generate_blocking(
+    project_json: String,
+    node_id: String,
+    endpoint: String,
+    timeout_secs: u64,
+    allow_remote_comfy: bool,
+) -> Result<String, String> {
+    security::ensure_safe_comfy_endpoint(&endpoint, allow_remote_comfy)?;
+
     let project_value = serde_json::from_str::<Value>(&project_json).map_err(|e| e.to_string())?;
     let node = project_value
         .get("workflow")
@@ -1748,8 +2069,23 @@ fn comfy_generate(
     serde_json::to_string(&frame).map_err(|e| e.to_string())
 }
 
+// Heavy: shells out to ffmpeg to extract/scale a frame. Run off the main thread.
 #[tauri::command]
-fn video_decode_frame(
+async fn video_decode_frame(
+    asset_id: String,
+    source_path: String,
+    requested_time: f64,
+    width: u32,
+    height: u32,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        video_decode_frame_blocking(asset_id, source_path, requested_time, width, height)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn video_decode_frame_blocking(
     asset_id: String,
     source_path: String,
     requested_time: f64,
@@ -1766,22 +2102,20 @@ fn video_decode_frame(
     .map_err(|error| error.to_string())
 }
 
+// Heavy: shells out to ffmpeg to extract/scale a frame. Run off the main thread.
 #[tauri::command]
-fn video_seek(
+async fn video_seek(
     asset_id: String,
     source_path: String,
     requested_time: f64,
     width: u32,
     height: u32,
 ) -> Result<String, String> {
-    serde_json::to_string(&decode_preview_frame(
-        asset_id,
-        source_path,
-        requested_time,
-        width,
-        height,
-    ))
-    .map_err(|error| error.to_string())
+    tokio::task::spawn_blocking(move || {
+        video_decode_frame_blocking(asset_id, source_path, requested_time, width, height)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[cfg(test)]
@@ -1816,7 +2150,7 @@ mod preview_decode_tests {
             .expect("ffmpeg should launch");
         assert!(status.success(), "ffmpeg failed to synthesize the test clip");
 
-        let json = video_decode_frame(
+        let json = video_decode_frame_blocking(
             "preview-asset".to_string(),
             clip.to_string_lossy().to_string(),
             0.2,
@@ -2305,7 +2639,7 @@ fn load_project_from_dir(app: &AppHandle, project_dir: &PathBuf) -> Result<Optio
     }
 
     let base_project = fs::read_to_string(&project_path).map_err(|error| error.to_string())?;
-    let wal_snapshot = read_latest_wal_snapshot(project_dir)?;
+    let wal_snapshot = reconstruct_project_from_wal(project_dir)?;
 
     if let Some(snapshot) = wal_snapshot {
         return Ok(Some(snapshot));
@@ -2326,10 +2660,11 @@ fn write_project_state_to_dir(
     clear_wal: bool,
 ) -> Result<(), String> {
     ensure_project_structure(project_dir)?;
-    fs::write(project_dir.join("project.json"), project_json).map_err(|error| error.to_string())?;
+    security::atomic_write(&project_dir.join("project.json"), project_json.as_bytes())
+        .map_err(|error| error.to_string())?;
 
     if clear_wal {
-        fs::write(project_dir.join("autosave").join("wal.jsonl"), "").map_err(|error| error.to_string())?;
+        truncate_wal(project_dir)?;
     }
 
     set_current_project_dir(app, project_dir)?;
@@ -2408,30 +2743,156 @@ fn trim_autosave_snapshots(autosave_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn read_latest_wal_snapshot(project_dir: &Path) -> Result<Option<String>, String> {
+/// Reconstructs the latest project described by the WAL: finds the most recent embedded snapshot
+/// (scanning backward) and replays the forward immer patches of every entry after it. Mirrors
+/// reconstructProjectFromWal in the TypeScript LocalProjectRepository. Returns the serialized
+/// project, or None when the WAL holds no snapshot to base off of. Replaying patches (rather than
+/// the old "return the last full snapshot" behavior) is what keeps recovery correct now that most
+/// entries carry only patches instead of a full project.
+fn reconstruct_project_from_wal(project_dir: &Path) -> Result<Option<String>, String> {
     let wal_path = project_dir.join("autosave").join("wal.jsonl");
-
-    if !wal_path.exists() {
+    let lines = read_wal_lines(&wal_path)?;
+    if lines.is_empty() {
         return Ok(None);
     }
 
-    let file = fs::File::open(&wal_path).map_err(|error| error.to_string())?;
-    let reader = BufReader::new(file);
-    let lines = reader.lines().collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    let entries = lines
+        .iter()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .collect::<Vec<_>>();
 
-    for line in lines.into_iter().rev() {
-        let Ok(value) = serde_json::from_str::<Value>(&line) else {
-            continue;
-        };
+    let Some(base_index) = entries
+        .iter()
+        .rposition(|entry| entry.get("projectSnapshot").map_or(false, |value| !value.is_null()))
+    else {
+        return Ok(None);
+    };
 
-        if let Some(snapshot) = value.get("projectSnapshot") {
-            return serde_json::to_string(snapshot)
-                .map(Some)
-                .map_err(|error| error.to_string());
+    let mut project = entries[base_index]
+        .get("projectSnapshot")
+        .cloned()
+        .unwrap_or(Value::Null);
+
+    for entry in &entries[base_index + 1..] {
+        if let Some(patches) = entry.get("patches").and_then(|value| value.as_array()) {
+            if !patches.is_empty() {
+                apply_immer_patches(&mut project, patches);
+            }
         }
     }
 
-    Ok(None)
+    serde_json::to_string(&project)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+/// Applies immer-style forward patches (`op` = "add" | "replace" | "remove", `path` = array of
+/// object keys / array indices) to a serde_json value in place, including immer's array `length`
+/// shrink patch. Paths that no longer resolve are skipped rather than panicking.
+fn apply_immer_patches(root: &mut Value, patches: &[Value]) {
+    for patch in patches {
+        let Some(op) = patch.get("op").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let Some(path) = patch.get("path").and_then(|value| value.as_array()) else {
+            continue;
+        };
+        let value = patch.get("value").cloned();
+
+        if path.is_empty() {
+            if op != "remove" {
+                if let Some(value) = value {
+                    *root = value;
+                }
+            }
+            continue;
+        }
+
+        apply_immer_patch_at(root, path, op, value);
+    }
+}
+
+fn apply_immer_patch_at(root: &mut Value, path: &[Value], op: &str, value: Option<Value>) {
+    let Some((last, parents)) = path.split_last() else {
+        return;
+    };
+
+    let mut current = root;
+    for segment in parents {
+        current = match current {
+            Value::Object(map) => {
+                let Some(child) = segment.as_str().and_then(|key| map.get_mut(key)) else {
+                    return;
+                };
+                child
+            }
+            Value::Array(items) => {
+                let Some(child) = segment.as_u64().and_then(|index| items.get_mut(index as usize)) else {
+                    return;
+                };
+                child
+            }
+            _ => return,
+        };
+    }
+
+    match current {
+        Value::Object(map) => {
+            let Some(key) = last.as_str() else {
+                return;
+            };
+            if op == "remove" {
+                map.remove(key);
+            } else if let Some(value) = value {
+                map.insert(key.to_string(), value);
+            }
+        }
+        Value::Array(items) => {
+            // immer emits a `length` replace patch when an array shrinks.
+            if last.as_str() == Some("length") {
+                if let Some(new_len) = value.as_ref().and_then(|value| value.as_u64()) {
+                    items.truncate(new_len as usize);
+                }
+                return;
+            }
+
+            let Some(index) = last.as_u64().map(|index| index as usize) else {
+                return;
+            };
+            match op {
+                "remove" => {
+                    if index < items.len() {
+                        items.remove(index);
+                    }
+                }
+                "add" => {
+                    let value = value.unwrap_or(Value::Null);
+                    if index >= items.len() {
+                        items.push(value);
+                    } else {
+                        items.insert(index, value);
+                    }
+                }
+                _ => {
+                    if let Some(value) = value {
+                        if index >= items.len() {
+                            items.push(value);
+                        } else {
+                            items[index] = value;
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Truncates the crash-recovery WAL to empty. Called whenever a durable copy of the project
+/// becomes current (explicit save AND autosave), so the WAL can never grow without bound.
+fn truncate_wal(project_dir: &Path) -> Result<(), String> {
+    let wal_path = project_dir.join("autosave").join("wal.jsonl");
+    security::atomic_write(&wal_path, b"").map_err(|error| error.to_string())
 }
 
 fn read_latest_autosave_snapshot(project_dir: &Path) -> Result<Option<String>, String> {
@@ -2903,11 +3364,8 @@ fn read_render_status(status_path: &Path) -> Result<RenderJobStatus, String> {
 
 fn write_render_status(status_path: &Path, status: &RenderJobStatus) -> Result<(), String> {
     let serializable = RenderJobStatusSerde::from_render_status(status);
-    fs::write(
-        status_path,
-        serde_json::to_string_pretty(&serializable).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())
+    let body = serde_json::to_string_pretty(&serializable).map_err(|error| error.to_string())?;
+    security::atomic_write(status_path, body.as_bytes()).map_err(|error| error.to_string())
 }
 
 fn serialize_detached_panel_layout(
@@ -3013,9 +3471,25 @@ fn iso_timestamp_now() -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Chat with the in-app copilot: runs the agent loop (Ollama brain) against the live Action
 /// registry, letting the model call FluxNode tools to answer. `model` defaults to a local
-/// tool-calling model. Blocking — Tauri runs it off the UI thread.
+/// tool-calling model.
+///
+/// Heavy (drives an LLM chat loop + tool calls that may shell out) — genuinely run off the main
+/// thread via `spawn_blocking`. (Previously this doc comment claimed that already; the fn body
+/// was plain synchronous `#[tauri::command]`, which Tauri dispatches ON the UI/main thread — the
+/// claim was false until this conversion.)
 #[tauri::command]
-fn agent_chat(
+async fn agent_chat(
+    app: AppHandle,
+    message: String,
+    model: Option<String>,
+    allow_writes: Option<bool>,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || agent_chat_blocking(app, message, model, allow_writes))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn agent_chat_blocking(
     app: AppHandle,
     message: String,
     model: Option<String>,
@@ -3078,6 +3552,7 @@ pub fn run() {
             fs_pick_directory,
             fs_pick_media_file,
             get_app_version,
+            get_cloud_api_key,
             get_current_project_path,
             health_ping,
             inspect_asset_path,
@@ -3098,6 +3573,7 @@ pub fn run() {
             save_project_state,
             save_project_state_as,
             save_app_preferences,
+            set_cloud_api_key,
             shell_open_path,
             start_export_job,
             comfy_ping,
@@ -3170,6 +3646,118 @@ mod tests {
         assert_eq!(url_encode_svg("abcXYZ-_.~09"), "abcXYZ-_.~09");
         assert_eq!(url_encode_svg("a b"), "a%20b");
         assert_eq!(url_encode_svg("<svg>"), "%3Csvg%3E");
+    }
+
+    #[test]
+    fn apply_immer_patches_handles_replace_add_remove_and_length() {
+        let mut value = serde_json::json!({
+            "meta": { "name": "old", "stale": 1 },
+            "list": [1, 2, 3],
+        });
+        apply_immer_patches(
+            &mut value,
+            &[
+                serde_json::json!({ "op": "replace", "path": ["meta", "name"], "value": "new" }),
+                serde_json::json!({ "op": "add", "path": ["meta", "extra"], "value": true }),
+                serde_json::json!({ "op": "remove", "path": ["meta", "stale"] }),
+                serde_json::json!({ "op": "replace", "path": ["list", 0], "value": 9 }),
+                serde_json::json!({ "op": "replace", "path": ["list", "length"], "value": 2 }),
+            ],
+        );
+        assert_eq!(value["meta"]["name"], serde_json::json!("new"));
+        assert_eq!(value["meta"]["extra"], serde_json::json!(true));
+        assert!(value["meta"].get("stale").is_none());
+        assert_eq!(value["list"], serde_json::json!([9, 2]));
+    }
+
+    #[test]
+    fn build_bounded_wal_lines_embeds_base_snapshot_then_drops_it() {
+        let base = serde_json::json!({
+            "id": "a", "timestamp": "t", "type": "x", "label": "l",
+            "projectSnapshot": { "meta": { "name": "p" } },
+            "patches": [],
+        })
+        .to_string();
+
+        let first = build_bounded_wal_lines(Vec::new(), &base).unwrap();
+        assert_eq!(first.len(), 1);
+        let stored: Value = serde_json::from_str(&first[0]).unwrap();
+        assert!(stored.get("projectSnapshot").is_some(), "first entry embeds a snapshot");
+        assert!(stored.get("patches").is_none(), "snapshot entry drops redundant patches");
+
+        // A subsequent entry (snapshot still within interval) stores patches only, even though the
+        // store handed us a full projectSnapshot alongside them.
+        let follow = serde_json::json!({
+            "id": "b", "timestamp": "t", "type": "x", "label": "l",
+            "projectSnapshot": { "meta": { "name": "p2" } },
+            "patches": [{ "op": "replace", "path": ["meta", "name"], "value": "p2" }],
+        })
+        .to_string();
+        let second = build_bounded_wal_lines(first, &follow).unwrap();
+        assert_eq!(second.len(), 2);
+        let stored: Value = serde_json::from_str(&second[1]).unwrap();
+        assert!(stored.get("projectSnapshot").is_none(), "non-base entry drops the snapshot");
+        assert!(stored.get("patches").is_some());
+    }
+
+    #[test]
+    fn build_bounded_wal_lines_caps_at_wal_limit_and_retains_a_snapshot() {
+        let mut lines: Vec<String> = Vec::new();
+        for i in 0..(WAL_LIMIT * 2) {
+            let entry = serde_json::json!({
+                "id": format!("id-{i}"), "timestamp": "t", "type": "x", "label": "l",
+                "projectSnapshot": { "meta": { "seq": i } },
+                "patches": [{ "op": "replace", "path": ["meta", "seq"], "value": i }],
+            })
+            .to_string();
+            lines = build_bounded_wal_lines(lines, &entry).unwrap();
+            assert!(lines.len() <= WAL_LIMIT, "never exceeds the ring-buffer cap");
+        }
+        assert_eq!(lines.len(), WAL_LIMIT);
+        let has_snapshot = lines.iter().any(|line| {
+            serde_json::from_str::<Value>(line)
+                .map(|value| value.get("projectSnapshot").is_some())
+                .unwrap_or(false)
+        });
+        assert!(has_snapshot, "a trimmed window still contains a snapshot to reconstruct from");
+    }
+
+    #[test]
+    fn reconstruct_project_from_wal_replays_patches_onto_latest_snapshot() {
+        let dir = std::env::temp_dir()
+            .join(format!("fluxnode-wal-reconstruct-{}", std::process::id()));
+        let autosave = dir.join("autosave");
+        fs::create_dir_all(&autosave).unwrap();
+
+        let mut lines: Vec<String> = Vec::new();
+        let base = serde_json::json!({
+            "id": "a", "timestamp": "t", "type": "x", "label": "l",
+            "projectSnapshot": { "meta": { "name": "base" }, "value": 1 },
+            "patches": [],
+        })
+        .to_string();
+        lines = build_bounded_wal_lines(lines, &base).unwrap();
+        let patch = serde_json::json!({
+            "id": "b", "timestamp": "t", "type": "x", "label": "l",
+            "projectSnapshot": { "meta": { "name": "later" }, "value": 2 },
+            "patches": [{ "op": "replace", "path": ["value"], "value": 2 }],
+        })
+        .to_string();
+        lines = build_bounded_wal_lines(lines, &patch).unwrap();
+
+        let body = format!("{}\n", lines.join("\n"));
+        fs::write(autosave.join("wal.jsonl"), body).unwrap();
+
+        let reconstructed = reconstruct_project_from_wal(&dir)
+            .unwrap()
+            .expect("WAL contains a snapshot");
+        let value: Value = serde_json::from_str(&reconstructed).unwrap();
+        // Base snapshot is retained (the follow-up entry's snapshot was dropped in favor of its
+        // patches), and the forward patch is replayed on top of it.
+        assert_eq!(value["meta"]["name"], serde_json::json!("base"));
+        assert_eq!(value["value"], serde_json::json!(2), "forward patch replayed on recovery");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -3382,7 +3970,7 @@ mod workflow_exec_tests {
             }
         });
 
-        let result = workflow_render_node(project.to_string(), "o1".to_string(), 160, 120)
+        let result = workflow_render_node_blocking(project.to_string(), "o1".to_string(), 160, 120)
             .expect("workflow_render_node should return");
         let parsed: Value = serde_json::from_str(&result).expect("valid json");
         let data_url = parsed.get("dataUrl").and_then(|v| v.as_str()).unwrap_or("");
@@ -3404,8 +3992,14 @@ mod workflow_exec_tests {
             ], "edges": [] }
         });
         // Port 1 refuses connections — ping fails fast, so no ComfyUI is needed.
-        let err = comfy_generate(project.to_string(), "g1".to_string(), "http://127.0.0.1:1".to_string(), 5)
-            .expect_err("unreachable ComfyUI should error");
+        let err = comfy_generate_blocking(
+            project.to_string(),
+            "g1".to_string(),
+            "http://127.0.0.1:1".to_string(),
+            5,
+            false,
+        )
+        .expect_err("unreachable ComfyUI should error");
         assert!(err.contains("not reachable"), "expected unreachable error, got: {err}");
     }
 }

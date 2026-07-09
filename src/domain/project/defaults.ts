@@ -1,3 +1,4 @@
+import { nextId } from '../id'
 import type {
   Asset,
   Clip,
@@ -15,7 +16,7 @@ function nowIso() {
 }
 
 function createProjectId(templateId: ProjectTemplateId) {
-  return `project-${templateId}-${Date.now()}`
+  return `${nextId('project')}-${templateId}`
 }
 
 function createVideoAsset(): Asset {

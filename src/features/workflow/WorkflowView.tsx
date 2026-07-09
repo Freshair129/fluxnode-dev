@@ -6,6 +6,9 @@ import type { NodeType, WorkflowNode, WorkflowState } from '../../domain/project
 import { buildNodePreviewSource, useProjectStore } from '../../store/project-store'
 import { isTauriRuntime } from '../../services/ipc/tauri-runtime'
 import { useModalA11y } from '../settings/useModalA11y'
+import { Button } from '../../components/Button'
+import { StatCard } from '../../components/StatCard'
+import { ContextMenu, ContextMenuItem, ContextMenuDivider } from '../../components/ContextMenu'
 
 const PORT_COLOR_MAP = {
   video: '#e0ff00',
@@ -150,6 +153,13 @@ export function WorkflowView() {
   const panOriginRef = useRef<{ x: number; y: number } | null>(null)
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const denseEdgeCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  // Roving tabindex: node cards are one composite list on the canvas — only
+  // the "current" node is a real tab stop; Up/Down arrow moves between the
+  // rest in graph order (a free-form 2D layout has no unambiguous spatial
+  // "next", so document order is the pragmatic, still fully keyboard-operable
+  // choice here).
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
+  const nodeElementRefs = useRef(new Map<string, HTMLElement>())
   const filteredNodeTypes = useMemo(
     () =>
       WORKFLOW_NODE_TYPES.filter((type) =>
@@ -333,6 +343,20 @@ export function WorkflowView() {
 
     event.preventDefault()
     action()
+  }
+
+  const effectiveFocusedNodeId = focusedNodeId ?? workflow.nodes[0]?.id ?? null
+
+  function moveNodeFocus(fromNodeId: string, direction: 1 | -1) {
+    const currentIndex = workflow.nodes.findIndex((node) => node.id === fromNodeId)
+    const nextNode = workflow.nodes[currentIndex + direction]
+
+    if (!nextNode) {
+      return
+    }
+
+    setFocusedNodeId(nextNode.id)
+    nodeElementRefs.current.get(nextNode.id)?.focus()
   }
 
   const displayedNodePositions = useMemo(
@@ -649,13 +673,14 @@ export function WorkflowView() {
     >
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-[1.5rem] border border-white/8 bg-black/20 p-4">
         <div>
-          <p className="text-[11px] uppercase tracking-[0.3em] text-[#7f8691]">Workflow Mode</p>
+          <p className="text-[11px] uppercase tracking-[0.3em] text-text-secondary">Workflow Mode</p>
           <h2 className="mt-2 font-display text-2xl font-semibold text-white">Node graph foundation</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[#98a1ad]">
             Node positions, edges, and compute mode are stored in the same project document as the timeline.
           </p>
-          <p className="mt-2 text-xs uppercase tracking-[0.2em] text-[#7f8691]">
-            Hold Space to pan • Scroll to zoom • Drag nodes • Click output then input to connect
+          <p id="workflow-canvas-hint" className="mt-2 text-xs uppercase tracking-[0.2em] text-text-secondary">
+            Hold Space to pan • Scroll to zoom • Drag nodes • Click output then input to connect. Drag from an output
+            port to an input port to wire two nodes together.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -670,7 +695,7 @@ export function WorkflowView() {
           <button
             type="button"
             onClick={openNodePicker}
-            className="inline-flex items-center gap-2 rounded-full bg-[#e0ff00] px-4 py-2 text-sm font-semibold text-black"
+            className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-black"
           >
             <Plus size={16} />
             Add Node
@@ -734,7 +759,7 @@ export function WorkflowView() {
           <button
             type="button"
             onClick={validateWorkflow}
-            className="inline-flex items-center gap-2 rounded-full border border-[#e0ff00]/25 bg-[#e0ff00]/10 px-4 py-2 text-sm text-[#f5ffd5]"
+            className="inline-flex items-center gap-2 rounded-full border border-accent/25 bg-accent/10 px-4 py-2 text-sm text-[#f5ffd5]"
           >
             <CheckCircle2 size={16} />
             Validate Graph
@@ -748,7 +773,7 @@ export function WorkflowView() {
           tabIndex={0}
           role="region"
           aria-label="Workflow canvas"
-          aria-description="Pan with space plus drag, zoom with the mouse wheel, and use the node toolbar to add graph nodes."
+          aria-describedby="workflow-canvas-hint"
           className={`relative overflow-hidden rounded-[1.5rem] border border-white/8 bg-[#0c0d0f] ${
             isHandToolActive ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : dragState ? 'cursor-grabbing' : 'cursor-default'
           }`}
@@ -850,7 +875,7 @@ export function WorkflowView() {
               className={`absolute right-4 top-4 z-10 rounded-full border px-4 py-2 text-xs ${
                 connectionFeedback.tone === 'error'
                   ? 'border-red-400/20 bg-red-500/15 text-red-100'
-                  : 'border-[#e0ff00]/25 bg-[#e0ff00]/10 text-[#f5ffd5]'
+                  : 'border-accent/25 bg-accent/10 text-[#f5ffd5]'
               }`}
             >
               {connectionFeedback.message}
@@ -938,7 +963,7 @@ export function WorkflowView() {
                 </svg>
                 {marqueeSelection ? (
                   <div
-                    className="pointer-events-none absolute border border-[#e0ff00]/70 bg-[#e0ff00]/10"
+                    className="pointer-events-none absolute border border-accent/70 bg-accent/10"
                     style={getMarqueeStyle(marqueeSelection)}
                   />
                 ) : null}
@@ -993,14 +1018,35 @@ export function WorkflowView() {
                   return (
                     <article
                       key={node.id}
+                      ref={(element) => {
+                        if (element) {
+                          nodeElementRefs.current.set(node.id, element)
+                        } else {
+                          nodeElementRefs.current.delete(node.id)
+                        }
+                      }}
                       onClick={(event) => {
                         if (dragState) {
                           return
                         }
+                        setFocusedNodeId(node.id)
                         selectNode(node.id, event.ctrlKey || event.metaKey)
+                      }}
+                      onFocus={(event) => {
+                        if (event.target === event.currentTarget) {
+                          setFocusedNodeId(node.id)
+                        }
                       }}
                       onKeyDown={(event) => {
                         activateWithKeyboard(event, () => selectNode(node.id, event.ctrlKey || event.metaKey))
+
+                        if (
+                          event.target === event.currentTarget &&
+                          (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+                        ) {
+                          event.preventDefault()
+                          moveNodeFocus(node.id, event.key === 'ArrowDown' ? 1 : -1)
+                        }
                       }}
                       onMouseDown={(event) => {
                         if (isHandToolActive || event.button !== 0) {
@@ -1049,14 +1095,14 @@ export function WorkflowView() {
                         selectNode(node.id, event.ctrlKey || event.metaKey)
                         setContextMenu({ type: 'node', x: event.clientX, y: event.clientY })
                       }}
-                      tabIndex={0}
+                      tabIndex={node.id === effectiveFocusedNodeId ? 0 : -1}
                       role="button"
-                      aria-label={`Workflow node ${node.label ?? node.id}, type ${node.type.replace('_', ' ')}`}
+                      aria-label={`Workflow node ${node.label ?? node.id}, type ${node.type.replace('_', ' ')}. Use Up or Down arrow to move between nodes.`}
                       className={`absolute cursor-pointer rounded-[1.4rem] border bg-[#17181b]/95 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl transition ${
                         selectedNodeIds.includes(node.id)
                           ? node.executionError
                             ? 'border-red-400/70 shadow-[0_0_0_1px_rgba(248,113,113,0.2),0_20px_60px_rgba(0,0,0,0.45)]'
-                            : 'border-[#e0ff00]/70 shadow-[0_0_0_1px_rgba(224,255,0,0.2),0_20px_60px_rgba(0,0,0,0.45)]'
+                            : 'border-accent/70 shadow-[0_0_0_1px_rgba(224,255,0,0.2),0_20px_60px_rgba(0,0,0,0.45)]'
                           : node.executionError
                             ? 'border-red-400/40'
                             : 'border-white/10'
@@ -1070,7 +1116,7 @@ export function WorkflowView() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="text-[11px] uppercase tracking-[0.25em] text-[#7f8691]">{node.type.replace('_', ' ')}</p>
+                          <p className="text-[11px] uppercase tracking-[0.25em] text-text-secondary">{node.type.replace('_', ' ')}</p>
                           <h3 className="mt-2 text-lg font-semibold text-white">{node.label ?? node.id}</h3>
                           {compact ? (
                             <p className="mt-2 text-xs text-[#96a0ac]">
@@ -1168,10 +1214,10 @@ export function WorkflowView() {
                               }}
                               className={`mt-4 inline-flex w-full items-center justify-center gap-2 rounded-[1rem] border px-4 py-2 text-sm font-semibold transition ${
                                 generating
-                                  ? 'cursor-wait border-[#e0ff00]/30 bg-[#e0ff00]/10 text-[#f5ffd5]'
+                                  ? 'cursor-wait border-accent/30 bg-accent/10 text-[#f5ffd5]'
                                   : !isTauri
-                                    ? 'cursor-not-allowed border-white/10 bg-white/5 text-[#7f8691] opacity-60'
-                                    : 'border-[#e0ff00]/40 bg-[#e0ff00] text-black hover:bg-[#eaff4d]'
+                                    ? 'cursor-not-allowed border-white/10 bg-white/5 text-text-secondary opacity-60'
+                                    : 'border-accent/40 bg-accent text-black hover:bg-[#eaff4d]'
                               }`}
                             >
                               {generating ? (
@@ -1209,7 +1255,7 @@ export function WorkflowView() {
         </div>
 
         <aside aria-label="Workflow status and actions" className="rounded-[1.5rem] border border-white/8 bg-[#17181b] p-4">
-          <p className="text-xs uppercase tracking-[0.25em] text-[#7f8691]">Workflow Status</p>
+          <p className="text-xs uppercase tracking-[0.25em] text-text-secondary">Workflow Status</p>
           <div className="mt-4 grid gap-3">
             <StatusCard
               icon={workflow.computeMode === 'local' ? Cpu : Cloud}
@@ -1251,7 +1297,7 @@ export function WorkflowView() {
           </div>
 
           <div className="mt-5 rounded-[1.25rem] border border-white/8 bg-black/20 p-4">
-            <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">Validation</p>
+            <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">Validation</p>
             <div aria-live="polite" className="mt-3 space-y-3">
               {combinedIssues.length === 0 ? (
                 <p className="text-sm text-[#d7f9a7]">No current validation issues.</p>
@@ -1272,7 +1318,7 @@ export function WorkflowView() {
             </div>
           </div>
           <div className="mt-5 rounded-[1.25rem] border border-white/8 bg-black/20 p-4">
-            <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">Node Actions</p>
+            <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">Node Actions</p>
             <div className="mt-3 flex flex-wrap gap-2">
               <ActionPill label="Select All" onClick={selectAllWorkflowNodes} />
               <ActionPill label="Copy" onClick={copySelectedNodes} />
@@ -1305,12 +1351,11 @@ export function WorkflowView() {
         </aside>
       </div>
       {contextMenu ? (
-        <div
-          role="menu"
-          aria-label={contextMenu.type === 'node' ? 'Workflow node actions' : 'Workflow canvas actions'}
-          className="fixed z-30 min-w-56 rounded-[1rem] border border-white/10 bg-[#101113]/95 p-2 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onClick={(event) => event.stopPropagation()}
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          label={contextMenu.type === 'node' ? 'Workflow node actions' : 'Workflow canvas actions'}
+          minWidthClassName="min-w-56"
         >
           {contextMenu.type === 'node' ? (
             <div className="space-y-1">
@@ -1381,7 +1426,7 @@ export function WorkflowView() {
               <ContextAction label="Validate Graph" onClick={runContextAction(validateWorkflow)} />
             </div>
           )}
-        </div>
+        </ContextMenu>
       ) : null}
       {showNodePicker ? (
         <WorkflowNodePicker
@@ -1435,7 +1480,7 @@ function WorkflowNodePicker({
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.28em] text-[#7f8691]">Node Picker</p>
+            <p className="text-[11px] uppercase tracking-[0.28em] text-text-secondary">Node Picker</p>
             <h3 id="workflow-node-picker-title" className="mt-2 text-2xl font-semibold text-white">Search and add a workflow node</h3>
           </div>
           <button
@@ -1448,13 +1493,13 @@ function WorkflowNodePicker({
           </button>
         </div>
         <label className="mt-4 flex items-center gap-3 rounded-[1.2rem] border border-white/10 bg-black/20 px-4 py-3">
-          <Search size={16} className="text-[#7f8691]" />
+          <Search size={16} className="text-text-secondary" />
           <input
             value={nodeSearch}
             onChange={(event) => onSearchChange(event.target.value)}
             placeholder="Search nodes like shader, output, ai..."
             aria-label="Search workflow node types"
-            className="w-full bg-transparent text-sm text-white outline-none placeholder:text-[#7f8691]"
+            className="w-full bg-transparent text-sm text-white outline-none placeholder:text-text-secondary"
             autoFocus
           />
         </label>
@@ -1465,9 +1510,9 @@ function WorkflowNodePicker({
               type="button"
               onClick={() => onAddNode(type)}
               aria-label={`Add ${type.replace('_', ' ')} node`}
-              className="rounded-[1.2rem] border border-white/10 bg-black/20 p-4 text-left transition hover:border-[#e0ff00]/35 hover:bg-white/[0.04]"
+              className="rounded-[1.2rem] border border-white/10 bg-black/20 p-4 text-left transition hover:border-accent/35 hover:bg-white/[0.04]"
             >
-              <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">Node Type</p>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">Node Type</p>
               <p className="mt-2 text-base font-semibold text-white">{type.replace('_', ' ')}</p>
               <p className="mt-2 text-sm leading-6 text-[#9ca3af]">
                 Inputs {NODE_PORT_DEFINITIONS[type].inputs.length} / Outputs {NODE_PORT_DEFINITIONS[type].outputs.length}
@@ -1486,15 +1531,18 @@ function WorkflowNodePicker({
 function EmptyWorkflowState({ onAddNode }: { onAddNode: () => void }) {
   return (
     <div className="flex h-full flex-col items-center justify-center rounded-[1.25rem] border border-dashed border-white/10 bg-white/[0.02] px-6 py-12 text-center">
-      <ArrowRight size={28} className="text-[#e0ff00]" />
+      <ArrowRight size={28} className="text-accent" />
       <h3 className="mt-4 text-xl font-semibold text-white">Press N to add a node</h3>
       <p className="mt-2 max-w-md text-sm leading-6 text-[#8f97a2]">
         Build an AI/VFX graph by adding nodes and wiring their typed ports together. Every edit is undoable.
       </p>
+      <p className="mt-2 max-w-md text-xs leading-5 text-text-secondary">
+        Tip: drag from a node's output port to another node's input port to connect them.
+      </p>
       <button
         type="button"
         onClick={onAddNode}
-        className="mt-5 rounded-full bg-[#e0ff00] px-5 py-3 text-sm font-semibold text-black"
+        className="mt-5 rounded-full bg-accent px-5 py-3 text-sm font-semibold text-black"
       >
         Add Shader Node
       </button>
@@ -1530,7 +1578,7 @@ function PortGroup({
 }) {
   return (
     <div className="rounded-[1rem] border border-white/8 bg-black/20 p-3">
-      <p className="text-[11px] uppercase tracking-[0.25em] text-[#7f8691]">{side === 'input' ? 'Inputs' : 'Outputs'}</p>
+      <p className="text-[11px] uppercase tracking-[0.25em] text-text-secondary">{side === 'input' ? 'Inputs' : 'Outputs'}</p>
       <div className="mt-3 space-y-2">
         {ports.length === 0 ? (
           <p className="text-xs text-[#8f97a2]">No ports</p>
@@ -1589,8 +1637,11 @@ function PortGroup({
   )
 }
 
+// Thin delegating wrappers over the shared src/components primitives — kept
+// under their historical local names so the many call sites throughout this
+// file didn't need touching, while the actual styling now lives in one place.
 function StatusCard({
-  icon: Icon,
+  icon,
   label,
   value,
 }: {
@@ -1598,15 +1649,7 @@ function StatusCard({
   label: string
   value: string
 }) {
-  return (
-    <div className="rounded-[1.25rem] border border-white/8 bg-black/20 p-4">
-      <div className="flex items-center gap-3">
-        {Icon ? <Icon size={18} className="text-[#e0ff00]" /> : null}
-        <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">{label}</p>
-      </div>
-      <p className="mt-3 text-sm font-medium text-white">{value}</p>
-    </div>
-  )
+  return <StatCard icon={icon} label={label} value={value} note={undefined} />
 }
 
 function ActionPill({
@@ -1619,17 +1662,9 @@ function ActionPill({
   tone?: 'default' | 'danger'
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-full border px-3 py-2 text-xs ${
-        tone === 'danger'
-          ? 'border-red-400/20 bg-red-500/10 text-red-100'
-          : 'border-white/10 bg-white/5 text-white'
-      }`}
-    >
+    <Button size="sm" tone={tone} onClick={onClick}>
       {label}
-    </button>
+    </Button>
   )
 }
 
@@ -1644,25 +1679,11 @@ function ContextAction({
   tone?: 'default' | 'danger'
   disabled?: boolean
 }) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      disabled={disabled}
-      className={`block w-full rounded-xl px-3 py-2 text-left text-sm ${
-        tone === 'danger'
-          ? 'bg-red-500/10 text-red-100 hover:bg-red-500/15'
-          : 'text-white hover:bg-white/5'
-      } ${disabled ? 'cursor-not-allowed opacity-45 hover:bg-transparent' : ''}`}
-    >
-      {label}
-    </button>
-  )
+  return <ContextMenuItem label={label} onClick={onClick} tone={tone} disabled={disabled} />
 }
 
 function ContextDivider() {
-  return <div role="separator" className="my-1 border-t border-white/8" />
+  return <ContextMenuDivider />
 }
 
 function toCanvasPoint(
@@ -1839,11 +1860,11 @@ function getOutputCandidateState(
 function getPortClasses(candidateState: PortCandidateState) {
   switch (candidateState) {
     case 'compatible':
-      return 'border-[#e0ff00]/45 bg-[#e0ff00]/10 text-white'
+      return 'border-accent/45 bg-accent/10 text-white'
     case 'incompatible':
-      return 'border-white/5 bg-white/[0.02] text-[#7f8691] opacity-60'
+      return 'border-white/5 bg-white/[0.02] text-text-secondary opacity-60'
     case 'active':
-      return 'border-[#e0ff00]/60 bg-[#e0ff00]/14 text-white'
+      return 'border-accent/60 bg-accent/14 text-white'
     default:
       return 'border-white/5 bg-white/[0.03] text-white'
   }

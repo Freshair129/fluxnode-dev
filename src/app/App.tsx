@@ -1,6 +1,7 @@
-import { Suspense, lazy, useEffect, useMemo, useRef } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { Header } from '../features/header/Header'
 import { PreviewPanel } from '../features/preview/PreviewPanel'
+import { ErrorBoundary } from '../components/ErrorBoundary'
 import { useKeyboardShortcuts } from '../features/shortcuts/useKeyboardShortcuts'
 import {
   getDetachedPanelFromLocation,
@@ -38,6 +39,9 @@ const SettingsModal = lazy(() =>
 )
 const WorkspaceSharingModal = lazy(() =>
   import('../features/workspace/WorkspaceSharingModal').then((module) => ({ default: module.WorkspaceSharingModal })),
+)
+const ShortcutsCheatSheet = lazy(() =>
+  import('../features/shortcuts/ShortcutsCheatSheet').then((module) => ({ default: module.ShortcutsCheatSheet })),
 )
 
 export default function App() {
@@ -83,8 +87,9 @@ export default function App() {
   const suppressNextPanelBroadcastRef = useRef<string | null>(null)
   const lastAppliedPanelTransactionRef = useRef<string | null>(null)
   const previousActiveViewRef = useRef(activeView)
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false)
 
-  useKeyboardShortcuts()
+  useKeyboardShortcuts({ onOpenShortcutsHelp: () => setShowShortcutsHelp((current) => !current) })
 
   // Map timeline clips with an audio stream onto the decoupled audio-engine
   // input shape, then drive Web Audio playback in sync with the playhead.
@@ -491,17 +496,19 @@ export default function App() {
         aria-label={`${detachedPanel} detached panel`}
         className="min-h-screen bg-[#0d0d0d] p-4 text-white"
       >
-        {detachedPanel === 'preview' ? <PreviewPanel /> : null}
-        {detachedPanel === 'timeline' ? (
-          <Suspense fallback={<PanelFallback label="Loading timeline panel" />}>
-            <TimelineView />
-          </Suspense>
-        ) : null}
-        {detachedPanel === 'inspector' ? (
-          <Suspense fallback={<PanelFallback label="Loading inspector panel" />}>
-            <DetachedInspectorPanel />
-          </Suspense>
-        ) : null}
+        <ErrorBoundary label={`${detachedPanel} panel`}>
+          {detachedPanel === 'preview' ? <PreviewPanel /> : null}
+          {detachedPanel === 'timeline' ? (
+            <Suspense fallback={<PanelFallback label="Loading timeline panel" />}>
+              <TimelineView />
+            </Suspense>
+          ) : null}
+          {detachedPanel === 'inspector' ? (
+            <Suspense fallback={<PanelFallback label="Loading inspector panel" />}>
+              <DetachedInspectorPanel />
+            </Suspense>
+          ) : null}
+        </ErrorBoundary>
       </main>
     )
   }
@@ -510,37 +517,62 @@ export default function App() {
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(224,255,0,0.08),_transparent_28%),linear-gradient(180deg,_#0d0d0d_0%,_#090909_100%)] text-white">
       <div className="relative min-h-screen overflow-hidden">
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:80px_80px] opacity-20" />
-        <Header />
+        <ErrorBoundary label="Header" compact>
+          <Header />
+        </ErrorBoundary>
         <main
           aria-label="FluxNode workspace"
           className="relative z-10 h-[calc(100vh-4.5rem)] overflow-hidden p-4 md:p-5"
         >
-          <div className="flex h-full flex-col gap-4 overflow-auto">
-            <PreviewPanel />
-            <Suspense fallback={<PanelFallback label={activeView === 'timeline' ? 'Loading timeline workspace' : 'Loading workflow workspace'} />}>
-              {activeView === 'timeline' ? <TimelineView /> : <WorkflowView />}
-            </Suspense>
-            <Suspense fallback={<PanelFallback label="Loading system panels" compact />}>
-              <SystemPanels />
-            </Suspense>
-          </div>
+          <ErrorBoundary label="Workspace">
+            <div className="flex h-full flex-col gap-4 overflow-auto">
+              <ErrorBoundary label="Preview monitor">
+                <PreviewPanel />
+              </ErrorBoundary>
+              <ErrorBoundary label={activeView === 'timeline' ? 'Timeline' : 'Workflow'}>
+                <Suspense fallback={<PanelFallback label={activeView === 'timeline' ? 'Loading timeline workspace' : 'Loading workflow workspace'} />}>
+                  {activeView === 'timeline' ? <TimelineView /> : <WorkflowView />}
+                </Suspense>
+              </ErrorBoundary>
+              <ErrorBoundary label="System panels" compact>
+                <Suspense fallback={<PanelFallback label="Loading system panels" compact />}>
+                  <SystemPanels />
+                </Suspense>
+              </ErrorBoundary>
+            </div>
+          </ErrorBoundary>
         </main>
         {showWelcome ? (
-          <Suspense fallback={<ModalFallback label="Loading welcome flow" />}>
-            <WelcomeModal />
-          </Suspense>
+          <ErrorBoundary label="Welcome flow" compact>
+            <Suspense fallback={<ModalFallback label="Loading welcome flow" />}>
+              <WelcomeModal />
+            </Suspense>
+          </ErrorBoundary>
         ) : null}
         {showSettings ? (
-          <Suspense fallback={<ModalFallback label="Loading settings" />}>
-            <SettingsModal />
-          </Suspense>
+          <ErrorBoundary label="Settings" compact>
+            <Suspense fallback={<ModalFallback label="Loading settings" />}>
+              <SettingsModal />
+            </Suspense>
+          </ErrorBoundary>
         ) : null}
         {showWorkspaceSharing ? (
-          <Suspense fallback={<ModalFallback label="Loading workspace sharing" />}>
-            <WorkspaceSharingModal />
-          </Suspense>
+          <ErrorBoundary label="Workspace sharing" compact>
+            <Suspense fallback={<ModalFallback label="Loading workspace sharing" />}>
+              <WorkspaceSharingModal />
+            </Suspense>
+          </ErrorBoundary>
         ) : null}
-        <ErrorToasts />
+        {showShortcutsHelp ? (
+          <ErrorBoundary label="Shortcuts overlay" compact>
+            <Suspense fallback={<ModalFallback label="Loading shortcuts overlay" />}>
+              <ShortcutsCheatSheet open={showShortcutsHelp} onClose={() => setShowShortcutsHelp(false)} />
+            </Suspense>
+          </ErrorBoundary>
+        ) : null}
+        <ErrorBoundary label="Notifications" compact>
+          <ErrorToasts />
+        </ErrorBoundary>
       </div>
     </div>
   )

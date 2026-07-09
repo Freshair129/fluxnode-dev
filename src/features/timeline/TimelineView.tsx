@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -15,9 +15,17 @@ import {
   ScissorsLineDashed,
   Split,
   Trash2,
+  UploadCloud,
   Unlink2,
 } from 'lucide-react'
 import { useProjectStore } from '../../store/project-store'
+import { isTauriRuntime } from '../../services/ipc/tauri-runtime'
+import { useFileDropZone } from './useFileDropZone'
+import { ConfirmDialog } from '../../components/ConfirmDialog'
+import { PromptDialog } from '../../components/PromptDialog'
+import { Button } from '../../components/Button'
+import { Badge as SharedBadge } from '../../components/Badge'
+import { ContextMenu, ContextMenuItem, ContextMenuDivider } from '../../components/ContextMenu'
 
 export function TimelineView() {
   const timeline = useProjectStore((state) => state.project.timeline)
@@ -82,6 +90,86 @@ export function TimelineView() {
     | { type: 'track'; x: number; y: number }
     | null
   >(null)
+  const [dropNotice, setDropNotice] = useState<string | null>(null)
+  const dropNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleFilesDropped = useCallback(
+    (paths: string[]) => {
+      const isTauri = isTauriRuntime()
+
+      if (dropNoticeTimerRef.current) {
+        clearTimeout(dropNoticeTimerRef.current)
+      }
+      dropNoticeTimerRef.current = setTimeout(() => setDropNotice(null), 6000)
+
+      if (isTauri) {
+        // Desktop drops carry real absolute paths — import each one directly.
+        setDropNotice(
+          `Importing ${paths.length} dropped file${paths.length === 1 ? '' : 's'} (${paths[0]}${paths.length > 1 ? ', …' : ''})…`,
+        )
+        for (const path of paths) {
+          void importAssetFromPath(path)
+        }
+        return
+      }
+
+      // Browsers never expose an absolute filesystem path, so we fall back to the picker.
+      setDropNotice(
+        `Detected ${paths.length} dropped file${paths.length === 1 ? '' : 's'} — opening import picker (browser mode can't read a full file path, so pick it there to finish).`,
+      )
+      void importAssetFromPath()
+    },
+    [importAssetFromPath],
+  )
+  const assetDropZone = useFileDropZone<HTMLDivElement>(handleFilesDropped)
+  const tracksDropZone = useFileDropZone<HTMLDivElement>(handleFilesDropped)
+
+  // Roving tabindex: tracks are one composite list (Up/Down moves between
+  // tracks), clips are a second flattened list spanning every track (Up/Down
+  // moves between clips in track order). Only the "current" item in each
+  // list is a real tab stop; everything else is tabIndex=-1.
+  const [focusedTrackId, setFocusedTrackId] = useState<string | null>(null)
+  const [focusedClipId, setFocusedClipId] = useState<string | null>(null)
+  const trackNodeRefs = useRef(new Map<string, HTMLDivElement>())
+  const clipNodeRefs = useRef(new Map<string, HTMLElement>())
+  const flattenedClips = useMemo(
+    () => timeline.tracks.flatMap((track) => track.clips.map((clip) => ({ clip, trackId: track.id }))),
+    [timeline.tracks],
+  )
+  const effectiveFocusedTrackId = focusedTrackId ?? timeline.tracks[0]?.id ?? null
+  const effectiveFocusedClipId = focusedClipId ?? flattenedClips[0]?.clip.id ?? null
+
+  function moveTrackFocus(fromTrackId: string, direction: 1 | -1) {
+    const currentIndex = timeline.tracks.findIndex((track) => track.id === fromTrackId)
+    const nextTrack = timeline.tracks[currentIndex + direction]
+
+    if (!nextTrack) {
+      return
+    }
+
+    setFocusedTrackId(nextTrack.id)
+    trackNodeRefs.current.get(nextTrack.id)?.focus()
+  }
+
+  function moveClipFocus(fromClipId: string, direction: 1 | -1) {
+    const currentIndex = flattenedClips.findIndex((entry) => entry.clip.id === fromClipId)
+    const nextEntry = flattenedClips[currentIndex + direction]
+
+    if (!nextEntry) {
+      return
+    }
+
+    setFocusedClipId(nextEntry.clip.id)
+    clipNodeRefs.current.get(nextEntry.clip.id)?.focus()
+  }
+
+  useEffect(
+    () => () => {
+      if (dropNoticeTimerRef.current) {
+        clearTimeout(dropNoticeTimerRef.current)
+      }
+    },
+    [],
+  )
   const scrubTrackRef = useRef<HTMLDivElement | null>(null)
   const scrubSessionRef = useRef<{ lastAt: number; lastPlayhead: number; startedAt: string } | null>(null)
   const assetList = useMemo(() => Object.values(assets), [assets])
@@ -97,20 +185,27 @@ export function TimelineView() {
     setContextMenu(null)
   }
   const openSelectedClipProperties = () => void openDetachedPanel('inspector')
-  const promptForCustomSpeed = () => {
-    const value = window.prompt('Enter custom clip speed (0.25 - 4.00)', '1')
-
-    if (!value) {
-      return
-    }
-
+  const [customSpeedPromptOpen, setCustomSpeedPromptOpen] = useState(false)
+  const promptForCustomSpeed = () => setCustomSpeedPromptOpen(true)
+  const confirmCustomSpeed = (value: string) => {
     const parsed = Number(value)
 
     if (!Number.isFinite(parsed)) {
+      setCustomSpeedPromptOpen(false)
       return
     }
 
     setSelectedClipSpeed(Math.max(0.25, Math.min(4, parsed)))
+    setCustomSpeedPromptOpen(false)
+  }
+  const [deleteTrackConfirmOpen, setDeleteTrackConfirmOpen] = useState(false)
+  const requestDeleteSelectedTrack = () => {
+    if (selectedTrack && selectedTrack.clips.length > 0) {
+      setDeleteTrackConfirmOpen(true)
+      return
+    }
+
+    deleteSelectedTrack()
   }
   const activateWithKeyboard = (event: React.KeyboardEvent<HTMLElement>, action: () => void) => {
     if (event.key !== 'Enter' && event.key !== ' ') {
@@ -253,7 +348,7 @@ export function TimelineView() {
     >
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-[1.5rem] border border-white/8 bg-black/20 p-4">
         <div>
-          <p className="text-[11px] uppercase tracking-[0.3em] text-[#7f8691]">Timeline Mode</p>
+          <p className="text-[11px] uppercase tracking-[0.3em] text-text-secondary">Timeline Mode</p>
           <h2 className="mt-2 font-display text-2xl font-semibold text-white">Editorial command slice</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[#98a1ad]">
             Transport, clipboard, track controls, and workflow-linked clips now share one undoable project state.
@@ -276,7 +371,11 @@ export function TimelineView() {
             <FastForward size={16} />
             End
           </ToolbarButton>
-          <ToolbarButton tone="accent" onClick={addDemoClip}>
+          <ToolbarButton tone="accent" onClick={() => void importAssetFromPath()}>
+            <UploadCloud size={16} />
+            Import Media…
+          </ToolbarButton>
+          <ToolbarButton onClick={addDemoClip}>
             <Plus size={16} />
             Add Demo Clip
           </ToolbarButton>
@@ -312,9 +411,19 @@ export function TimelineView() {
         </div>
       </div>
 
+      {dropNotice ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="rounded-[1.25rem] border border-accent/25 bg-accent/10 px-4 py-3 text-sm text-[#f5ffd5]"
+        >
+          {dropNotice}
+        </div>
+      ) : null}
+
       <div className="grid flex-1 gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
         <aside aria-label="Timeline controls and asset library" className="rounded-[1.5rem] border border-white/8 bg-[#17181b] p-4">
-          <p className="text-xs uppercase tracking-[0.25em] text-[#7f8691]">Project Transport</p>
+          <p className="text-xs uppercase tracking-[0.25em] text-text-secondary">Project Transport</p>
           <div aria-live="polite" className="mt-4 grid gap-3 text-sm text-[#d7dce2]">
             <Metric label="Playhead" value={`${timeline.playhead.toFixed(1)}s`} />
             <Metric label="In / Out" value={`${timeline.inPoint ?? 0}s - ${timeline.outPoint ?? 0}s`} />
@@ -331,7 +440,7 @@ export function TimelineView() {
             <MiniButton onClick={fitTimelineToWindow}>Fit</MiniButton>
           </div>
           <div className="mt-4 rounded-2xl border border-white/8 bg-black/20 p-3">
-            <div className="flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">
+            <div className="flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.22em] text-text-secondary">
               <span>Scrub Timeline</span>
               <span>{scrubPreviewState.active ? `${scrubPreviewState.mode} ${scrubPreviewState.speed.toFixed(2)}x` : `${timeline.playhead.toFixed(2)}s`}</span>
             </div>
@@ -366,7 +475,7 @@ export function TimelineView() {
               className="mt-3 h-4 cursor-ew-resize rounded-full border border-white/8 bg-[linear-gradient(90deg,rgba(59,130,246,0.18),rgba(224,255,0,0.22))]"
             >
               <div
-                className="relative h-full rounded-full bg-[#e0ff00]/20"
+                className="relative h-full rounded-full bg-accent/20"
                 style={{ width: `${Math.max(0, Math.min(100, (timeline.playhead / Math.max(timelineEnd, 0.01)) * 100))}%` }}
               >
                 <span className="absolute right-0 top-1/2 h-5 w-1.5 -translate-y-1/2 rounded-full bg-[#f5ffd5] shadow-[0_0_0_1px_rgba(224,255,0,0.25)]" />
@@ -382,7 +491,7 @@ export function TimelineView() {
           </div>
 
           <div className="mt-4 border-t border-white/8 pt-4">
-            <p className="text-xs uppercase tracking-[0.25em] text-[#7f8691]">Track Actions</p>
+            <p className="text-xs uppercase tracking-[0.25em] text-text-secondary">Track Actions</p>
             <div className="mt-3 flex flex-wrap gap-2">
               <MiniButton onClick={addTrackAbove}>Add Above</MiniButton>
               <MiniButton onClick={addTrackBelow}>Add Below</MiniButton>
@@ -402,7 +511,7 @@ export function TimelineView() {
                 {selectedTrack?.solo ? 'Unsolo' : 'Solo'}
               </MiniButton>
               <MiniButton onClick={cycleSelectedTrackHeight}>Height</MiniButton>
-              <MiniButton tone="danger" onClick={deleteSelectedTrack}>
+              <MiniButton tone="danger" onClick={requestDeleteSelectedTrack}>
                 Delete Track
               </MiniButton>
             </div>
@@ -411,7 +520,7 @@ export function TimelineView() {
             </p>
             {selectedTrack?.type === 'audio' ? (
               <div className="mt-4 space-y-3 rounded-2xl border border-white/8 bg-black/20 p-3">
-                <label className="block text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">
+                <label className="block text-[11px] uppercase tracking-[0.22em] text-text-secondary">
                   Track Volume {selectedTrack.volume.toFixed(2)}x
                 </label>
                 <input
@@ -422,9 +531,9 @@ export function TimelineView() {
                   value={selectedTrack.volume}
                   onChange={(event) => setSelectedTrackVolume(Number(event.target.value))}
                   aria-label={`Track volume, ${selectedTrack.volume.toFixed(2)} times`}
-                  className="w-full accent-[#e0ff00]"
+                  className="w-full accent-accent"
                 />
-                <label className="block text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">
+                <label className="block text-[11px] uppercase tracking-[0.22em] text-text-secondary">
                   Track Pan {selectedTrack.pan.toFixed(2)}
                 </label>
                 <input
@@ -442,7 +551,7 @@ export function TimelineView() {
           </div>
 
           <div className="mt-4 border-t border-white/8 pt-4">
-            <p className="text-xs uppercase tracking-[0.25em] text-[#7f8691]">Clip Actions</p>
+            <p className="text-xs uppercase tracking-[0.25em] text-text-secondary">Clip Actions</p>
             <div className="mt-3 flex flex-wrap gap-2">
               <MiniButton onClick={() => moveSelectedClipToAdjacentTrack('up')}>
                 <ArrowUp size={14} />
@@ -465,9 +574,17 @@ export function TimelineView() {
             </div>
           </div>
 
-          <div className="mt-6 border-t border-white/8 pt-4">
+          <div
+            ref={assetDropZone.zoneRef}
+            {...assetDropZone.browserDragHandlers}
+            className={`mt-6 rounded-[1.25rem] border-t border-white/8 pt-4 outline-2 outline-offset-4 transition ${
+              assetDropZone.isActive ? 'bg-accent/[0.04] outline-accent/60' : 'outline-transparent'
+            }`}
+          >
             <div className="flex items-center justify-between gap-2">
-              <p className="text-xs uppercase tracking-[0.25em] text-[#7f8691]">Asset Library</p>
+              <p className="text-xs uppercase tracking-[0.25em] text-text-secondary">
+                Asset Library {assetDropZone.isActive ? '— drop to import' : ''}
+              </p>
               <span className="rounded-full border border-white/10 px-2 py-1 text-[10px] text-[#c5ccd6]">
                 {assetList.length} asset{assetList.length === 1 ? '' : 's'}
               </span>
@@ -476,7 +593,7 @@ export function TimelineView() {
               <button
                 type="button"
                 onClick={() => void importAssetFromPath()}
-                className="rounded-full bg-[#e0ff00] px-4 py-2 text-sm font-semibold text-black"
+                className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-black"
               >
                 Import Path
               </button>
@@ -507,7 +624,7 @@ export function TimelineView() {
                           className="h-full w-full object-cover"
                         />
                       ) : (
-                        <div className="px-2 text-center text-[10px] uppercase tracking-[0.2em] text-[#7f8691]">
+                        <div className="px-2 text-center text-[10px] uppercase tracking-[0.2em] text-text-secondary">
                           No Thumb
                         </div>
                       )}
@@ -527,7 +644,7 @@ export function TimelineView() {
                           {asset.status}
                         </span>
                       </div>
-                      <p className="mt-2 text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">
+                      <p className="mt-2 text-[11px] uppercase tracking-[0.22em] text-text-secondary">
                         {asset.type}
                         {asset.metadata.width && asset.metadata.height
                           ? ` | ${asset.metadata.width}x${asset.metadata.height}`
@@ -561,32 +678,60 @@ export function TimelineView() {
           </div>
         </aside>
 
-        <div role="group" aria-label="Timeline tracks" className="rounded-[1.5rem] border border-white/8 bg-[#0d0e10] p-4">
+        <div
+          ref={tracksDropZone.zoneRef}
+          {...tracksDropZone.browserDragHandlers}
+          role="group"
+          aria-label="Timeline tracks"
+          className={`rounded-[1.5rem] border p-4 outline-2 outline-offset-4 transition ${
+            tracksDropZone.isActive
+              ? 'border-accent/50 bg-accent/[0.04] outline-accent/60'
+              : 'border-white/8 bg-[#0d0e10] outline-transparent'
+          }`}
+        >
           {timeline.tracks.length === 0 ? (
-            <EmptyTimelineState onAddClip={addDemoClip} />
+            <EmptyTimelineState isDragActive={tracksDropZone.isActive} onImportMedia={() => void importAssetFromPath()} onAddClip={addDemoClip} />
           ) : (
             <div className="space-y-4">
               {timeline.tracks.map((track) => (
                 <div
                   key={track.id}
-                  onClick={() => selectTrack(track.id)}
-                  onKeyDown={(event) => activateWithKeyboard(event, () => selectTrack(track.id))}
+                  ref={(element) => {
+                    if (element) {
+                      trackNodeRefs.current.set(track.id, element)
+                    } else {
+                      trackNodeRefs.current.delete(track.id)
+                    }
+                  }}
+                  onClick={() => {
+                    setFocusedTrackId(track.id)
+                    selectTrack(track.id)
+                  }}
+                  onKeyDown={(event) => {
+                    activateWithKeyboard(event, () => selectTrack(track.id))
+
+                    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                      event.preventDefault()
+                      moveTrackFocus(track.id, event.key === 'ArrowDown' ? 1 : -1)
+                    }
+                  }}
+                  onFocus={() => setFocusedTrackId(track.id)}
                   onContextMenu={(event) => {
                     event.preventDefault()
                     selectTrack(track.id)
                     setContextMenu({ type: 'track', x: event.clientX, y: event.clientY })
                   }}
-                  tabIndex={0}
+                  tabIndex={track.id === effectiveFocusedTrackId ? 0 : -1}
                   role="button"
-                  aria-label={`Track ${track.name}, ${track.type}, ${track.clips.length} clips`}
+                  aria-label={`Track ${track.name}, ${track.type}, ${track.clips.length} clips. Use Up or Down arrow to move between tracks.`}
                   className={`rounded-[1.25rem] border bg-[#16171a] p-4 transition ${
-                    selectedTrackId === track.id ? 'border-[#e0ff00]/45' : 'border-white/8'
+                    selectedTrackId === track.id ? 'border-accent/45' : 'border-white/8'
                   }`}
                 >
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-white">{track.name}</p>
-                      <p className="text-xs uppercase tracking-[0.2em] text-[#7f8691]">{track.type} track</p>
+                      <p className="text-xs uppercase tracking-[0.2em] text-text-secondary">{track.type} track</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-[#c5ccd6]">
@@ -615,26 +760,40 @@ export function TimelineView() {
                       return (
                         <article
                           key={clip.id}
+                          ref={(element) => {
+                            if (element) {
+                              clipNodeRefs.current.set(clip.id, element)
+                            } else {
+                              clipNodeRefs.current.delete(clip.id)
+                            }
+                          }}
                           onClick={(event) => {
                             event.stopPropagation()
+                            setFocusedClipId(clip.id)
                             selectClip(clip.id, event.ctrlKey || event.metaKey)
                           }}
                           onKeyDown={(event) => {
                             event.stopPropagation()
                             activateWithKeyboard(event, () => selectClip(clip.id, event.ctrlKey || event.metaKey))
+
+                            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                              event.preventDefault()
+                              moveClipFocus(clip.id, event.key === 'ArrowDown' ? 1 : -1)
+                            }
                           }}
+                          onFocus={() => setFocusedClipId(clip.id)}
                           onContextMenu={(event) => {
                             event.preventDefault()
                             event.stopPropagation()
                             selectClip(clip.id, false)
                             setContextMenu({ type: 'clip', x: event.clientX, y: event.clientY })
                           }}
-                          tabIndex={0}
+                          tabIndex={clip.id === effectiveFocusedClipId ? 0 : -1}
                           role="button"
-                          aria-label={`Clip ${asset?.name ?? clip.assetId}, starts at ${clip.startTime.toFixed(1)} seconds, duration ${clip.duration.toFixed(1)} seconds`}
+                          aria-label={`Clip ${asset?.name ?? clip.assetId}, starts at ${clip.startTime.toFixed(1)} seconds, duration ${clip.duration.toFixed(1)} seconds. Use Up or Down arrow to move between clips.`}
                           className={`cursor-pointer rounded-[1rem] border p-4 transition ${
                             isSelected
-                              ? 'border-[#e0ff00]/70 bg-[linear-gradient(135deg,rgba(224,255,0,0.18),rgba(255,255,255,0.08))] shadow-[0_0_0_1px_rgba(224,255,0,0.2)]'
+                              ? 'border-accent/70 bg-[linear-gradient(135deg,rgba(224,255,0,0.18),rgba(255,255,255,0.08))] shadow-[0_0_0_1px_rgba(224,255,0,0.2)]'
                               : 'border-white/8 bg-[linear-gradient(135deg,rgba(224,255,0,0.15),rgba(255,255,255,0.04))]'
                           }`}
                         >
@@ -649,7 +808,7 @@ export function TimelineView() {
                                   />
                                 </div>
                               ) : (
-                                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black/25 text-[#e0ff00]">
+                                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black/25 text-accent">
                                   <Clapperboard size={18} aria-hidden="true" />
                                 </div>
                               )}
@@ -697,12 +856,10 @@ export function TimelineView() {
         </div>
       </div>
       {contextMenu ? (
-        <div
-          role="menu"
-          aria-label={contextMenu.type === 'clip' ? 'Clip actions' : 'Track actions'}
-          className="fixed z-30 min-w-52 rounded-[1rem] border border-white/10 bg-[#101113]/95 p-2 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onClick={(event) => event.stopPropagation()}
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          label={contextMenu.type === 'clip' ? 'Clip actions' : 'Track actions'}
         >
           {contextMenu.type === 'clip' ? (
             <div className="space-y-1">
@@ -733,7 +890,7 @@ export function TimelineView() {
               <ContextAction label="Add Track Below" onClick={runContextAction(addTrackBelow)} />
               <ContextAction label="Move Track Up" onClick={runContextAction(() => moveSelectedTrack('up'))} />
               <ContextAction label="Move Track Down" onClick={runContextAction(() => moveSelectedTrack('down'))} />
-              <ContextAction label="Delete Track" onClick={runContextAction(deleteSelectedTrack)} tone="danger" />
+              <ContextAction label="Delete Track" onClick={runContextAction(requestDeleteSelectedTrack)} tone="danger" />
               <ContextDivider />
               <ContextAction label="Rename Track" onClick={runContextAction(renameSelectedTrack)} />
               <ContextAction label={selectedTrack?.locked ? 'Unlock Track' : 'Lock Track'} onClick={runContextAction(toggleSelectedTrackLock)} />
@@ -745,27 +902,84 @@ export function TimelineView() {
               <ContextAction label="Track Height: Large" onClick={runContextAction(() => setSelectedTrackHeight(112))} />
             </div>
           )}
-        </div>
+        </ContextMenu>
       ) : null}
+      <PromptDialog
+        open={customSpeedPromptOpen}
+        title="Custom clip speed"
+        description="Enter a speed multiplier between 0.25x and 4.00x."
+        label="Speed"
+        defaultValue="1"
+        placeholder="1.00"
+        confirmLabel="Apply"
+        validate={(value) => {
+          const parsed = Number(value)
+          if (!Number.isFinite(parsed)) {
+            return 'Enter a valid number.'
+          }
+          return null
+        }}
+        onConfirm={confirmCustomSpeed}
+        onCancel={() => setCustomSpeedPromptOpen(false)}
+      />
+      <ConfirmDialog
+        open={deleteTrackConfirmOpen}
+        title="Delete track?"
+        description={
+          selectedTrack
+            ? `"${selectedTrack.name}" has ${selectedTrack.clips.length} clip${selectedTrack.clips.length === 1 ? '' : 's'} on it. Deleting the track removes them from the timeline (this is undoable with Ctrl+Z).`
+            : undefined
+        }
+        confirmLabel="Delete Track"
+        tone="danger"
+        onConfirm={() => {
+          deleteSelectedTrack()
+          setDeleteTrackConfirmOpen(false)
+        }}
+        onCancel={() => setDeleteTrackConfirmOpen(false)}
+      />
     </section>
   )
 }
 
-function EmptyTimelineState({ onAddClip }: { onAddClip: () => void }) {
+function EmptyTimelineState({
+  isDragActive,
+  onImportMedia,
+  onAddClip,
+}: {
+  isDragActive: boolean
+  onImportMedia: () => void
+  onAddClip: () => void
+}) {
   return (
-    <div className="flex h-full flex-col items-center justify-center rounded-[1.25rem] border border-dashed border-white/10 bg-white/[0.02] px-6 py-12 text-center">
-      <ScissorsLineDashed size={28} className="text-[#e0ff00]" aria-hidden="true" />
-      <h3 className="mt-4 text-xl font-semibold text-white">Drop media here to start</h3>
+    <div
+      className={`flex h-full flex-col items-center justify-center rounded-[1.25rem] border border-dashed px-6 py-12 text-center transition ${
+        isDragActive ? 'border-accent/60 bg-accent/[0.05]' : 'border-white/10 bg-white/[0.02]'
+      }`}
+    >
+      <ScissorsLineDashed size={28} className="text-accent" aria-hidden="true" />
+      <h3 className="mt-4 text-xl font-semibold text-white">
+        {isDragActive ? 'Release to import' : 'Drop media here to start'}
+      </h3>
       <p className="mt-2 max-w-md text-sm leading-6 text-[#8f97a2]">
         Drag video, audio, or images onto the timeline — or press Ctrl+I to import. Clips become editable, undoable tracks instantly.
       </p>
-      <button
-        type="button"
-        onClick={onAddClip}
-        className="mt-5 rounded-full bg-[#e0ff00] px-5 py-3 text-sm font-semibold text-black"
-      >
-        Add Demo Clip
-      </button>
+      <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+        <button
+          type="button"
+          onClick={onImportMedia}
+          className="rounded-full bg-accent px-5 py-3 text-sm font-semibold text-black"
+        >
+          Import Media…
+        </button>
+        <button
+          type="button"
+          onClick={onAddClip}
+          className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white"
+        >
+          Add Demo Clip
+        </button>
+      </div>
     </div>
   )
 }
@@ -773,21 +987,17 @@ function EmptyTimelineState({ onAddClip }: { onAddClip: () => void }) {
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-white/8 bg-black/20 p-3">
-      <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">{label}</p>
+      <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">{label}</p>
       <p className="mt-2 text-base font-semibold text-white">{value}</p>
     </div>
   )
 }
 
+// Thin delegating wrappers over the shared src/components primitives — kept
+// under their historical local names so the many call sites throughout this
+// file didn't need touching, while the actual styling now lives in one place.
 function Badge({ label, tone = 'default' }: { label: string; tone?: 'default' | 'warn' | 'danger' }) {
-  const classes =
-    tone === 'warn'
-      ? 'border-amber-300/20 bg-amber-500/10 text-amber-50'
-      : tone === 'danger'
-        ? 'border-red-400/20 bg-red-500/10 text-red-100'
-      : 'border-white/10 bg-black/20'
-
-  return <span className={`rounded-full border px-3 py-1 ${classes}`}>{label}</span>
+  return <SharedBadge label={label} tone={tone} />
 }
 
 function MiniButton({
@@ -800,17 +1010,9 @@ function MiniButton({
   tone?: 'default' | 'danger'
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`inline-flex items-center gap-1 rounded-full border px-3 py-2 text-xs ${
-        tone === 'danger'
-          ? 'border-red-400/20 bg-red-500/10 text-red-100'
-          : 'border-white/10 bg-white/5 text-white'
-      }`}
-    >
+    <Button size="sm" tone={tone} onClick={onClick}>
       {children}
-    </button>
+    </Button>
   )
 }
 
@@ -823,17 +1025,10 @@ function ToolbarButton({
   onClick: () => void
   tone?: 'default' | 'accent' | 'danger'
 }) {
-  const className =
-    tone === 'accent'
-      ? 'inline-flex items-center gap-2 rounded-full bg-[#e0ff00] px-4 py-2 text-sm font-semibold text-black'
-      : tone === 'danger'
-        ? 'inline-flex items-center gap-2 rounded-full border border-red-400/20 bg-red-500/10 px-4 py-2 text-sm text-red-100'
-        : 'inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white'
-
   return (
-    <button type="button" onClick={onClick} className={className}>
+    <Button size="md" tone={tone} onClick={onClick}>
       {children}
-    </button>
+    </Button>
   )
 }
 
@@ -846,24 +1041,11 @@ function ContextAction({
   onClick: () => void
   tone?: 'default' | 'danger'
 }) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      className={`block w-full rounded-xl px-3 py-2 text-left text-sm ${
-        tone === 'danger'
-          ? 'bg-red-500/10 text-red-100 hover:bg-red-500/15'
-          : 'text-white hover:bg-white/5'
-      }`}
-    >
-      {label}
-    </button>
-  )
+  return <ContextMenuItem label={label} onClick={onClick} tone={tone} />
 }
 
 function ContextDivider() {
-  return <div className="my-1 border-t border-white/8" />
+  return <ContextMenuDivider />
 }
 
 function KeyframeStrip({
@@ -884,8 +1066,8 @@ function KeyframeStrip({
 
   const propertyColorMap: Record<string, string> = {
     speed: '#facc15',
-    opacity: '#e0ff00',
-    volume: '#3b82f6',
+    opacity: 'var(--color-accent)',
+    volume: 'var(--color-cloud)',
     'transform.x': '#fb7185',
     'transform.y': '#f97316',
     'transform.scaleX': '#a78bfa',
@@ -959,7 +1141,7 @@ function Filmstrip({
               </div>
             ))
           : (
-            <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-[0.2em] text-[#7f8691]">
+            <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-[0.2em] text-text-secondary">
               No Thumbnail
             </div>
           )}

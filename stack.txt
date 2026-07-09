@@ -1,23 +1,22 @@
-สรุปเทคโนโลยีที่เลือกใช้สำหรับ **FluxNode** โดยเน้นการรองรับระบบ AI-Native และประสิทธิภาพสูงสุด ดังนี้ครับ:
+FluxNode — Actual Tech Stack (verified against the repo, 2026-07)
 
-### **สรุป Tech Stack สำหรับ FluxNode**
+This file previously described an earlier proposal (React Flow + FastAPI + Socket.IO +
+ffmpeg-next) that was never implemented. The stack below reflects what actually ships.
 
-| Layer | Technology | เหตุผลที่เลือก |
-| --- | --- | --- |
-| **Frontend UI** | **React + Tailwind CSS** | ให้ความเร็วในการพัฒนาและรองรับความยืดหยุ่นของ UI สูง |
-| **Node Canvas** | **React Flow** | เป็นมาตรฐานอุตสาหกรรมสำหรับการทำระบบ Node-based ที่จัดการ Canvas ได้ลื่นไหล |
-| **State Management** | **Zustand** | จัดการ State ของ Node และ Timeline ได้เบาและรวดเร็ว |
-| **Video Engine** | **Rust (Core)** | ใช้ประมวลผลวิดีโอ (FFmpeg-next) เพื่อความเร็วสูงสุดและปลอดภัยจาก Memory Leak |
-| **Compute Pipeline** | **Python (FastAPI) + ComfyUI** | เป็นหัวใจหลักของ AI/Generative Video ที่รองรับ Ecosystem ของ AI ได้ดีที่สุด |
-| **Communication** | **WebSockets (Socket.io)** | ใช้ส่งข้อมูลสถานะการ Render แบบ Real-time ระหว่าง Engine กับ UI |
-| **Desktop Bridge** | **Tauri** | ใช้รันบน Desktop โดยเชื่อมต่อ UI (Web) เข้ากับ Rust Core ได้อย่างแนบเนียน |
+| Layer               | Technology                                   | Notes |
+| ------------------- | --------------------------------------------- | ----- |
+| Frontend UI         | React 19 + TypeScript 6 (strict) + Tailwind CSS v4 | `src/features/`, `src/app/` |
+| Node / workflow canvas | Custom SVG-based canvas (no React Flow)   | `src/domain/workflow/`, `src/features/workflow/` |
+| State management    | Zustand (single store) + Immer for structural updates | `src/store/project-store.ts` |
+| Desktop shell        | Tauri v2                                     | `src-tauri/`, IPC via `@tauri-apps/api` |
+| Core / video engine  | Rust (Tauri backend), bundled ffmpeg/ffprobe binaries | `src-tauri/src/lib.rs`, `src-tauri/binaries/` (fetched via `scripts/fetch-ffmpeg.ps1`, not committed) |
+| AI Copilot / agent layer | Rust action registry + agent loop, local Ollama (default `qwen3.5:4b`), optional in-process llama.cpp (`--features llama`, stub), MCP server (`rmcp`) | `src-tauri/src/action.rs`, `brain/`, `mcp.rs` |
+| Media generation     | Pluggable adapter: stable-diffusion.cpp / ComfyUI (image), whisper (transcribe), piper (synth) | `src-tauri/src/media/` |
+| Communication        | Tauri IPC (commands/events) — no WebSockets/Socket.IO | |
+| Persistence          | `.fluxnode/` project directory (`project.json` + `autosave/` + `thumbnails/` + `proxies/` + `cache/`); localStorage fallback in browser-only dev mode | `src/services/persistence/` |
+| Testing              | Vitest | `npm test` |
+| Linting              | oxlint (no eslint) | `.oxlintrc.json` |
+| Formatting           | Prettier | `.prettierrc` |
 
----
-
-### **กลยุทธ์การพัฒนา (Development Strategy)**
-
-1. **Phase MVP (Phase 1):** พัฒนาด้วย **React Flow + FastAPI** ก่อน เพื่อให้ได้ Prototype ที่ใช้งานได้จริงและเห็นภาพ Workflow อย่างรวดเร็ว
-2. **Rust Integration:** เมื่อระบบเริ่มนิ่ง ให้เริ่มย้ายส่วน "Compute Pipeline" (ตัวจัดการ Raw Frame และ Rendering) ไปไว้ใน **Rust Core** เพื่อให้ FluxNode มีความเร็วระดับมืออาชีพ
-3. **Communication:** ใช้ **WebSockets** เป็นหัวใจในการซิงค์ข้อมูลระหว่างโหมด Timeline และโหมด Workflow เพื่อให้ผู้ใช้ได้รับประสบการณ์ที่ไร้รอยต่อ
-
-สรุปคือ **FluxNode** จะถูกสร้างขึ้นมาในโครงสร้างแบบ **Hybrid** คือใช้ความง่ายของ Web Technology ในการสร้าง UI ที่สวยงาม และใช้พลังของ Rust ในการเป็น Engine ประมวลผลครับ
+See `MASTERPLAN.md`, `STATUS.md`, and `docs/AI Copilot and Media Adapter Design.md` for the
+full architecture and current implementation status.

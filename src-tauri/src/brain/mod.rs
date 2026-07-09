@@ -12,7 +12,7 @@
 pub mod llama;
 pub mod ollama;
 
-use crate::action::{Registry, SideEffect};
+use crate::action::Registry;
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
@@ -90,20 +90,13 @@ pub fn run_agent(
             BrainReply::Text(text) => return Ok(text),
             BrainReply::ToolCalls(calls) => {
                 for call in calls {
-                    let gated = !allow_writes
-                        && matches!(
-                            reg.get(&call.name).map(|a| a.def().side_effect),
-                            Some(SideEffect::Mutating) | Some(SideEffect::LongJob)
-                        );
-                    let result = if gated {
-                        json!({ "error": format!(
-                            "'{}' is a write/long-running action and requires user confirmation; not executed",
-                            call.name
-                        ) })
-                    } else {
-                        reg.invoke(app, &call.name, call.arguments.clone())
-                            .unwrap_or_else(|e| json!({ "error": e }))
-                    };
+                    // `Registry::invoke` is the single write gate (see `action::Registry::invoke`)
+                    // — it refuses `Mutating`/`LongJob` actions itself when `allow_writes` is
+                    // false, so every caller (this loop, `action_invoke`, the MCP server) is
+                    // gated identically instead of each reimplementing the check.
+                    let result = reg
+                        .invoke(app, &call.name, call.arguments.clone(), allow_writes)
+                        .unwrap_or_else(|e| json!({ "error": e }));
                     messages.push(json!({
                         "role": "tool",
                         "name": call.name,

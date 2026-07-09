@@ -257,9 +257,9 @@ pub fn submit_prompt(endpoint: &str, prompt: &Value) -> Result<String, String> {
         .map_err(|e| format!("failed to submit prompt: {e}"))?;
 
     let status = resp.status();
-    let text = resp
-        .text()
+    let bytes = crate::security::read_capped_bytes(resp, crate::security::MAX_JSON_RESPONSE_BYTES)
         .map_err(|e| format!("failed to read submit response: {e}"))?;
+    let text = String::from_utf8_lossy(&bytes).into_owned();
     if !status.is_success() {
         return Err(format!("ComfyUI rejected prompt ({status}): {text}"));
     }
@@ -292,9 +292,10 @@ pub fn wait_for_output(
             .map_err(|e| format!("failed to poll history: {e}"))?;
 
         if resp.status().is_success() {
-            let history: Value = resp
-                .json()
-                .map_err(|e| format!("invalid history JSON: {e}"))?;
+            let body = crate::security::read_capped_bytes(resp, crate::security::MAX_JSON_RESPONSE_BYTES)
+                .map_err(|e| format!("failed to read history response: {e}"))?;
+            let history: Value =
+                serde_json::from_slice(&body).map_err(|e| format!("invalid history JSON: {e}"))?;
             // History is keyed by prompt_id; the entry may not exist yet while
             // the job is still queued.
             if let Some(entry) = history.get(prompt_id) {
@@ -374,9 +375,10 @@ pub fn fetch_image(endpoint: &str, image: &ComfyImageRef) -> Result<Vec<u8>, Str
         ));
     }
 
-    resp.bytes()
-        .map(|b| b.to_vec())
-        .map_err(|e| format!("failed to read image bytes: {e}"))
+    // Cap the buffered image size — a compromised/misbehaving ComfyUI instance (or anything
+    // else listening on the configured endpoint) shouldn't be able to OOM the app via an
+    // oversized/streamed response.
+    crate::security::read_capped_bytes(resp, crate::security::MAX_DOWNLOAD_BYTES)
 }
 
 // ---------------------------------------------------------------------------

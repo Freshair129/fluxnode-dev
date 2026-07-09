@@ -5,17 +5,18 @@ import type {
   WalEntry,
 } from '../../domain/project/types'
 import { invokeCommand } from '../ipc/tauri-commands'
+import { migrateProject } from './migrate-project'
 import type { ProjectRepository } from './project-repository'
 
 export class TauriProjectRepository implements ProjectRepository {
   async load(): Promise<FluxNodeProject | null> {
     const response = await invokeCommand<string | null>('load_project_state')
-    return response ? normalizeLoadedProject(JSON.parse(response) as FluxNodeProject) : null
+    return response ? migrateProject(JSON.parse(response) as FluxNodeProject) : null
   }
 
   async loadFromPath(path: string): Promise<FluxNodeProject | null> {
     const response = await invokeCommand<string | null>('open_project_at_path', { path })
-    return response ? normalizeLoadedProject(JSON.parse(response) as FluxNodeProject) : null
+    return response ? migrateProject(JSON.parse(response) as FluxNodeProject) : null
   }
 
   async save(project: FluxNodeProject): Promise<void> {
@@ -39,6 +40,12 @@ export class TauriProjectRepository implements ProjectRepository {
   }
 
   async appendWal(entry: WalEntry): Promise<void> {
+    // Ring-buffer bounding / quota handling for the WAL ledger itself lives in the Rust
+    // backend (src-tauri), which is out of scope for this pass. What we control here is
+    // the shape of `entry`: the store now sends immer `patches` for most entries and only
+    // an occasional full `projectSnapshot` (see project-store.ts applyMutation), so entries
+    // crossing this boundary are already far smaller than the old full-snapshot-per-entry
+    // scheme even before any server-side bounding.
     await invokeCommand('append_wal_entry', {
       entryJson: JSON.stringify(entry),
     })
@@ -67,24 +74,4 @@ export class TauriProjectRepository implements ProjectRepository {
     })
     return response
   }
-}
-
-function normalizeLoadedProject(project: FluxNodeProject) {
-  if (project.meta.section11TargetProfileOverride !== null && typeof project.meta.section11TargetProfileOverride !== 'string') {
-    project.meta.section11TargetProfileOverride = null
-  }
-
-  if (!Array.isArray(project.meta.section11ProofHistory)) {
-    project.meta.section11ProofHistory = []
-  }
-
-  if (!Array.isArray(project.meta.section11CoverageMapHistory)) {
-    project.meta.section11CoverageMapHistory = []
-  }
-
-  if (!Array.isArray(project.meta.section11CapturePacketHistory)) {
-    project.meta.section11CapturePacketHistory = []
-  }
-
-  return project
 }

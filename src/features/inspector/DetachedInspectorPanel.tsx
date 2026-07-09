@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link2, Layers3, PlaySquare, SlidersHorizontal } from 'lucide-react'
 import type { AudioMixInputSetting, UniformValue, WorkflowNode } from '../../domain/project/types'
 import { useProjectStore } from '../../store/project-store'
+import { PromptDialog } from '../../components/PromptDialog'
 
 export function DetachedInspectorPanel() {
   const project = useProjectStore((state) => state.project)
@@ -153,10 +154,10 @@ export function DetachedInspectorPanel() {
 
   return (
     <section className="rounded-[1.75rem] border border-white/10 bg-[#111214] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
-      <p className="text-[11px] uppercase tracking-[0.28em] text-[#7f8691]">Detached Inspector</p>
+      <p className="text-[11px] uppercase tracking-[0.28em] text-text-secondary">Detached Inspector</p>
       <h2 className="mt-2 text-2xl font-semibold text-white">Selection properties</h2>
       <div className="mt-5 overflow-hidden rounded-[1.5rem] border border-white/8 bg-black/20 p-4">
-        <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">Node Preview</p>
+        <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">Node Preview</p>
         <div className="mt-3 aspect-square overflow-hidden rounded-[1.2rem] border border-white/10 bg-[#0c0d0f]">
           {nodePreview ? (
             <img
@@ -211,13 +212,13 @@ export function DetachedInspectorPanel() {
       <div className="mt-5 grid gap-4 xl:grid-cols-2">
         <section className="rounded-[1.4rem] border border-white/8 bg-black/20 p-4">
           <div className="flex items-center gap-3">
-            <Layers3 size={18} className="text-[#e0ff00]" />
-            <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">Node Properties</p>
+            <Layers3 size={18} className="text-accent" />
+            <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">Node Properties</p>
           </div>
           {selectedNode ? (
             <div className="mt-4 space-y-4">
               <label className="block">
-                <span className="text-[11px] uppercase tracking-[0.18em] text-[#7f8691]">Label</span>
+                <span className="text-[11px] uppercase tracking-[0.18em] text-text-secondary">Label</span>
                 <input
                   value={nodeLabelDraft}
                   onChange={(event) => setNodeLabelDraft(event.target.value)}
@@ -275,7 +276,7 @@ export function DetachedInspectorPanel() {
               ) : null}
               {nodeComputeSource ? (
                 <div className="rounded-[1.1rem] border border-white/8 bg-[#111214] p-4">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-[#7f8691]">AI Compute Source</p>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-text-secondary">AI Compute Source</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {(['project', 'local', 'cloud'] as const).map((source) => (
                       <button
@@ -287,7 +288,7 @@ export function DetachedInspectorPanel() {
                         aria-label={`Compute source ${source}`}
                         className={`rounded-full px-3 py-2 text-xs ${
                           nodeComputeSource === source
-                            ? 'bg-[#e0ff00] font-semibold text-black'
+                            ? 'bg-accent font-semibold text-black'
                             : 'border border-white/10 bg-white/5 text-white'
                         } disabled:cursor-not-allowed disabled:opacity-40`}
                       >
@@ -306,8 +307,8 @@ export function DetachedInspectorPanel() {
         </section>
         <section className="rounded-[1.4rem] border border-white/8 bg-black/20 p-4">
           <div className="flex items-center gap-3">
-            <SlidersHorizontal size={18} className="text-[#e0ff00]" />
-            <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">Clip Properties</p>
+            <SlidersHorizontal size={18} className="text-accent" />
+            <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">Clip Properties</p>
           </div>
           {selectedClip ? (
             <div className="mt-4 space-y-4">
@@ -320,7 +321,7 @@ export function DetachedInspectorPanel() {
                 <Metric label="Linked Clip" value={selectedClip.linkedClipId ?? 'None'} />
               </div>
               <div className="rounded-[1rem] border border-white/8 bg-[#111214] p-3">
-                <p className="text-[11px] uppercase tracking-[0.18em] text-[#7f8691]">Timing & Trim</p>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-text-secondary">Timing & Trim</p>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   <TransformField
                     label="Start Time"
@@ -375,7 +376,7 @@ export function DetachedInspectorPanel() {
               <div className="rounded-[1rem] border border-white/8 bg-[#111214] p-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className="text-[11px] uppercase tracking-[0.18em] text-[#7f8691]">Keyframes</p>
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-text-secondary">Keyframes</p>
                     <p className="mt-2 text-xs leading-5 text-[#9ca3af]">
                       Add keyframes at playhead {Math.max(0, project.timeline.playhead - selectedClip.startTime).toFixed(2)}s within the selected clip.
                     </p>
@@ -457,7 +458,7 @@ export function DetachedInspectorPanel() {
                         </div>
                         <div className="mt-3 grid gap-3 md:grid-cols-3">
                           <label className="block">
-                            <span className="text-[11px] uppercase tracking-[0.16em] text-[#7f8691]">Time</span>
+                            <span className="text-[11px] uppercase tracking-[0.16em] text-text-secondary">Time</span>
                             <input
                               type="number"
                               min={0}
@@ -471,7 +472,7 @@ export function DetachedInspectorPanel() {
                             />
                           </label>
                           <label className="block">
-                            <span className="text-[11px] uppercase tracking-[0.16em] text-[#7f8691]">Value</span>
+                            <span className="text-[11px] uppercase tracking-[0.16em] text-text-secondary">Value</span>
                             <input
                               type="number"
                               step={0.05}
@@ -483,7 +484,7 @@ export function DetachedInspectorPanel() {
                             />
                           </label>
                           <label className="block">
-                            <span className="text-[11px] uppercase tracking-[0.16em] text-[#7f8691]">Easing</span>
+                            <span className="text-[11px] uppercase tracking-[0.16em] text-text-secondary">Easing</span>
                             <select
                               value={keyframe.easing}
                               onChange={(event) =>
@@ -511,7 +512,7 @@ export function DetachedInspectorPanel() {
                 )}
               </div>
               <div className="rounded-[1rem] border border-white/8 bg-[#111214] p-3">
-                <p className="text-[11px] uppercase tracking-[0.18em] text-[#7f8691]">Transform</p>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-text-secondary">Transform</p>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   <TransformField
                     label="Position X"
@@ -581,8 +582,8 @@ function InspectorCard({
   return (
     <div className="rounded-[1.25rem] border border-white/8 bg-black/20 p-4">
       <div className="flex items-center gap-3">
-        <Icon size={18} className="text-[#e0ff00]" />
-        <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">{label}</p>
+        <Icon size={18} className="text-accent" />
+        <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">{label}</p>
       </div>
       <p className="mt-3 text-base font-medium text-white">{title}</p>
       <p className="mt-2 text-sm leading-6 text-[#9ca3af]">{note}</p>
@@ -593,7 +594,7 @@ function InspectorCard({
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[1rem] border border-white/8 bg-[#111214] p-3">
-      <p className="text-[11px] uppercase tracking-[0.18em] text-[#7f8691]">{label}</p>
+      <p className="text-[11px] uppercase tracking-[0.18em] text-text-secondary">{label}</p>
       <p className="mt-2 break-all text-sm text-white">{value}</p>
     </div>
   )
@@ -616,7 +617,7 @@ function RangeField({
 }) {
   return (
     <label className="block rounded-[1rem] border border-white/8 bg-[#111214] p-3">
-      <span className="text-[11px] uppercase tracking-[0.18em] text-[#7f8691]">{label}</span>
+      <span className="text-[11px] uppercase tracking-[0.18em] text-text-secondary">{label}</span>
       <input
         type="range"
         min={min}
@@ -624,7 +625,7 @@ function RangeField({
         step={step}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
-        className="mt-3 w-full accent-[#e0ff00]"
+        className="mt-3 w-full accent-accent"
       />
     </label>
   )
@@ -643,7 +644,7 @@ function TransformField({
 }) {
   return (
     <label className="block rounded-[0.9rem] border border-white/8 bg-[#0f1012] p-3">
-      <span className="text-[11px] uppercase tracking-[0.16em] text-[#7f8691]">{label}</span>
+      <span className="text-[11px] uppercase tracking-[0.16em] text-text-secondary">{label}</span>
       <input
         type="number"
         step={step}
@@ -673,7 +674,7 @@ function NodeDataEditor({
 
   return (
     <div className="rounded-[1rem] border border-white/8 bg-[#111214] p-3">
-      <p className="text-[11px] uppercase tracking-[0.18em] text-[#7f8691]">Node Settings</p>
+      <p className="text-[11px] uppercase tracking-[0.18em] text-text-secondary">Node Settings</p>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         {node.type === 'camera' ? (
           <>
@@ -801,51 +802,60 @@ function ShaderUniformEditor({
   onChange: (uniforms: Record<string, UniformValue>) => void
 }) {
   const uniformEntries = Object.entries(uniforms)
+  const [uniformPrompt, setUniformPrompt] = useState<{ mode: 'add' } | { mode: 'rename'; key: string } | null>(null)
 
-  const addUniform = () => {
-    const nextKey = window.prompt('Enter a unique uniform name', `uniform_${uniformEntries.length + 1}`)
+  const addUniform = () => setUniformPrompt({ mode: 'add' })
+  const renameUniform = (uniformKey: string) => setUniformPrompt({ mode: 'rename', key: uniformKey })
 
-    if (!nextKey) {
-      return
+  const validateUniformName = (value: string) => {
+    if (!uniformPrompt) {
+      return null
     }
 
-    const trimmedKey = nextKey.trim()
+    const trimmedKey = value.trim()
 
-    if (trimmedKey.length === 0 || uniforms[trimmedKey]) {
-      return
+    if (trimmedKey.length === 0) {
+      return 'Enter a uniform name.'
     }
 
-    onChange({
-      ...uniforms,
-      [trimmedKey]: { type: 'float', value: 0 },
-    })
+    const isRenameNoop = uniformPrompt.mode === 'rename' && trimmedKey === uniformPrompt.key
+
+    if (!isRenameNoop && uniforms[trimmedKey]) {
+      return 'A uniform with this name already exists.'
+    }
+
+    return null
   }
 
-  const renameUniform = (uniformKey: string) => {
-    const nextKey = window.prompt('Rename uniform', uniformKey)
-
-    if (!nextKey) {
+  const confirmUniformPrompt = (value: string) => {
+    if (!uniformPrompt) {
       return
     }
 
-    const trimmedKey = nextKey.trim()
+    const trimmedKey = value.trim()
 
-    if (trimmedKey.length === 0 || (trimmedKey !== uniformKey && uniforms[trimmedKey])) {
-      return
+    if (uniformPrompt.mode === 'add') {
+      onChange({
+        ...uniforms,
+        [trimmedKey]: { type: 'float', value: 0 },
+      })
+    } else {
+      const uniformKey = uniformPrompt.key
+      const renamedUniforms = Object.entries(uniforms).reduce<Record<string, UniformValue>>((result, [key, entryValue]) => {
+        result[key === uniformKey ? trimmedKey : key] = entryValue
+        return result
+      }, {})
+
+      onChange(renamedUniforms)
     }
 
-    const renamedUniforms = Object.entries(uniforms).reduce<Record<string, UniformValue>>((result, [key, value]) => {
-      result[key === uniformKey ? trimmedKey : key] = value
-      return result
-    }, {})
-
-    onChange(renamedUniforms)
+    setUniformPrompt(null)
   }
 
   return (
     <div className="rounded-[0.9rem] border border-white/8 bg-[#0f1012] p-3 md:col-span-2">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-[11px] uppercase tracking-[0.16em] text-[#7f8691]">Uniforms</span>
+        <span className="text-[11px] uppercase tracking-[0.16em] text-text-secondary">Uniforms</span>
         <button type="button" onClick={addUniform} className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white">
           Add Uniform
         </button>
@@ -905,6 +915,16 @@ function ShaderUniformEditor({
           ))
         )}
       </div>
+      <PromptDialog
+        open={uniformPrompt !== null}
+        title={uniformPrompt?.mode === 'rename' ? 'Rename uniform' : 'Add uniform'}
+        label="Uniform name"
+        defaultValue={uniformPrompt?.mode === 'rename' ? uniformPrompt.key : `uniform_${uniformEntries.length + 1}`}
+        confirmLabel={uniformPrompt?.mode === 'rename' ? 'Rename' : 'Add'}
+        validate={validateUniformName}
+        onConfirm={confirmUniformPrompt}
+        onCancel={() => setUniformPrompt(null)}
+      />
     </div>
   )
 }
@@ -932,7 +952,7 @@ function CompositorLayerEditor({
   return (
     <div className="rounded-[0.9rem] border border-white/8 bg-[#0f1012] p-3 md:col-span-2">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-[11px] uppercase tracking-[0.16em] text-[#7f8691]">Layers</span>
+        <span className="text-[11px] uppercase tracking-[0.16em] text-text-secondary">Layers</span>
         <button type="button" onClick={addLayer} className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white">
           Add Layer
         </button>
@@ -1004,7 +1024,7 @@ function AudioMixInputsEditor({
   return (
     <div className="rounded-[0.9rem] border border-white/8 bg-[#0f1012] p-3 md:col-span-2">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-[11px] uppercase tracking-[0.16em] text-[#7f8691]">Input Routing</span>
+        <span className="text-[11px] uppercase tracking-[0.16em] text-text-secondary">Input Routing</span>
         <button type="button" onClick={addInput} className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white">
           Add Input
         </button>
@@ -1122,7 +1142,7 @@ function TextField({
 }) {
   return (
     <label className="block rounded-[0.9rem] border border-white/8 bg-[#0f1012] p-3">
-      <span className="text-[11px] uppercase tracking-[0.16em] text-[#7f8691]">{label}</span>
+      <span className="text-[11px] uppercase tracking-[0.16em] text-text-secondary">{label}</span>
       <input
         type="text"
         value={value}
@@ -1144,7 +1164,7 @@ function TextAreaField({
 }) {
   return (
     <label className="block rounded-[0.9rem] border border-white/8 bg-[#0f1012] p-3 md:col-span-2">
-      <span className="text-[11px] uppercase tracking-[0.16em] text-[#7f8691]">{label}</span>
+      <span className="text-[11px] uppercase tracking-[0.16em] text-text-secondary">{label}</span>
       <textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -1168,7 +1188,7 @@ function SelectField({
 }) {
   return (
     <label className="block rounded-[0.9rem] border border-white/8 bg-[#0f1012] p-3">
-      <span className="text-[11px] uppercase tracking-[0.16em] text-[#7f8691]">{label}</span>
+      <span className="text-[11px] uppercase tracking-[0.16em] text-text-secondary">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -1187,7 +1207,7 @@ function SelectField({
 function PropertyDump({ title, value }: { title: string; value: unknown }) {
   return (
     <div className="rounded-[1rem] border border-white/8 bg-[#111214] p-3">
-      <p className="text-[11px] uppercase tracking-[0.18em] text-[#7f8691]">{title}</p>
+      <p className="text-[11px] uppercase tracking-[0.18em] text-text-secondary">{title}</p>
       <pre className="mt-3 overflow-auto whitespace-pre-wrap break-all text-xs leading-6 text-[#c8d0db]">
         {JSON.stringify(value, null, 2)}
       </pre>

@@ -2,6 +2,16 @@
 
 FluxNode is a Tauri v2 desktop video editor that combines a timeline-oriented editing surface with a node-based AI/VFX workflow. The current repository is a functional app shell with real state management, persistence, validation, render orchestration, performance guardrails, and proof tooling.
 
+> For the honest, up-to-date picture of what's implemented vs. pending, see **[STATUS.md](STATUS.md)**.
+
+## Prerequisites
+
+- **Node.js 20+** (see `.nvmrc`) and npm
+- **Rust toolchain** (stable, edition 2021) — install via [rustup](https://rustup.rs/); required for `tauri:dev` / `tauri:build` and any `cargo` command
+- **Tauri v2 system dependencies** for your OS (WebView2 on Windows is auto-installed by the Tauri CLI; see the [Tauri prerequisites guide](https://v2.tauri.app/start/prerequisites/) for macOS/Linux)
+- **Ollama** running locally, for the AI Copilot / agent layer (`brain/ollama.rs` talks to Ollama's `/api/chat`; default model `qwen3.5:4b`)
+- Optional: **CMake + LLVM/libclang** only if you plan to build with `--features llama` (in-process llama.cpp backend, currently a stub)
+
 ## Current Status
 
 - Core feature slices from `MASTERPLAN.md` are implemented across timeline editing, workflow graph editing, audio, export, error handling, keyboard shortcuts, onboarding, workspace sharing, and timeline-workflow sync.
@@ -60,9 +70,15 @@ FluxNode is agent-native: a single **Action registry** (`src-tauri/src/action.rs
 
 ## Important Docs
 
+- `STATUS.md` - living source of truth: what's implemented vs. pending, links to everything below
 - `MASTERPLAN.md` - primary technical specification
-- `MASTERPLAN Completion Audit.md` - current implementation status by major section
-- `MASTERPLAN Performance Evidence Audit.md` - Section 11 proof and guardrail status
-- `MASTERPLAN Remaining Work Report.html` - concise summary of what still blocks a fully complete claim
-- `Product Requirements Document.md` - product-level requirements
-- `Software Requirements Specification.md` - system-level requirements
+- `masterplan-completion-audit.md` - current implementation status by major section (author self-assessment, not externally verified)
+- `masterplan-performance-evidence-audit.md` - Section 11 proof and guardrail status (author self-assessment, not externally verified)
+- `masterplan-final-approval-packet.md` - record of an approved implementation slice (author self-assessment, not externally verified)
+- `product-requirements-document.md` - product-level requirements
+- `software-requirements-specification.md` - system-level requirements
+- `HANDOFF.md` - current AI Copilot / agent-layer handoff notes for the next contributor
+
+### Documentation language split
+
+Engineering docs (this README, `CLAUDE.md`, `AGENTS.md`, `HANDOFF.md`, `STATUS.md`, the MASTERPLAN family, PRD/SRS, `docs/`) are written in **English**. Some product-direction and design notes were originally authored in **Thai** and may still contain Thai passages (for example parts of `fluxnode-design-guide.md` and historical planning notes) — this is intentional, not an inconsistency, and reflects the primary author's working language for product/design thinking versus engineering documentation.

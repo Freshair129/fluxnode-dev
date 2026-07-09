@@ -1,0 +1,41 @@
+PROVISIONAL LICENSE NOTICE — READ BEFORE RELYING ON THIS FILE
+==============================================================
+
+This LICENSE file is a PLACEHOLDER, not a finalized legal decision. It exists
+so the repository is not silently "all rights reserved by default with no
+stated terms." The actual choice of license — proprietary/closed-source vs.
+a permissive or copyleft open-source license (e.g. MIT, Apache-2.0, AGPL-3.0)
+— is a BUSINESS decision that belongs to the project owner and has NOT been
+made yet. Nothing in this file should be read as that decision having been
+made in favor of open-sourcing the project.
+
+Until the owner replaces this file with a deliberate choice, the terms below
+apply, matching the "UNLICENSED" designation in package.json (i.e. the code
+is proprietary and all rights are reserved).
+
+--------------------------------------------------------------------------
+
+Copyright (c) 2026 FluxNode. All rights reserved.
+
+This software and associated documentation files (the "Software") are the
+proprietary property of the copyright holder. No license, express or
+implied, is granted to any person to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, or to permit
+persons to whom the Software is furnished to do so, except as may be
+separately agreed in writing by the copyright holder.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+--------------------------------------------------------------------------
+
+Note on relicensing: the copyright holder retains the right to relicense
+this Software, in whole or in part, under different terms at any time
+(including a permissive open-source license, a copyleft license, or a
+dual-license model), without notice to prior recipients, since no other
+license grant currently exists for third parties.

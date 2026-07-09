@@ -26,7 +26,7 @@ impl OllamaBrain {
         }
     }
 
-    /// Local Ollama; pass a tool-calling-capable model (e.g. `qwen3.5:4b`).
+    /// Local Ollama; pass a tool-calling-capable model (e.g. `qwen3:4b`).
     pub fn local(model: impl Into<String>) -> Self {
         Self::new("http://127.0.0.1:11434", model)
     }

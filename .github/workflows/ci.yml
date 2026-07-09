@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (lint / typecheck / test / build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (oxlint)
+        run: npm run lint
+
+      - name: Format check (prettier)
+        # Non-blocking for now: Prettier was just introduced in this pass and the existing
+        # `src/**` tree predates it, so `format:check` currently fails across ~40 files that
+        # are out of scope for this infra change. Flip continue-on-error off once `src/**`
+        # has had a one-time `npm run format` pass (owned by the frontend team, not infra).
+        continue-on-error: true
+        run: npm run format:check
+
+      - name: Typecheck
+        run: npx tsc -b
+
+      - name: Unit tests (vitest)
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Verify build output
+        run: node scripts/check-build-output.mjs
+
+  rust:
+    name: Rust (fmt / clippy / test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # Tauri v2 Linux build dependencies, needed even for `cargo check`/`cargo test`
+      # since src-tauri links against system webkit2gtk / gtk libs.
+      - name: Install Tauri Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            libssl-dev
+
+      - name: Cache cargo registry/build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: cargo fmt --check
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: cargo clippy
+        working-directory: src-tauri
+        # Clippy is not yet a hard gate: the codebase has an actively-evolving AI Copilot /
+        # agent layer (src-tauri/src/action.rs, brain/, media/) and clippy has not been run
+        # against it yet in CI. Flip this to non-continue-on-error once the backlog is clean.
+        continue-on-error: true
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test

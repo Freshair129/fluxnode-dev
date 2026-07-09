@@ -72,4 +72,4 @@ This PRD remains the product-direction document. The current repository implemen
 - The repo now contains a functional React + Tauri application rather than design-only artifacts.
 - Core feature slices for timeline editing, workflow editing, audio, export, validation, onboarding, workspace sharing, and timeline-workflow sync are implemented.
 - The main remaining repo-level gap is Section 11 proof breadth across more OS targets and hardware tiers.
-- For current code-truth and audit status, see `MASTERPLAN Completion Audit.md`, `MASTERPLAN Performance Evidence Audit.md`, and `MASTERPLAN Remaining Work Report.html`.
+- For current code-truth and audit status, see `STATUS.md`, `masterplan-completion-audit.md`, and `masterplan-performance-evidence-audit.md`.

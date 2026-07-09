@@ -1,4 +1,20 @@
 import { create } from 'zustand'
+import { applyPatches, enablePatches, produceWithPatches, setAutoFreeze, type Patch } from 'immer'
+
+// Immer's patches plugin (produceWithPatches/applyPatches, used by applyMutation and
+// undo/redo below) must be explicitly enabled before first use, even on immer 10.x.
+enablePatches()
+// getValidationState (below) normalizes several project fields (workflow groups, workspace
+// sharing, section 11 history, render queue, ...) by mutating its `project` argument in
+// place, and it's called on the *result* of applyMutation/applyGroupedMutations/undo/redo —
+// i.e. after immer has already finished producing that object. Immer deep-freezes produced
+// state by default, which would make every one of those post-produce normalize calls throw.
+// Rather than rewrite getValidationState and its six normalize* helpers into a pure/immer-
+// draft style (touching a lot of call sites, including ones that pass plain, never-frozen
+// objects like a freshly loaded/deserialized project), disable auto-freeze: immer's
+// structural sharing and patch generation are unaffected by this flag, it only removes the
+// runtime Object.freeze() safety net.
+setAutoFreeze(false)
 import {
   beginHistoryGroup,
   createHistoryState,
@@ -8,6 +24,7 @@ import {
   pushCommand,
   type HistoryState,
 } from '../domain/history/history-manager'
+import { nextId } from '../domain/id'
 import { createDefaultProject, createTemplateProject, type ProjectTemplateId } from '../domain/project/defaults'
 import { validateProject, type ProjectValidationIssue } from '../domain/project/validators'
 import type {
@@ -71,7 +88,7 @@ import { generateComfyNode, pingComfy } from '../services/ipc/comfy'
 import { isTauriRuntime } from '../services/ipc/tauri-runtime'
 import { generateWaveformPeaks } from '../services/ipc/waveform'
 import { pickMediaFile, pickRelinkDirectory } from '../services/ipc/file-dialog'
-import { loadAppPreferences, saveAppPreferences } from '../services/persistence/app-preferences'
+import { loadAppPreferences, saveAppPreferences, saveCloudApiKey } from '../services/persistence/app-preferences'
 import { closeDetachedPanelWindow, openDetachedPanelWindow } from '../services/ipc/detached-panels'
 import type { ShortcutCommand } from '../services/shortcuts/shortcut-config'
 import { DEFAULT_KEYBINDINGS } from '../services/shortcuts/shortcut-config'
@@ -169,7 +186,7 @@ interface ProjectStoreState {
   addNodeOfType: (type: NodeType) => void
   nudgeFirstNode: () => void
   createLargeCanvasBenchmarkScene: () => void
-  importAssetFromPath: () => Promise<void>
+  importAssetFromPath: (providedPath?: string) => Promise<void>
   rescanAssetStatuses: () => Promise<void>
   toggleAssetProxyPreference: (assetId: string) => void
   replaceSelectedAssetPath: () => Promise<void>
@@ -306,6 +323,10 @@ const PREVIEW_FRAME_CACHE_LIMIT = 18
 const NODE_PREVIEW_CACHE_LIMIT = 12
 const WAVEFORM_CACHE_LIMIT = 12
 const THUMBNAIL_CACHE_LIMIT = 36
+// Fixed per-entry estimate for a cached thumbnail's in-memory footprint (see
+// estimateRuntimeCacheUsageMb) — deliberately not derived from thumbnailPath.length, which
+// tracks path length rather than actual thumbnail size.
+const THUMBNAIL_ESTIMATED_BYTES = 16 * 1024
 const TIMELINE_PREVIEW_PREFETCH_FRAMES = 30
 const TIMELINE_PREVIEW_DECODE_CONCURRENCY = 4
 const MEMORY_PRESSURE_EVICTION_THRESHOLD_PCT = 70
@@ -320,6 +341,74 @@ const recoveryTimers: Record<RecoveryKind, ReturnType<typeof window.setTimeout> 
 const renderRetryTimers = new Map<string, ReturnType<typeof window.setTimeout>>()
 const pendingPreviewFrameRequests = new Set<string>()
 const pendingNodePreviewRequests = new Set<string>()
+
+// LRU bookkeeping for the runtime caches: previously trimRecordToLastN evicted purely
+// by insertion order, so an entry the user kept coming back to (a genuine "hot" entry) was
+// exactly as likely to be evicted as one that was produced once and never looked at again.
+// Each map tracks a monotonic "last touched" tick per cache key so trimming can keep the
+// actually-recently-used entries instead of just the most-recently-inserted ones. The tick
+// is per-cache (not shared) — only the relative order within one cache matters for its own
+// eviction, and keeping them separate avoids cross-cache traffic skewing any single cache.
+let previewFrameAccessTick = 0
+const previewFrameAccessOrder = new Map<string, number>()
+
+function touchPreviewFrameAccess(cacheKey: string) {
+  previewFrameAccessTick += 1
+  previewFrameAccessOrder.set(cacheKey, previewFrameAccessTick)
+}
+
+let nodePreviewFrameAccessTick = 0
+const nodePreviewFrameAccessOrder = new Map<string, number>()
+
+function touchNodePreviewFrameAccess(cacheKey: string) {
+  nodePreviewFrameAccessTick += 1
+  nodePreviewFrameAccessOrder.set(cacheKey, nodePreviewFrameAccessTick)
+}
+
+let waveformAccessTick = 0
+const waveformAccessOrder = new Map<string, number>()
+
+function touchWaveformAccess(cacheKey: string) {
+  waveformAccessTick += 1
+  waveformAccessOrder.set(cacheKey, waveformAccessTick)
+}
+
+let assetThumbnailAccessTick = 0
+const assetThumbnailAccessOrder = new Map<string, number>()
+
+function touchAssetThumbnailAccess(cacheKey: string) {
+  assetThumbnailAccessTick += 1
+  assetThumbnailAccessOrder.set(cacheKey, assetThumbnailAccessTick)
+}
+
+/**
+ * These caches/timers are module-level singletons (not part of the zustand store), so
+ * switching projects (new/open/load) previously left them populated with entries keyed by
+ * ids that no longer exist in the new project — a slow, unbounded leak across a long
+ * session of opening many projects. Call this alongside every cache reset that already
+ * happens on project switch.
+ */
+function clearModuleGlobalCaches() {
+  pendingPreviewFrameRequests.clear()
+  pendingNodePreviewRequests.clear()
+  previewFrameAccessOrder.clear()
+  nodePreviewFrameAccessOrder.clear()
+  waveformAccessOrder.clear()
+  assetThumbnailAccessOrder.clear()
+
+  for (const kind of Object.keys(recoveryTimers) as RecoveryKind[]) {
+    const timer = recoveryTimers[kind]
+    if (timer !== null) {
+      window.clearTimeout(timer)
+      recoveryTimers[kind] = null
+    }
+  }
+
+  for (const timer of renderRetryTimers.values()) {
+    window.clearTimeout(timer)
+  }
+  renderRetryTimers.clear()
+}
 
 function createIdleScrubPreviewState(): ScrubPreviewState {
   return {
@@ -378,6 +467,7 @@ function createInitialAppUpdateState(): AppUpdateState {
     },
     latestVersion: null,
     downloadUrl: null,
+    sha256: null,
     downloadedFilePath: null,
     notes: null,
     publishedAt: null,
@@ -826,7 +916,7 @@ function createWorkflowNodeOfType(type: NodeType, index: number): WorkflowNode {
       }
     case 'media_source':
       return {
-        id: `node-media-${Date.now()}-${index}`,
+        id: `${nextId('node-media')}-${index}`,
         type,
         position,
         data: {
@@ -853,10 +943,10 @@ function createUniqueMediaSourceNodeId(project: FluxNodeProject, preferredIndex?
   }
 
   let collisionIndex = 1
-  let candidateId = `node-media-${Date.now()}-${collisionIndex}`
+  let candidateId = `${nextId('node-media')}-${collisionIndex}`
   while (project.workflow.nodes.some((node) => node.id === candidateId)) {
     collisionIndex += 1
-    candidateId = `node-media-${Date.now()}-${collisionIndex}`
+    candidateId = `${nextId('node-media')}-${collisionIndex}`
   }
 
   return candidateId
@@ -1066,7 +1156,7 @@ function pushAssetCorruptError(
   detail?: string | null,
 ) {
   pushAppError(set, {
-    id: `error-${Date.now()}-${assetId}`,
+    id: `${nextId('error')}-${assetId}`,
     category: 'asset_corrupt',
     message,
     userMessage: `${assetName} cannot be decoded.`,
@@ -1122,6 +1212,7 @@ async function generateThumbnailForAssetRecord(
 
   try {
     const thumbnail = await generateAssetThumbnail(asset.id, runtimePath, 0)
+    touchAssetThumbnailAccess(asset.id)
     set((state) => ({
       ...trimRuntimeCachesForBudget({
         ...state,
@@ -1158,7 +1249,7 @@ async function generateThumbnailForAssetRecord(
       }
     })
     pushAppError(set, {
-      id: `error-${Date.now()}`,
+      id: nextId('error'),
       category: 'asset_corrupt',
       message: error instanceof Error ? error.message : `Thumbnail generation failed for ${asset.sourcePath}.`,
       userMessage: 'FluxNode could not generate a media thumbnail.',
@@ -1236,6 +1327,7 @@ async function replaceAssetPathById(
       const nextThumbnails = { ...state.assetThumbnails }
       const removedThumbnailPath = nextThumbnails[assetId]?.thumbnailPath ?? null
       delete nextThumbnails[assetId]
+      assetThumbnailAccessOrder.delete(assetId)
       const fallbackThumbnail = Object.values(nextThumbnails)[0]?.thumbnailPath ?? null
       return {
         project:
@@ -1298,6 +1390,52 @@ function getAllTimelineClips(project: FluxNodeProject) {
   return project.timeline.tracks.flatMap((track) => track.clips)
 }
 
+interface ClipLocation {
+  trackId: string
+  trackIndex: number
+  clipIndex: number
+}
+
+// Derived by-id clip index, memoized per committed project reference (immer gives every
+// mutation a new top-level `project` reference, so the WeakMap naturally invalidates once
+// the project changes — no manual bookkeeping needed). This turns repeated by-id lookups
+// against a *committed* project (i.e. `get().project` / `state.project`, never an in-flight
+// immer draft that a caller might still be splicing) from O(clip count) into O(1) without
+// changing the on-disk track/clip array shape. Not used inside mutate() callbacks, where the
+// draft's contents can change mid-callback and would make a cached index stale.
+const clipIndexByProject = new WeakMap<FluxNodeProject, Map<string, ClipLocation>>()
+
+function getClipIndex(project: FluxNodeProject): Map<string, ClipLocation> {
+  const cached = clipIndexByProject.get(project)
+
+  if (cached) {
+    return cached
+  }
+
+  const index = new Map<string, ClipLocation>()
+
+  project.timeline.tracks.forEach((track, trackIndex) => {
+    track.clips.forEach((clip, clipIndex) => {
+      index.set(clip.id, { trackId: track.id, trackIndex, clipIndex })
+    })
+  })
+
+  clipIndexByProject.set(project, index)
+  return index
+}
+
+/** O(1) by-id clip lookup against a committed project snapshot. See getClipIndex for caching notes. */
+function findCommittedClipById(project: FluxNodeProject, clipId: string) {
+  const location = getClipIndex(project).get(clipId)
+  return location ? project.timeline.tracks[location.trackIndex]?.clips[location.clipIndex] ?? null : null
+}
+
+/** O(1) by-id track lookup (which track owns this clip) against a committed project snapshot. */
+function findCommittedTrackByClipId(project: FluxNodeProject, clipId: string) {
+  const location = getClipIndex(project).get(clipId)
+  return location ? project.timeline.tracks[location.trackIndex] ?? null : null
+}
+
 function getTimelineDuration(project: FluxNodeProject) {
   return Math.max(
     ...project.timeline.tracks.flatMap((track) =>
@@ -1318,7 +1456,7 @@ function createTrack(project: FluxNodeProject, type: Track['type'], index: numbe
   const nextNumber = project.timeline.tracks.filter((track) => track.type === type).length + 1
 
   return {
-    id: `track-${type}-${Date.now()}-${index}`,
+    id: `${nextId('track')}-${type}-${index}`,
     name: `${type.charAt(0).toUpperCase()}${type.slice(1)} Track ${nextNumber}`,
     type,
     locked: false,
@@ -1352,9 +1490,30 @@ function getActiveRenderJob(project: FluxNodeProject) {
   )
 }
 
-function trimRecordToLastN<T>(record: Record<string, T>, limit: number) {
-  const entries = Object.entries(record)
-  return Object.fromEntries(entries.slice(Math.max(0, entries.length - limit)))
+/**
+ * Trims a cache record down to `limit` entries. When `accessOrder` is provided, eviction is
+ * true LRU (drop the entries with the oldest recorded access tick, keep the rest); otherwise
+ * it falls back to the previous insertion-order behavior (drop the oldest-inserted entries).
+ */
+function trimRecordToLastN<T>(record: Record<string, T>, limit: number, accessOrder?: Map<string, number>) {
+  const keys = Object.keys(record)
+
+  if (keys.length <= limit) {
+    return record
+  }
+
+  if (!accessOrder) {
+    return Object.fromEntries(Object.entries(record).slice(Math.max(0, keys.length - limit)))
+  }
+
+  const keysByRecency = [...keys].sort((a, b) => (accessOrder.get(a) ?? 0) - (accessOrder.get(b) ?? 0))
+  const evicted = new Set(keysByRecency.slice(0, keys.length - limit))
+
+  for (const key of evicted) {
+    accessOrder.delete(key)
+  }
+
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !evicted.has(key)))
 }
 
 type TimelinePreviewRequest = {
@@ -1379,7 +1538,7 @@ function buildTimelinePreviewRequest(
     return null
   }
 
-  const clip = getAllTimelineClips(state.project).find((entry) => entry.id === selectedClipId)
+  const clip = findCommittedClipById(state.project, selectedClipId)
 
   if (!clip) {
     return null
@@ -1432,9 +1591,7 @@ function buildTimelinePreviewWindowRequests(
   }
 
   const selectedClipId = state.ui.selectedClipId
-  const clip = selectedClipId
-    ? getAllTimelineClips(state.project).find((entry) => entry.id === selectedClipId)
-    : null
+  const clip = selectedClipId ? findCommittedClipById(state.project, selectedClipId) : null
 
   if (!clip) {
     return [currentRequest]
@@ -1468,6 +1625,7 @@ function commitPreviewFrame(
   frame: PreviewFrameData,
   options?: { background?: boolean },
 ) {
+  touchPreviewFrameAccess(request.cacheKey)
   set((currentState) => {
     const nextPreviewFrames = {
       ...currentState.previewFrames,
@@ -1511,7 +1669,12 @@ async function decodeTimelinePreviewRequest(
 ) {
   const currentState = get()
 
-  if (currentState.previewFrames[request.cacheKey] || pendingPreviewFrameRequests.has(request.cacheKey)) {
+  if (currentState.previewFrames[request.cacheKey]) {
+    touchPreviewFrameAccess(request.cacheKey)
+    return false
+  }
+
+  if (pendingPreviewFrameRequests.has(request.cacheKey)) {
     return false
   }
 
@@ -1578,16 +1741,59 @@ function estimateRuntimeCacheUsageMb(
     (sum, waveform) => sum + waveform.peaks.length * 16,
     0,
   )
-  const thumbnailBytes = Object.values(state.assetThumbnails).reduce(
-    (sum, thumbnail) => sum + thumbnail.thumbnailPath.length * 2,
-    0,
-  )
+  // Thumbnails are stored on disk (only a path is cached in memory), so we can't measure
+  // their real byte size cheaply here. Estimating from the PATH STRING length previously
+  // produced numbers unrelated to actual memory usage (a longer file path != a bigger
+  // thumbnail); use a fixed per-thumbnail constant instead, calibrated to a typical small
+  // JPEG/PNG timeline thumbnail.
+  const thumbnailBytes = Object.keys(state.assetThumbnails).length * THUMBNAIL_ESTIMATED_BYTES
 
   return Number(((previewBytes + nodePreviewBytes + waveformBytes + thumbnailBytes) / 1_048_576).toFixed(1))
 }
 
+// Byte-per-structural-unit constants below are rough calibrations against typical
+// serialized JSON size for each entity kind — intentionally approximate. The point of this
+// estimate is to stay cheap (O(entity count), no stringify of the whole project) rather
+// than to be byte-exact; it only feeds a soft/hard memory-pressure threshold check.
+const FOOTPRINT_BYTES_PER_CLIP = 900
+const FOOTPRINT_BYTES_PER_KEYFRAME = 150
+const FOOTPRINT_BYTES_PER_TRACK = 300
+const FOOTPRINT_BYTES_PER_NODE = 700
+const FOOTPRINT_BYTES_PER_EDGE = 200
+const FOOTPRINT_BYTES_PER_ASSET = 500
+const FOOTPRINT_BYTES_PER_RENDER_JOB = 600
+const FOOTPRINT_BYTES_PER_HISTORY_RECORD = 400
+const FOOTPRINT_BASE_OVERHEAD_BYTES = 4_096
+
 function estimateProjectFootprintMb(project: FluxNodeProject) {
-  return Number(((JSON.stringify(project).length * 2) / 1_048_576).toFixed(1))
+  let clipCount = 0
+  let keyframeCount = 0
+
+  for (const track of project.timeline.tracks) {
+    clipCount += track.clips.length
+    for (const clip of track.clips) {
+      keyframeCount += clip.keyframes.length
+    }
+  }
+
+  const assetCount = Object.keys(project.assets.assets).length
+  const historyRecordCount =
+    project.meta.section11ProofHistory.length +
+    project.meta.section11CoverageMapHistory.length +
+    project.meta.section11CapturePacketHistory.length
+
+  const estimatedBytes =
+    clipCount * FOOTPRINT_BYTES_PER_CLIP +
+    keyframeCount * FOOTPRINT_BYTES_PER_KEYFRAME +
+    project.timeline.tracks.length * FOOTPRINT_BYTES_PER_TRACK +
+    project.workflow.nodes.length * FOOTPRINT_BYTES_PER_NODE +
+    project.workflow.edges.length * FOOTPRINT_BYTES_PER_EDGE +
+    assetCount * FOOTPRINT_BYTES_PER_ASSET +
+    project.output.queue.length * FOOTPRINT_BYTES_PER_RENDER_JOB +
+    historyRecordCount * FOOTPRINT_BYTES_PER_HISTORY_RECORD +
+    FOOTPRINT_BASE_OVERHEAD_BYTES
+
+  return Number((estimatedBytes / 1_048_576).toFixed(2))
 }
 
 function getMemoryPressurePct(runtimeHealth: RuntimeHealth) {
@@ -1645,10 +1851,29 @@ function trimRuntimeCachesForBudget(
   state: Pick<ProjectStoreState, 'project' | 'runtimeHealth' | 'previewFrames' | 'nodePreviewFrames' | 'waveformCache' | 'assetThumbnails'>,
 ) {
   return {
-    previewFrames: trimRecordToLastN(state.previewFrames, getCacheLimit(PREVIEW_FRAME_CACHE_LIMIT, state)),
-    nodePreviewFrames: trimRecordToLastN(state.nodePreviewFrames, getCacheLimit(NODE_PREVIEW_CACHE_LIMIT, state)),
-    waveformCache: trimRecordToLastN(state.waveformCache, getCacheLimit(WAVEFORM_CACHE_LIMIT, state)),
-    assetThumbnails: trimRecordToLastN(state.assetThumbnails, getCacheLimit(THUMBNAIL_CACHE_LIMIT, state)),
+    previewFrames: trimRecordToLastN(
+      state.previewFrames,
+      getCacheLimit(PREVIEW_FRAME_CACHE_LIMIT, state),
+      previewFrameAccessOrder,
+    ),
+    // All four runtime caches evict by true LRU: each passes its own access-order map so a
+    // hot entry (touched on cache-hit and on write) survives trimming over cold entries that
+    // were produced once and never looked at again.
+    nodePreviewFrames: trimRecordToLastN(
+      state.nodePreviewFrames,
+      getCacheLimit(NODE_PREVIEW_CACHE_LIMIT, state),
+      nodePreviewFrameAccessOrder,
+    ),
+    waveformCache: trimRecordToLastN(
+      state.waveformCache,
+      getCacheLimit(WAVEFORM_CACHE_LIMIT, state),
+      waveformAccessOrder,
+    ),
+    assetThumbnails: trimRecordToLastN(
+      state.assetThumbnails,
+      getCacheLimit(THUMBNAIL_CACHE_LIMIT, state),
+      assetThumbnailAccessOrder,
+    ),
   }
 }
 
@@ -1870,7 +2095,7 @@ function buildRenderFailureError(job: {
       : 'Quota reset time is pending from the provider.'
 
     return {
-      id: `error-${Date.now()}-${job.id}-quota`,
+      id: `${nextId('error')}-${job.id}-quota`,
       category: 'cloud_quota',
       message: job.lastError ?? `Cloud quota exceeded for render job ${job.id}.`,
       userMessage: 'Cloud quota has been exceeded for this render.',
@@ -1886,7 +2111,7 @@ function buildRenderFailureError(job: {
   }
 
   return {
-    id: `error-${Date.now()}-${job.id}-failed`,
+    id: `${nextId('error')}-${job.id}-failed`,
     category: job.errorCategory,
     message: job.lastError ?? `Render job ${job.id} failed at frame ${job.currentFrame}.`,
     userMessage: 'Render stopped before completion.',
@@ -2117,6 +2342,47 @@ function inferErrorCategory(message: string, fallback: AppError['category']): Ap
   return fallback
 }
 
+/** Fire-and-forget WAL append that surfaces failures as a real app error instead of swallowing them. */
+function appendWalSafely(
+  set: StoreSetter,
+  entry: { id: string; timestamp: string; type: string; label: string; project: FluxNodeProject; patches: Patch[] },
+) {
+  void projectRepository
+    .appendWal({
+      id: entry.id,
+      timestamp: entry.timestamp,
+      type: entry.type,
+      label: entry.label,
+      // Always hand the repository the full current project reference (cheap: with immer
+      // this is a reference, not a copy) alongside the forward patches for this change. The
+      // repository decides per-entry whether to persist the full snapshot (periodic "base"
+      // entries) or just the patches (see LocalProjectRepository.appendWal).
+      projectSnapshot: entry.project,
+      patches: entry.patches,
+    })
+    .catch((error: unknown) => {
+      pushAppError(set, {
+        id: nextId('error'),
+        category: 'disk_full',
+        message: error instanceof Error ? error.message : 'Failed to append crash-recovery log entry.',
+        userMessage: 'Local storage is full — recent changes may not be recoverable after a crash.',
+        recoverable: true,
+        suggestedAction: 'Save your project now to persist your work durably.',
+        actionLabel: 'Save Project',
+        actionCommand: 'save_project',
+        contextId: null,
+        detail: null,
+        createdAt: new Date().toISOString(),
+      })
+    })
+}
+
+/**
+ * Applies a single project mutation through immer's `produceWithPatches`, so only the
+ * paths actually touched by `mutate` are cloned (structural sharing for everything else)
+ * instead of the previous four `structuredClone(project)` calls per mutation. History now
+ * records immer patches/inversePatches rather than full before/after project snapshots.
+ */
 function applyMutation(
   set: StoreSetter,
   get: () => ProjectStoreState,
@@ -2124,13 +2390,14 @@ function applyMutation(
   label: string,
   mutate: (project: FluxNodeProject) => void,
 ) {
-  const before = cloneProject(get().project)
-  const after = cloneProject(get().project)
-
-  mutate(after)
-  syncUpdatedAt(after)
+  const before = get().project
+  const [after, patches, inversePatches] = produceWithPatches(before, (draft) => {
+    mutate(draft as FluxNodeProject)
+    syncUpdatedAt(draft as FluxNodeProject)
+  })
   const validationState = getValidationState(after)
-  const commandId = `${type}-${Date.now()}`
+  const commandId = nextId(type)
+  const walTimestamp = new Date().toISOString()
 
   set((state) => ({
     project: after,
@@ -2147,8 +2414,8 @@ function applyMutation(
       type,
       label,
       timestamp: Date.now(),
-      before,
-      after: cloneProject(after),
+      patches,
+      inversePatches,
     }),
     ...validationState,
     ui: {
@@ -2157,13 +2424,7 @@ function applyMutation(
     },
   }))
 
-  void projectRepository.appendWal({
-    id: commandId,
-    timestamp: new Date().toISOString(),
-    type,
-    label,
-    projectSnapshot: cloneProject(after),
-  })
+  appendWalSafely(set, { id: commandId, timestamp: walTimestamp, type, label, project: after, patches })
 }
 
 function applyGroupedMutations(
@@ -2182,29 +2443,32 @@ function applyGroupedMutations(
   }
 
   const baseTimestamp = Date.now()
-  const beforeGroup = cloneProject(get().project)
-  let workingProject = cloneProject(get().project)
-  let history = beginHistoryGroup(get().history, type, label, cloneProject(beforeGroup))
+  let workingProject = get().project
+  let history = beginHistoryGroup(get().history, type, label, nextId(type))
   const walTimestamp = new Date(baseTimestamp).toISOString()
+  const groupPatches: Patch[] = []
 
   steps.forEach((step, index) => {
-    const stepBefore = cloneProject(workingProject)
-    step.mutate(workingProject)
-    syncUpdatedAt(workingProject)
-    const stepAfter = cloneProject(workingProject)
+    const [nextProject, patches, inversePatches] = produceWithPatches(workingProject, (draft) => {
+      step.mutate(draft as FluxNodeProject)
+      syncUpdatedAt(draft as FluxNodeProject)
+    })
+    workingProject = nextProject
+    groupPatches.push(...patches)
     history = pushCommand(history, {
-      id: `${step.type}-${baseTimestamp}-${index + 1}`,
+      id: nextId(step.type),
       type: step.type,
       label: step.label,
       timestamp: baseTimestamp + index,
-      before: stepBefore,
-      after: stepAfter,
+      patches,
+      inversePatches,
     })
   })
 
-  const afterGroup = cloneProject(workingProject)
+  const afterGroup = workingProject
   const validationState = getValidationState(afterGroup)
-  const finalizedHistory = endHistoryGroup(history, cloneProject(afterGroup))
+  const finalizedHistory = endHistoryGroup(history)
+  const walId = nextId(type)
 
   set((state) => ({
     project: afterGroup,
@@ -2224,12 +2488,13 @@ function applyGroupedMutations(
     },
   }))
 
-  void projectRepository.appendWal({
-    id: `${type}-${baseTimestamp}`,
+  appendWalSafely(set, {
+    id: walId,
     timestamp: walTimestamp,
     type,
     label,
-    projectSnapshot: cloneProject(afterGroup),
+    project: afterGroup,
+    patches: groupPatches,
   })
 }
 
@@ -2650,7 +2915,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       }
 
       project.meta.sharing.invites.push({
-        id: `invite-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: `${nextId('invite')}-${Math.random().toString(36).slice(2, 8)}`,
         email: normalizedEmail,
         role,
         status: 'pending',
@@ -2674,7 +2939,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       invite.status = 'accepted'
       invite.acceptedAt = new Date().toISOString()
       project.meta.sharing.collaborators.push({
-        id: `member-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: `${nextId('member')}-${Math.random().toString(36).slice(2, 8)}`,
         name: invite.email.split('@')[0] || invite.email,
         email: invite.email,
         role: invite.role,
@@ -2745,7 +3010,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       ...get().preferences,
       cloudApiKey: apiKey.trim(),
     }
-    await saveAppPreferences(nextPreferences)
+    // Persist the secret to the OS keychain (Tauri) / local prefs (browser), never to the
+    // plaintext preferences file.
+    await saveCloudApiKey(nextPreferences.cloudApiKey)
     set((state) => ({
       preferences: nextPreferences,
       ui: {
@@ -2808,17 +3075,48 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       },
     }))
   },
+  // movePlayhead/setPlayhead are called up to ~10x/sec by the playback loop, so — like
+  // scrubPlayhead/panWorkflowViewport/adjustWorkflowZoom below — they bypass applyMutation
+  // entirely: no history entry (undo would otherwise fill up with playback frames) and no
+  // WAL append (which would otherwise rewrite the crash-recovery log every tick).
   movePlayhead: (delta) =>
-    applyMutation(set, get, 'timeline.playhead.move', 'Playhead moved', (project) => {
-      const maxTimelineDuration = getTimelineDuration(project)
-      project.timeline.playhead = Math.max(
+    set((state) => {
+      const nextPlayhead = Math.max(
         0,
-        Math.min(maxTimelineDuration, Number((project.timeline.playhead + delta).toFixed(2))),
+        Math.min(getTimelineDuration(state.project), Number((state.project.timeline.playhead + delta).toFixed(2))),
       )
+
+      return {
+        project: {
+          ...state.project,
+          timeline: {
+            ...state.project.timeline,
+            playhead: nextPlayhead,
+          },
+        },
+        ui: {
+          ...state.ui,
+          statusMessage: 'Playhead moved complete',
+        },
+      }
     }),
   setPlayhead: (time) =>
-    applyMutation(set, get, 'timeline.playhead.set', 'Playhead positioned', (project) => {
-      project.timeline.playhead = Math.max(0, Math.min(getTimelineDuration(project), Number(time.toFixed(2))))
+    set((state) => {
+      const nextPlayhead = Math.max(0, Math.min(getTimelineDuration(state.project), Number(time.toFixed(2))))
+
+      return {
+        project: {
+          ...state.project,
+          timeline: {
+            ...state.project.timeline,
+            playhead: nextPlayhead,
+          },
+        },
+        ui: {
+          ...state.ui,
+          statusMessage: 'Playhead positioned complete',
+        },
+      }
     }),
   scrubPlayhead: (time) =>
     set((state) => ({
@@ -2907,6 +3205,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   newProject: async () => {
     const project = createDefaultProject()
     const validationState = getValidationState(project)
+    clearModuleGlobalCaches()
     set((state) => ({
       project,
       history: createHistoryState(),
@@ -2939,6 +3238,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   applyTemplate: async (templateId) => {
     const project = createTemplateProject(templateId)
     const validationState = getValidationState(project)
+    clearModuleGlobalCaches()
     set((state) => ({
       project,
       history: createHistoryState(),
@@ -2992,7 +3292,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
     if (!loadedProject) {
       pushAppError(set, {
-        id: `error-${Date.now()}`,
+        id: nextId('error'),
         category: 'internal',
         message: `Project could not be opened from path ${path}.`,
         userMessage: 'Project could not be opened.',
@@ -3009,6 +3309,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     const validationState = getValidationState(loadedProject)
     const currentProjectPath = await projectRepository.getCurrentProjectPath()
 
+    clearModuleGlobalCaches()
     set((state) => ({
       project: loadedProject,
       history: createHistoryState(),
@@ -3160,17 +3461,16 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       firstNode.position.x += 36
       firstNode.position.y += 20
     }),
-  importAssetFromPath: async () => {
-    const path = await pickMediaFile(
-      'Enter a media file path to import into FluxNode',
-      getPreferredDirectory(get()),
-    )
+  importAssetFromPath: async (providedPath) => {
+    const path =
+      providedPath?.trim() ||
+      (await pickMediaFile('Enter a media file path to import into FluxNode', getPreferredDirectory(get())))
 
     if (!path) {
       return
     }
 
-    const assetId = `asset-${Date.now()}`
+    const assetId = nextId('asset')
     const copyIntoProject = window.confirm('Copy this media into the current FluxNode project?')
     const copyResult =
       copyIntoProject ? await copyAssetIntoProject(assetId, path).catch(() => null) : null
@@ -3241,7 +3541,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
     if (!inspection.exists) {
       pushAppError(set, {
-        id: `error-${Date.now()}`,
+        id: nextId('error'),
         category: 'asset_missing',
         message: `Imported path ${path} does not currently exist.`,
         userMessage: 'Imported media is offline.',
@@ -3401,7 +3701,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
     if (shouldBlockGpuOperations(get().runtimeHealth)) {
       pushAppError(set, {
-        id: `error-${Date.now()}`,
+        id: nextId('error'),
         category: 'gpu_oom',
         message: 'GPU operations paused because VRAM usage exceeded 95%.',
         userMessage: 'GPU memory is critically high, so proxy generation was paused.',
@@ -3442,7 +3742,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     } catch (error) {
       const message = error instanceof Error ? error.message : `Proxy generation failed for ${assetId}.`
       pushAppError(set, {
-        id: `error-${Date.now()}`,
+        id: nextId('error'),
         category: inferErrorCategory(message, 'render_failed'),
         message,
         userMessage: 'Proxy could not be generated.',
@@ -3467,7 +3767,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       return
     }
 
-    const clip = getAllTimelineClips(get().project).find((entry) => entry.id === selectedClipId)
+    const clip = findCommittedClipById(get().project, selectedClipId)
     if (!clip) {
       return
     }
@@ -3484,7 +3784,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
     if (isMemoryHardLimited(get())) {
       pushAppError(set, {
-        id: `error-${Date.now()}-memory-waveform`,
+        id: `${nextId('error')}-memory-waveform`,
         category: 'memory_pressure',
         message: 'Waveform generation blocked because the app exceeded the hard memory budget.',
         userMessage: 'Waveform caching paused while memory pressure is critical.',
@@ -3500,11 +3800,13 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     const cached = get().waveformCache[assetId]
 
     if (cached && cached.sourcePath === runtimePath && cached.peaks.length >= bucketCount) {
+      touchWaveformAccess(assetId)
       return
     }
 
     try {
       const waveform = await generateWaveformPeaks(assetId, runtimePath, bucketCount)
+      touchWaveformAccess(assetId)
       set((state) => ({
         ...trimRuntimeCachesForBudget({
           ...state,
@@ -3547,7 +3849,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     } catch (error) {
       const message = error instanceof Error ? error.message : `Waveform generation failed for ${assetId}.`
       pushAppError(set, {
-        id: `error-${Date.now()}`,
+        id: nextId('error'),
         category: inferErrorCategory(message, 'internal'),
         message,
         userMessage: 'Audio waveform could not be generated.',
@@ -3568,6 +3870,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     }
 
     if (state.assetThumbnails[assetId]) {
+      touchAssetThumbnailAccess(assetId)
       return
     }
 
@@ -3587,7 +3890,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
     if (isMemoryHardLimited(state)) {
       pushAppError(set, {
-        id: `error-${Date.now()}-memory-preview`,
+        id: `${nextId('error')}-memory-preview`,
         category: 'memory_pressure',
         message: 'Preview decode blocked because the app exceeded the hard memory budget.',
         userMessage: 'Preview decoding paused while memory pressure is critical.',
@@ -3602,7 +3905,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
     if (shouldBlockGpuOperations(state.runtimeHealth)) {
       pushAppError(set, {
-        id: `error-${Date.now()}`,
+        id: nextId('error'),
         category: 'gpu_oom',
         message: 'Preview decode blocked because VRAM usage exceeded 95%.',
         userMessage: 'Preview decoding paused to prevent a GPU crash.',
@@ -3658,7 +3961,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         }
       })
       pushAppError(set, {
-        id: `error-${Date.now()}`,
+        id: nextId('error'),
         category: inferErrorCategory(message, 'asset_corrupt'),
         message,
         userMessage: 'Preview frame could not be decoded.',
@@ -3688,7 +3991,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
     if (shouldBlockGpuOperations(state.runtimeHealth) || isMemoryHardLimited(state)) {
       pushAppError(set, {
-        id: `error-${Date.now()}-memory-node-preview`,
+        id: `${nextId('error')}-memory-node-preview`,
         category: shouldBlockGpuOperations(state.runtimeHealth) ? 'gpu_oom' : 'memory_pressure',
         message: 'Node preview generation paused because runtime pressure crossed the hard safety limit.',
         userMessage: 'Node preview is paused until GPU or memory pressure drops.',
@@ -3712,6 +4015,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       cached.width === requestWidth &&
       cached.height === requestHeight
     ) {
+      touchNodePreviewFrameAccess(selectedNodeId)
       return
     }
 
@@ -3724,6 +4028,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         requestHeight,
       )
 
+      touchNodePreviewFrameAccess(selectedNode.id)
       set((currentState) => ({
         ...trimRuntimeCachesForBudget({
           ...currentState,
@@ -3757,7 +4062,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     } catch (error) {
       const message = error instanceof Error ? error.message : `Node preview generation failed for ${selectedNode.id}.`
       pushAppError(set, {
-        id: `error-${Date.now()}-node-preview`,
+        id: `${nextId('error')}-node-preview`,
         category: inferErrorCategory(message, 'internal'),
         message,
         userMessage: 'Node preview could not be generated.',
@@ -3781,7 +4086,12 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       return
     }
 
-    if (state.nodePreviewFrames[cacheKey] || pendingNodePreviewRequests.has(cacheKey)) {
+    if (state.nodePreviewFrames[cacheKey]) {
+      touchNodePreviewFrameAccess(cacheKey)
+      return
+    }
+
+    if (pendingNodePreviewRequests.has(cacheKey)) {
       return
     }
 
@@ -3799,6 +4109,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     try {
       const frame = await renderNodePreview(projectJson, nodeId, width, height)
 
+      touchNodePreviewFrameAccess(cacheKey)
       set((currentState) => {
         const nextNodePreviewFrames = {
           ...currentState.nodePreviewFrames,
@@ -3868,6 +4179,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     try {
       const frame = await generateComfyNode(projectJson, nodeId, endpoint, 120)
 
+      touchNodePreviewFrameAccess(cacheKey)
       set((currentState) => {
         const nextNodePreviewFrames = {
           ...currentState.nodePreviewFrames,
@@ -3889,7 +4201,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       const detail = error instanceof Error ? error.message : String(error)
 
       pushAppError(set, {
-        id: `error-${Date.now()}-${nodeId}`,
+        id: `${nextId('error')}-${nodeId}`,
         category: 'comfy_execution',
         message: `ComfyUI generation failed for ${nodeId}.`,
         userMessage: `${nodeLabel} could not be generated on ComfyUI.`,
@@ -3970,7 +4282,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         selectedTrackId:
           clipId === null
             ? state.ui.selectedTrackId
-            : state.project.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === clipId))?.id ?? state.ui.selectedTrackId,
+            : findCommittedTrackByClipId(state.project, clipId)?.id ?? state.ui.selectedTrackId,
         selectedNodeId: null,
         selectedNodeIds: [],
       },
@@ -4173,7 +4485,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         }
 
         const mediaSourceIndex = project.workflow.nodes.filter((node) => node.type === 'media_source').length + 1
-        const workflowNodeId = `node-media-${Date.now()}-${mediaSourceIndex}`
+        const workflowNodeId = `${nextId('node-media')}-${mediaSourceIndex}`
 
         project.workflow.nodes.push({
           id: workflowNodeId,
@@ -4494,7 +4806,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
           existing.easing = 'linear'
         } else {
           clip.keyframes.push({
-            id: `kf-${Date.now()}-${clip.keyframes.length + 1}`,
+            id: `${nextId('kf')}-${clip.keyframes.length + 1}`,
             time: relativeTime,
             property,
             value: getClipKeyframeValueByProperty(clip, property),
@@ -4697,15 +5009,14 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       return
     }
 
-    const baseTimestamp = Date.now()
     const nodeIdMap = new Map<string, string>()
-    const duplicatedNodes = clipboard.nodes.map((node, index) => {
-      const nextId = `${node.type}-${baseTimestamp}-${index + 1}`
-      nodeIdMap.set(node.id, nextId)
+    const duplicatedNodes = clipboard.nodes.map((node) => {
+      const duplicatedNodeId = nextId(node.type)
+      nodeIdMap.set(node.id, duplicatedNodeId)
 
       return {
         ...structuredClone(node),
-        id: nextId,
+        id: duplicatedNodeId,
         position: {
           x: node.position.x + 56,
           y: node.position.y + 40,
@@ -4720,16 +5031,16 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
             : structuredClone(node.data),
       }
     })
-    const duplicatedEdges = clipboard.edges.map((edge, index) => ({
+    const duplicatedEdges = clipboard.edges.map((edge) => ({
       ...structuredClone(edge),
-      id: `edge-${baseTimestamp}-${index + 1}`,
+      id: nextId('edge'),
       source: nodeIdMap.get(edge.source) ?? edge.source,
       target: nodeIdMap.get(edge.target) ?? edge.target,
     }))
     const duplicatedGroups = clipboard.groups
-      .map((group, index) => ({
+      .map((group) => ({
         ...structuredClone(group),
-        id: `group-${baseTimestamp}-${index + 1}`,
+        id: nextId('group'),
         label: `${group.label} Copy`,
         nodeIds: group.nodeIds
           .map((nodeId) => nodeIdMap.get(nodeId))
@@ -4797,7 +5108,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       normalizeWorkflowGroups(project)
 
       project.workflow.groups.push({
-        id: `group-${Date.now()}`,
+        id: nextId('group'),
         label: `Group ${project.workflow.groups.length + 1}`,
         nodeIds: validNodeIds,
         color: createWorkflowGroupColor(project.workflow.groups.length),
@@ -4855,7 +5166,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       const duplicatedNodes = project.workflow.nodes
         .filter((node) => selectedNodeIdSet.has(node.id))
         .map((sourceNode, index) => {
-          const duplicatedId = `${sourceNode.type}-${Date.now()}-${index + 1}`
+          const duplicatedId = `${nextId(sourceNode.type)}-${index + 1}`
           idMap.set(sourceNode.id, duplicatedId)
 
           return {
@@ -4879,14 +5190,14 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         .filter((edge) => selectedNodeIdSet.has(edge.source) && selectedNodeIdSet.has(edge.target))
         .map((edge, index) => ({
           ...edge,
-          id: `edge-${Date.now()}-dup-${index + 1}`,
+          id: `${nextId('edge')}-dup-${index + 1}`,
           source: idMap.get(edge.source) ?? edge.source,
           target: idMap.get(edge.target) ?? edge.target,
         }))
       const duplicatedGroups = selectedGroups
         .map((group, index) => ({
           ...structuredClone(group),
-          id: `group-${Date.now()}-dup-${index + 1}`,
+          id: `${nextId('group')}-dup-${index + 1}`,
           label: `${group.label} Copy`,
           nodeIds: group.nodeIds
             .map((nodeId) => idMap.get(nodeId))
@@ -5054,7 +5365,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         project.timeline.tracks.push(targetTrack)
       }
 
-      const clipId = `clip-${selectedNode.id}-${Date.now()}`
+      const clipId = `${nextId('clip')}-${selectedNode.id}`
       const timelineEnd = Math.max(
         ...project.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.startTime + clip.duration)),
         project.timeline.outPoint ?? 0,
@@ -5123,7 +5434,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     }
 
     const selectedTrackId = timelineClipId
-      ? state.project.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === timelineClipId))?.id ?? null
+      ? findCommittedTrackByClipId(state.project, timelineClipId)?.id ?? null
       : null
 
     set((currentState) => ({
@@ -5231,7 +5542,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     })
 
     pushAppError(set, {
-      id: `error-${Date.now()}-${selectedNodeSnapshot.id}`,
+      id: `${nextId('error')}-${selectedNodeSnapshot.id}`,
       category: 'comfy_execution',
       message: `ComfyUI execution failed for ${selectedNodeSnapshot.id}.`,
       userMessage: `${selectedNodeSnapshot.label ?? selectedNodeSnapshot.id} failed during ComfyUI execution.`,
@@ -5284,7 +5595,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
         const leftDuration = Number((playhead - clip.startTime).toFixed(2))
         const rightDuration = Number((clipEnd - playhead).toFixed(2))
-        const originalKeyframes = structuredClone(clip.keyframes)
+        // `clip` is an immer draft here (applyMutation now runs mutate() through
+        // produceWithPatches), and structuredClone can't clone a Proxy — snapshot via a
+        // plain shallow copy instead of the structuredClone this used before immer.
+        const originalKeyframes = clip.keyframes.map((keyframe) => ({ ...keyframe }))
 
         clip.duration = leftDuration
         clip.outPoint = Number((clip.inPoint + leftDuration).toFixed(2))
@@ -5297,7 +5611,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
         const duplicated = {
           ...clip,
-          id: `${clip.id}-split`,
+          // Fresh ids rather than `${clip.id}-split`: splitting an already-split clip
+          // (whose id already ends in "-split") previously produced a duplicate id,
+          // corrupting by-id lookups/selection for both halves.
+          id: nextId('clip'),
           startTime: playhead,
           duration: rightDuration,
           inPoint: clip.outPoint,
@@ -5308,7 +5625,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
             .filter((keyframe) => keyframe.time >= leftDuration)
             .map((keyframe) => ({
               ...keyframe,
-              id: `${keyframe.id}-split`,
+              id: nextId('keyframe'),
               time: Math.max(0, Number((keyframe.time - leftDuration).toFixed(2))),
             })),
         }
@@ -5357,7 +5674,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         outputNode.id,
         targetPort,
         {
-          id: `edge-${Date.now()}`,
+          id: nextId('edge'),
           source: sourceNode.id,
           sourceHandle: sourcePort.name,
           target: outputNode.id,
@@ -5430,7 +5747,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         targetNodeId,
         targetPort,
         {
-          id: `edge-${Date.now()}`,
+          id: nextId('edge'),
           source: sourceNodeId,
           sourceHandle,
           target: targetNodeId,
@@ -5551,7 +5868,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     if (renderBlockingIssues.length > 0) {
       const detail = renderBlockingIssues.slice(0, 4).join(' ')
       pushAppError(set, {
-        id: `error-${Date.now()}-render-validation`,
+        id: `${nextId('error')}-render-validation`,
         category: 'render_failed',
         message: `Render validation failed: ${detail}`,
         userMessage: 'Render cannot start until validation issues are resolved.',
@@ -5576,7 +5893,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
     if (!activePreset) {
       pushAppError(set, {
-        id: `error-${Date.now()}`,
+        id: nextId('error'),
         category: 'internal',
         message: 'No active render preset was available when queueing export.',
         userMessage: 'Render preset is missing.',
@@ -5589,7 +5906,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       return
     }
 
-    const jobId = `render-${Date.now()}`
+    const jobId = nextId('render')
     const audioSummary = getWorkflowAudioSummary(projectSnapshot)
     let exportStart: ExportJobStartResult
     let renderStart: RenderJobStartResult
@@ -5600,7 +5917,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Export handoff failed to start.'
       pushAppError(set, {
-        id: `error-${Date.now()}`,
+        id: nextId('error'),
         category: inferErrorCategory(message, 'render_failed'),
         message,
         userMessage: 'Export handoff could not be created.',
@@ -5792,7 +6109,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       await pauseRenderJob(activeJob.id)
     } catch (error) {
       pushAppError(set, {
-        id: `error-${Date.now()}`,
+        id: nextId('error'),
         category: 'render_failed',
         message: error instanceof Error ? error.message : 'Render pause failed.',
         userMessage: 'Render could not be paused.',
@@ -5829,7 +6146,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       await resumeRenderJob(pausedJob.id)
     } catch (error) {
       pushAppError(set, {
-        id: `error-${Date.now()}`,
+        id: nextId('error'),
         category: 'render_failed',
         message: error instanceof Error ? error.message : 'Render resume failed.',
         userMessage: 'Render could not be resumed.',
@@ -5864,7 +6181,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       await cancelRenderJob(activeJob.id)
     } catch (error) {
       pushAppError(set, {
-        id: `error-${Date.now()}`,
+        id: nextId('error'),
         category: 'render_failed',
         message: error instanceof Error ? error.message : 'Render cancel failed.',
         userMessage: 'Render could not be cancelled cleanly.',
@@ -6064,7 +6381,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Render retry failed to re-arm.'
       pushAppError(set, {
-        id: `error-${Date.now()}`,
+        id: nextId('error'),
         category: inferErrorCategory(message, 'render_failed'),
         message,
         userMessage: 'Render retry could not be started.',
@@ -6204,6 +6521,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
           }
         }
         break
+      case 'save_project':
+        await get().saveProject()
+        break
       default:
         break
     }
@@ -6288,7 +6608,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         'Cloud connection issue detected.',
       )
       pushAppError(set, {
-        id: `error-${Date.now()}-offline`,
+        id: `${nextId('error')}-offline`,
         category: 'cloud_network',
         message: 'Network connectivity is offline.',
         userMessage:
@@ -6314,7 +6634,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         'Connecting to ComfyUI...',
       )
       pushAppError(set, {
-        id: `error-${Date.now()}-comfy`,
+        id: `${nextId('error')}-comfy`,
         category: 'comfy_connection',
         message: 'Local backend health is degraded while local compute is selected.',
         userMessage:
@@ -6337,7 +6657,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       state.preferences.cloudApiKey.trim().length === 0
     ) {
       pushAppError(set, {
-        id: `error-${Date.now()}-cloud-auth`,
+        id: `${nextId('error')}-cloud-auth`,
         category: 'cloud_auth',
         message: 'Cloud compute selected without an API key.',
         userMessage: 'Cloud authentication is not configured.',
@@ -6355,7 +6675,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     ) {
       const recoverableGb = Number((cacheUsageMb / 1024).toFixed(2))
       pushAppError(set, {
-        id: `error-${Date.now()}-disk`,
+        id: `${nextId('error')}-disk`,
         category: 'disk_full',
         message: `Low disk space detected (${state.runtimeHealth.diskFreeGb.toFixed(1)} GB remaining).`,
         userMessage: `Insufficient disk headroom for reliable renders (${state.runtimeHealth.diskFreeGb.toFixed(1)} GB free).`,
@@ -6369,7 +6689,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
     if (state.runtimeCacheMetrics.softLimitExceeded) {
       pushAppError(set, {
-        id: `error-${Date.now()}-memory-soft`,
+        id: `${nextId('error')}-memory-soft`,
         category: 'memory_pressure',
         message: `Estimated app footprint is ${state.runtimeCacheMetrics.estimatedAppFootprintGb.toFixed(2)} GB.`,
         userMessage:
@@ -6401,7 +6721,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
           ? `VRAM usage is ${state.runtimeHealth.vramUtilizationPct.toFixed(1)}%`
           : `Preview cache pressure is ${cacheUsageMb.toFixed(1)} MB`
       pushAppError(set, {
-        id: `error-${Date.now()}-gpu`,
+        id: `${nextId('error')}-gpu`,
         category: 'gpu_oom',
         message: `${vramSummary} and crossed the guarded threshold.`,
         userMessage:
@@ -6508,6 +6828,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
           },
           latestVersion: result.latestVersion,
           downloadUrl: result.downloadUrl,
+          sha256: result.sha256,
           downloadedFilePath: currentState.appUpdateState.downloadedFilePath,
           notes: result.notes,
           publishedAt: result.publishedAt,
@@ -6556,7 +6877,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     }))
 
     try {
-      const downloadedFilePath = await downloadAppUpdatePackage(state.appUpdateState.downloadUrl)
+      const downloadedFilePath = await downloadAppUpdatePackage(
+        state.appUpdateState.downloadUrl,
+        state.appUpdateState.sha256,
+      )
       set((currentState) => ({
         appUpdateState: {
           ...currentState.appUpdateState,
@@ -6620,10 +6944,16 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       return
     }
 
+    // Patch-based history: reconstruct the prior project by applying this command's
+    // inverse patches to the CURRENT project (which must be exactly this command's
+    // "after" state, since undo/redo is strictly LIFO and redoStack is cleared on any
+    // new mutation) rather than storing a second full snapshot.
+    const restoredProject = applyPatches(get().project, result.command.inversePatches)
+
     set((state) => ({
-      project: cloneProject(result.command.before),
+      project: restoredProject,
       history: result.history,
-      ...getValidationState(result.command.before),
+      ...getValidationState(restoredProject),
       ui: {
         ...state.ui,
         statusMessage: `Undid ${result.command.label.toLowerCase()}`,
@@ -6637,10 +6967,12 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       return
     }
 
+    const restoredProject = applyPatches(get().project, result.command.patches)
+
     set((state) => ({
-      project: cloneProject(result.command.after),
+      project: restoredProject,
       history: result.history,
-      ...getValidationState(result.command.after),
+      ...getValidationState(restoredProject),
       ui: {
         ...state.ui,
         statusMessage: `Redid ${result.command.label.toLowerCase()}`,
@@ -6686,6 +7018,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     const recentProjects = await projectRepository.loadRecentProjects()
     const currentProjectPath = await projectRepository.getCurrentProjectPath()
     const validationState = getValidationState(loadedProject)
+    clearModuleGlobalCaches()
     set((state) => ({
       project: loadedProject,
       history: createHistoryState(),

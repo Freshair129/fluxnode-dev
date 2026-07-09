@@ -1,0 +1,182 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { useProjectStore as UseProjectStoreType } from './project-store'
+
+// This repo has no jsdom/happy-dom dependency (vitest runs in the default "node"
+// environment), but project-store.ts touches window.localStorage / navigator at module
+// init and inside several actions. Static `import` statements are hoisted above any
+// `vi.stubGlobal` call in this file, so the stub has to be installed first and the store
+// module imported dynamically afterwards (see loadStore() below) — otherwise the module's
+// top-level `create<ProjectStoreState>(...)` factory would throw before stubbing runs.
+function installBrowserGlobals() {
+  const localStorageData = new Map<string, string>()
+
+  vi.stubGlobal('window', {
+    localStorage: {
+      getItem: (key: string) => (localStorageData.has(key) ? localStorageData.get(key)! : null),
+      setItem: (key: string, value: string) => {
+        localStorageData.set(key, value)
+      },
+      removeItem: (key: string) => {
+        localStorageData.delete(key)
+      },
+    },
+    setTimeout: (...args: Parameters<typeof setTimeout>) => setTimeout(...args),
+    clearTimeout: (handle: ReturnType<typeof setTimeout>) => clearTimeout(handle),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  })
+  vi.stubGlobal('navigator', { onLine: true })
+}
+
+async function loadStore() {
+  vi.resetModules()
+  installBrowserGlobals()
+  const mod = (await import('./project-store')) as { useProjectStore: typeof UseProjectStoreType }
+  return mod.useProjectStore
+}
+
+describe('project-store: applyMutation (immer)', () => {
+  let useProjectStore: typeof UseProjectStoreType
+
+  beforeEach(async () => {
+    useProjectStore = await loadStore()
+  })
+
+  it('produces a new top-level project reference but keeps unrelated branches referentially identical (structural sharing)', () => {
+    const before = useProjectStore.getState().project
+    useProjectStore.getState().setInPoint()
+    const after = useProjectStore.getState().project
+
+    expect(after).not.toBe(before)
+    // Only timeline.inPoint changed — workflow/assets/output/audio subtrees must be
+    // untouched references, proving applyMutation no longer does a full structuredClone.
+    expect(after.workflow).toBe(before.workflow)
+    expect(after.assets).toBe(before.assets)
+    expect(after.output).toBe(before.output)
+    expect(after.audio).toBe(before.audio)
+    expect(after.timeline).not.toBe(before.timeline)
+  })
+
+  it('records a history command with patches/inversePatches instead of full project snapshots', () => {
+    useProjectStore.getState().setOutPoint()
+    const history = useProjectStore.getState().history
+    expect(history.undoStack).toHaveLength(1)
+
+    const command = history.undoStack[0]
+    expect(Array.isArray(command.patches)).toBe(true)
+    expect(Array.isArray(command.inversePatches)).toBe(true)
+    expect(command.patches.length).toBeGreaterThan(0)
+    // The old shape stored full `before`/`after` FluxNodeProject snapshots on every command;
+    // that shape no longer exists.
+    expect((command as unknown as { before?: unknown }).before).toBeUndefined()
+    expect((command as unknown as { after?: unknown }).after).toBeUndefined()
+  })
+})
+
+describe('project-store: playhead moves stay off the history/WAL path', () => {
+  let useProjectStore: typeof UseProjectStoreType
+
+  beforeEach(async () => {
+    useProjectStore = await loadStore()
+  })
+
+  it('movePlayhead updates the timeline but does not push a history entry', () => {
+    const initialPlayhead = useProjectStore.getState().project.timeline.playhead
+    useProjectStore.getState().movePlayhead(0.5)
+
+    expect(useProjectStore.getState().project.timeline.playhead).toBeCloseTo(initialPlayhead + 0.5, 2)
+    expect(useProjectStore.getState().history.undoStack).toHaveLength(0)
+  })
+
+  it('setPlayhead updates the timeline but does not push a history entry', () => {
+    useProjectStore.getState().setPlayhead(1.23)
+
+    expect(useProjectStore.getState().project.timeline.playhead).toBeCloseTo(1.23, 2)
+    expect(useProjectStore.getState().history.undoStack).toHaveLength(0)
+  })
+
+  it('many rapid movePlayhead calls (simulating a playback loop) never grow the undo stack', () => {
+    for (let i = 0; i < 30; i += 1) {
+      useProjectStore.getState().movePlayhead(0.1)
+    }
+
+    expect(useProjectStore.getState().history.undoStack).toHaveLength(0)
+  })
+})
+
+describe('project-store: undo/redo round trip via patches', () => {
+  let useProjectStore: typeof UseProjectStoreType
+
+  beforeEach(async () => {
+    useProjectStore = await loadStore()
+  })
+
+  it('undo restores the exact prior project state and redo restores the mutated state', () => {
+    const original = useProjectStore.getState().project
+
+    useProjectStore.getState().setInPoint()
+    const mutated = useProjectStore.getState().project
+    expect(mutated.timeline.inPoint).not.toBe(original.timeline.inPoint)
+
+    useProjectStore.getState().undo()
+    expect(useProjectStore.getState().project.timeline.inPoint).toBe(original.timeline.inPoint)
+    expect(useProjectStore.getState().history.undoStack).toHaveLength(0)
+    expect(useProjectStore.getState().history.redoStack).toHaveLength(1)
+
+    useProjectStore.getState().redo()
+    expect(useProjectStore.getState().project.timeline.inPoint).toBe(mutated.timeline.inPoint)
+    expect(useProjectStore.getState().history.undoStack).toHaveLength(1)
+    expect(useProjectStore.getState().history.redoStack).toHaveLength(0)
+  })
+
+  it('undoes multiple mutations back to the original state, in order', () => {
+    const original = useProjectStore.getState().project.timeline.zoom
+
+    useProjectStore.getState().adjustTimelineZoom(0.5)
+    useProjectStore.getState().adjustTimelineZoom(0.5)
+    expect(useProjectStore.getState().project.timeline.zoom).toBeCloseTo(original + 1, 2)
+
+    useProjectStore.getState().undo()
+    expect(useProjectStore.getState().project.timeline.zoom).toBeCloseTo(original + 0.5, 2)
+
+    useProjectStore.getState().undo()
+    expect(useProjectStore.getState().project.timeline.zoom).toBeCloseTo(original, 2)
+  })
+})
+
+describe('project-store: split-clip id uniqueness', () => {
+  let useProjectStore: typeof UseProjectStoreType
+
+  beforeEach(async () => {
+    useProjectStore = await loadStore()
+  })
+
+  it('splitting a clip twice never produces duplicate clip or keyframe ids', () => {
+    // Default project ships with clip-video-01 (startTime 0, duration 8) on track-video-01,
+    // and a default playhead of 2.8 — inside the clip, so the first split is valid.
+    useProjectStore.getState().selectClip('clip-video-01')
+    useProjectStore.getState().splitSelectedClip()
+
+    const track = useProjectStore.getState().project.timeline.tracks.find((t) => t.id === 'track-video-01')!
+    expect(track.clips).toHaveLength(2)
+
+    const [left, right] = track.clips
+    expect(left.id).not.toBe(right.id)
+    expect(right.id).not.toMatch(/-split$/)
+
+    // Split the right half again (its startTime is the old playhead, so move the playhead
+    // partway into it and split once more).
+    useProjectStore.getState().selectClip(right.id)
+    useProjectStore.getState().setPlayhead(right.startTime + right.duration / 2)
+    useProjectStore.getState().splitSelectedClip()
+
+    const allClips = useProjectStore
+      .getState()
+      .project.timeline.tracks.flatMap((t) => t.clips)
+    const ids = allClips.map((clip) => clip.id)
+    expect(new Set(ids).size).toBe(ids.length)
+
+    const allKeyframeIds = allClips.flatMap((clip) => clip.keyframes.map((kf) => kf.id))
+    expect(new Set(allKeyframeIds).size).toBe(allKeyframeIds.length)
+  })
+})

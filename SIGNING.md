@@ -79,3 +79,32 @@ Get-AuthenticodeSignature .\src-tauri\target\release\bundle\nsis\FluxNode_0.1.0_
 ```
 
 `Status` should read `Valid`.
+
+## In-app update download verification (not the same as installer signing, above)
+
+Separately from the installer signing above, FluxNode has an **in-app** "check for update /
+download update" flow (`check_for_app_update` / `download_app_update` in `src-tauri/src/lib.rs`).
+This flow does **not** use `tauri-plugin-updater` and therefore does **not** verify a publisher
+signature on the downloaded package. What it does do (as of this hardening pass):
+
+- **HTTPS-only.** Both the manifest URL and the manifest's `downloadUrl` must be `https://`;
+  plain `http://` is rejected outright.
+- **Required SHA-256.** The manifest must include a `sha256` field alongside `downloadUrl`.
+  `download_app_update` takes an `expected_sha256` argument (from that manifest field), hashes
+  the downloaded bytes, and **refuses to write the file to disk** if the hash doesn't match.
+- **Response size caps.** Both the manifest fetch and the package download are capped (10MB for
+  the JSON manifest, 500MB for the download) to bound memory use against a malicious/broken
+  server.
+- **Filename sanitization.** The on-disk filename is derived from the URL's final path segment,
+  filtered to an alphanumeric/`.`/`-`/`_` whitelist — never the raw URL — so a malicious/MITM'd
+  manifest can't use `../` or similar tricks to escape the `updates/` directory.
+- **Atomic write.** The verified bytes are written via a temp-file-then-rename so a crash
+  mid-download never leaves a partially-written (and therefore unverifiable-looking) file behind.
+
+**What this is not:** proof that the manifest itself came from FluxNode. An attacker who can serve
+an arbitrary (but `https`) manifest can still supply their own `sha256` alongside their own
+payload — the hash check only proves the bytes match what *the manifest* claimed, not that the
+manifest is authentic. Closing that gap requires actual publisher signature verification, i.e.
+migrating this flow to **`tauri-plugin-updater`** with a signed update artifact and Tauri's
+built-in public-key verification. That migration is the recommended long-term fix and is not yet
+done — treat the current hash check as download-integrity hardening, not authentication.

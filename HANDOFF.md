@@ -110,5 +110,5 @@ e80999e feat: AI copilot + media engine adapter scaffolding (Wave 0/1)
 
 - Design: `docs/AI Copilot and Media Adapter Design.md`
 - Binary/toolchain setup: `docs/AI Copilot Binary Setup.md`
-- MASTERPLAN §13 + `MASTERPLAN Completion Audit.md` (Section 13, Partial)
+- MASTERPLAN §13 + `masterplan-completion-audit.md` (Section 13, Partial)
 - Benchmarks/evidence: `bench/wave1a/`, `bench/wave3/`

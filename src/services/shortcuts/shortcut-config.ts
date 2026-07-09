@@ -13,6 +13,7 @@ export type ShortcutCommand =
   | 'global.redo'
   | 'global.redoAlt'
   | 'global.toggleView'
+  | 'global.openShortcutsHelp'
   | 'timeline.selectAll'
   | 'timeline.copy'
   | 'timeline.paste'
@@ -72,6 +73,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   { command: 'global.redo', label: 'Redo', when: 'global' },
   { command: 'global.redoAlt', label: 'Redo Alternate', when: 'global' },
   { command: 'global.toggleView', label: 'Toggle Timeline and Workflow View', when: 'global' },
+  { command: 'global.openShortcutsHelp', label: 'Show Keyboard Shortcuts', when: 'global' },
   { command: 'timeline.selectAll', label: 'Select All Clips', when: 'timeline' },
   { command: 'timeline.copy', label: 'Copy Selected Clips', when: 'timeline' },
   { command: 'timeline.paste', label: 'Paste Clips', when: 'timeline' },
@@ -125,7 +127,10 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { command: 'global.undo', key: 'z', modifiers: ['Ctrl'], when: 'global' },
   { command: 'global.redo', key: 'z', modifiers: ['Ctrl', 'Shift'], when: 'global' },
   { command: 'global.redoAlt', key: 'y', modifiers: ['Ctrl'], when: 'global' },
-  { command: 'global.toggleView', key: 'Tab', modifiers: [], when: 'global' },
+  { command: 'global.toggleView', key: '`', modifiers: [], when: 'global' },
+  // '?' is Shift+/ on standard keyboards — the browser reports event.shiftKey
+  // for it, so the modifier must be declared to match keybindingMatchesEvent.
+  { command: 'global.openShortcutsHelp', key: '?', modifiers: ['Shift'], when: 'global' },
   { command: 'timeline.selectAll', key: 'a', modifiers: ['Ctrl'], when: 'timeline' },
   { command: 'timeline.copy', key: 'c', modifiers: ['Ctrl'], when: 'timeline' },
   { command: 'timeline.paste', key: 'v', modifiers: ['Ctrl'], when: 'timeline' },

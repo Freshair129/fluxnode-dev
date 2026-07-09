@@ -1,0 +1,11 @@
+node_modules
+.dist
+dist
+dist-ssr
+.tmp
+target
+src-tauri/target
+src-tauri/gen
+package-lock.json
+*.md
+*.html

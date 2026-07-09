@@ -137,8 +137,11 @@ impl ServerHandler for RegistryMcp {
         let app = self.app.clone();
         let name_for_task = name.clone();
 
+        // The MCP server is read-only by design (no confirmation UI exists over this transport):
+        // `allow_writes = false` means `Registry::invoke` refuses every `Mutating`/`LongJob`
+        // action before it runs, regardless of what the tool schema might suggest.
         let result = tokio::task::spawn_blocking(move || {
-            registry.invoke(&app, &name_for_task, args)
+            registry.invoke(&app, &name_for_task, args, false)
         })
         .await
         .map_err(|join_err| {

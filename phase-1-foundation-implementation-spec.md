@@ -15,7 +15,7 @@ It is intentionally limited to the minimum architecture needed to start building
   - `fluxnode_mockup.tsx` was a static proof of concept, not an integrated application.
 - Current status:
   - This foundation slice has since been implemented.
-  - For current repo-backed status, see `MASTERPLAN Completion Audit.md`.
+  - For current repo-backed status, see `masterplan-completion-audit.md` and `STATUS.md`.
 
 ## Complexity Classification
 
@@ -59,9 +59,10 @@ This foundation slice directly supports the MVP-priority systems:
 
 The following files remain authoritative and should not be contradicted:
 
-- `FluxNode Design Guide.md`
-- `stack.txt`
-- `fluxnode_mockup.tsx`
+- `fluxnode-design-guide.md`
+- `stack.txt` (now describes the actual shipped stack — Tauri + Rust + Zustand + a custom SVG canvas — not the original React Flow/FastAPI proposal)
+
+> `fluxnode_mockup.tsx` (the original static proof of concept referenced above) has since been deleted; the foundation slice it sketched is now the real implemented app.
 
 This implementation spec preserves the existing visual direction:
 

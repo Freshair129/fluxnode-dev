@@ -100,10 +100,11 @@ Bidirectional linking uses `clip.workflowNodeId` <-> `node.data.timelineClipId`.
 ## Spec Documents
 
 - `MASTERPLAN.md` - detailed technical specification
-- `Phase 1 Foundation Implementation Spec.md` - implementation priorities for the initial foundation slice
-- `Product Requirements Document.md` - PRD
-- `Software Requirements Specification.md` - SRS
-- `FluxNode Design Guide.md` - visual identity guide
+- `STATUS.md` - living source of truth for what's implemented vs pending
+- `phase-1-foundation-implementation-spec.md` - implementation priorities for the initial foundation slice
+- `product-requirements-document.md` - PRD
+- `software-requirements-specification.md` - SRS
+- `fluxnode-design-guide.md` - visual identity guide
 
 ## Current Progress
 

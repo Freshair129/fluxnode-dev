@@ -21,7 +21,10 @@ export async function loadAppPreferences(): Promise<AppPreferences> {
 
   try {
     const response = await invokeCommand<string>('load_app_preferences')
-    return normalizeAppPreferences(JSON.parse(response) as Partial<AppPreferences>)
+    const preferences = normalizeAppPreferences(JSON.parse(response) as Partial<AppPreferences>)
+    // The cloud API key is never persisted in preferences.json anymore — it lives in the OS
+    // keychain. Hydrate the in-memory copy so the UI can display/use it this session.
+    return { ...preferences, cloudApiKey: await loadCloudApiKey() }
   } catch {
     return loadLocalAppPreferences()
   }
@@ -33,9 +36,35 @@ export async function saveAppPreferences(preferences: AppPreferences): Promise<v
     return
   }
 
+  // Never round-trip the secret through the webview-writable preferences file.
+  const { cloudApiKey: _cloudApiKey, ...rest } = preferences
   await invokeCommand('save_app_preferences', {
-    preferencesJson: JSON.stringify(preferences),
+    preferencesJson: JSON.stringify({ ...rest, cloudApiKey: '' }),
   })
+}
+
+export async function loadCloudApiKey(): Promise<string> {
+  if (!isTauriRuntime()) {
+    return loadLocalAppPreferences().cloudApiKey
+  }
+
+  try {
+    return (await invokeCommand<string>('get_cloud_api_key')) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export async function saveCloudApiKey(apiKey: string): Promise<void> {
+  const trimmed = apiKey.trim()
+
+  if (!isTauriRuntime()) {
+    const next = { ...loadLocalAppPreferences(), cloudApiKey: trimmed }
+    window.localStorage.setItem(APP_PREFERENCES_KEY, JSON.stringify(next))
+    return
+  }
+
+  await invokeCommand('set_cloud_api_key', { key: trimmed })
 }
 
 function loadLocalAppPreferences(): AppPreferences {
