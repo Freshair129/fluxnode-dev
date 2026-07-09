@@ -47,13 +47,17 @@ spec section → [Fable 5] decompose into item + AC refs + complexity (C-1/C-2/C
 | 7 | Density modes (`data-density`, CSS vars) | G, L.7 | C-1 | Sonnet 5 (multi-file → fails E3; local only for any carved-out pure helpers) |
 | 8 | Empty/error state copy pass across surfaces | H, M.6 | C-1 | Sonnet 5 (multi-file → fails E3) |
 | 9 | Dissolve SystemPanels into the 28px status bar + drawers (its 8000px+ boundary content fights every stratum item) | E, F, J | C-2 | Sonnet 5 |
+| 10 | Browser-mode smoke-test infra (vitest browser mode or Playwright): shell height>0 + sky/ground proportional to ratio (item 3); JobChip timed flash-settle + accent→success + 8s auto-clear/hover-pin driven by a real job in a throwaway project (item 4). Stand up before phase-level sign-off. | J (verify) | C-2 | Sonnet 5 |
 
 Reviewed by Opus per item; assembled and gated by Fable 5 per phase.
 
+**Status (2026-07-09):** items 1, 2, 3, 4 = PASS + pushed. Remaining: 5, 6, 7, 8, 9, 10.
+
 ## Carried review notes (from closed items — bind on the items named)
 
-- **Item 3 (stage row):** must fold PreviewPanel *onto* the horizon — it currently renders as a row above StrataShell, and the shell is a 3-row grid, not L.1's 5-row template. (item-2 review)
-- **Item 4 (command registry):** ship a "Focus horizon splitter" / focus-region palette verb — with resting focus on body, Tab/Shift+Tab both flip and a keyboard-only user cannot enter the tab ring (K.1 names palette verbs as the alternative). Also decide command scoping: `useKeyboardShortcuts` still gates timeline/workflow commands on `activeView`, leaving the visible non-emphasized stratum keyboard-inert (tension with M.1). (item-2 review)
-- **Item 5 (lineage thread):** selection now survives horizon flips (regression-tested in project-store.test.ts), but the thread overlay needs real geometry — hard dependency on item 3's shell-height fix landing first (item-3 review).
+- **DONE — Item 3 (stage row):** folded PreviewPanel onto the horizon (5-row grid, fr-unit tracks). Closed.
+- **DONE — Item 4:** activeView command-scoping resolved via `resolveStratumScope` (scope follows DOM focus, not horizon emphasis) — M.1 tension closed. The "Focus horizon splitter" / focus-region palette verb is **re-deferred to item 6** (no palette exists yet). draggingRef guard also landed in item 3.
+- **Item 6 (command registry):** ship the "Focus horizon splitter" / focus-region palette verb (K.1 alternative for keyboard entry when focus rests on body). Rebind here.
+- **Item 5 (lineage thread):** selection survives horizon flips (regression-tested); shell now has real geometry (item 3 landed). Use `[data-meridian-stage-row]` as the horizon-crossing reference and `[data-meridian-stratum]` tags (added in item 4) for endpoint resolution.
 - **Open advisory, fold into any later shell-touching item:** global keydown doesn't check `draggingRef` — Ctrl+Arrow/backtick during a pointer-drag races the drag's DOM writes; minimal fix is an early-return when dragging. (item-2 review, advisory 2)
 - **Accepted deviations (do not re-flag):** analytic easeOutQuart instead of the bezier token; two CSS vars (--meridian-sky/--meridian-ground); ArrowUp shrinks sky (spatial, not WAI-ARIA value convention); duplicate lazy(TimelineView) wrappers.
