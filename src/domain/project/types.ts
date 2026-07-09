@@ -29,6 +29,19 @@ export interface ProjectMeta {
    * J.3). See `domain/project/horizon.ts` for the shared ratio math.
    */
   horizonRatio: number
+  /**
+   * MERIDIAN stage row (item 3): the job ledger (left) and context inspector
+   * (right) organs individually collapse to a 40px rail (spec F.3). Persisted
+   * per-project like `panelLayouts`/`horizonRatio`.
+   */
+  stageRowCollapse: StageRowCollapseState
+}
+
+export type StageRowSide = 'ledger' | 'inspector'
+
+export interface StageRowCollapseState {
+  ledger: boolean
+  inspector: boolean
 }
 
 export type DetachedPanelKind = 'preview' | 'timeline' | 'inspector'

@@ -5,6 +5,7 @@ import {
   activeViewForRatio,
   clampHorizonRatio,
   easeOutQuart,
+  horizonTrackSize,
   nextHorizonDetent,
   prefersReducedMotion,
   snapToHorizonDetent,
@@ -15,6 +16,9 @@ import {
 import { useProjectStore } from '../../store/project-store'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { PanelFallback } from '../../app/App'
+import { PreviewPanel } from '../preview/PreviewPanel'
+import { JobLedger } from '../status/JobLedger'
+import { StageInspector } from '../inspector/StageInspector'
 
 const WorkflowView = lazy(() =>
   import('../workflow/WorkflowView').then((module) => ({ default: module.WorkflowView })),
@@ -26,6 +30,22 @@ const TimelineView = lazy(() =>
 /** Spec J.2 (minimal): below this inner height, the non-emphasized stratum collapses to a peek strip. */
 const COMPACT_HEIGHT_BREAKPOINT = 720
 const COMPACT_PEEK_STRIP_PX = 32
+
+/** Spec F.1: stage row height is fixed per density mode (comfortable 248px). Exposed as a CSS
+ * var (`--meridian-stage-h`) rather than a bare literal so item 7 (density modes) has one place
+ * to retarget it instead of hunting through the grid template string. */
+const STAGE_ROW_HEIGHT_PX = 248
+/**
+ * Judgment call (item 3 brief: "in compact mode the stage row may shrink to transport-only
+ * height — your judgment, note it"). Below COMPACT_HEIGHT_BREAKPOINT the stage row shrinks to
+ * this much shorter band instead of staying at STAGE_ROW_HEIGHT_PX. There isn't a dedicated
+ * "transport-only" sub-layout to switch to yet — PreviewPanel's actual transport controls
+ * (play/pause/JKL) live in TimelineView's toolbar, not in PreviewPanel itself (see item-3
+ * report) — so this just tightens the row and leans on the embedded PreviewPanel's own internal
+ * scroll (`PreviewPanelProps.embedded`) to keep everything reachable. A real transport-only
+ * compact layout is a reasonable follow-up once a standalone TransportBar exists.
+ */
+const COMPACT_HEIGHT_STAGE_ROW_PX = 96
 
 /** Splitter's own focused-arrow-key resize steps (spec J.4), independent of the global Ctrl+arrow nudge. */
 const SPLITTER_ARROW_STEP_PX = 8
@@ -103,16 +123,16 @@ function applyHorizonRatioToDom(
   splitterEl: HTMLDivElement | null,
   ratio: number,
 ) {
-  const skyPct = ratio * 100
-  const groundPct = (1 - ratio) * 100
-
+  // fr units, NOT percentages — see horizonTrackSize's doc comment (item-3 review BLOCKING-2:
+  // percentage caps inside minmax() become unreachable once the fixed stage-row/splitter rows
+  // are subtracted, and grid silently equal-splits sky/ground).
   if (shellEl) {
-    shellEl.style.setProperty('--meridian-sky', `${skyPct}%`)
-    shellEl.style.setProperty('--meridian-ground', `${groundPct}%`)
+    shellEl.style.setProperty('--meridian-sky', horizonTrackSize(ratio))
+    shellEl.style.setProperty('--meridian-ground', horizonTrackSize(1 - ratio))
   }
 
   if (splitterEl) {
-    splitterEl.setAttribute('aria-valuenow', String(Math.round(skyPct)))
+    splitterEl.setAttribute('aria-valuenow', String(Math.round(ratio * 100)))
   }
 }
 
@@ -388,6 +408,16 @@ export function StrataShell({ className }: StrataShellProps) {
   // shadow native focus traversal — see isTabFlipRestingTarget.
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      // Carried advisory (item-2 review, advisory 2): an active pointer-drag already owns
+      // liveRatioRef/the DOM writes every frame via rAF. Without this guard, Ctrl+Arrow/`
+      // firing mid-drag would race those writes with animateRatioTo's own rAF loop and could
+      // leave the shell in a torn state (drag resumes from a ratio the nudge/peek already
+      // stomped, or vice versa). Simplest fix: while a pointer-drag is live, every horizon
+      // shortcut stands down and lets the drag finish.
+      if (draggingRef.current) {
+        return
+      }
+
       if (isEditableTarget(event.target) || isOverlayOpen()) {
         return
       }
@@ -441,20 +471,30 @@ export function StrataShell({ className }: StrataShellProps) {
     }
   }, [animateRatioTo, isCompactHeight, restorePeek])
 
+  // MERIDIAN item 3 (spec L.1's 5-row template, folding the stage row onto the horizon —
+  // carried review note from item 2): sky / top hairline+splitter / stage row (fixed height) /
+  // bottom hairline / ground. The two new "auto" rows sandwich the fixed-height stage row
+  // between sky and ground; only the sky/ground tracks are driven by --meridian-sky/-ground, so
+  // dragging the splitter moves sky and ground space around the stage row without ever
+  // resizing it (AC F.1). The splitter itself is unchanged from item 2 — same element, same
+  // pointer/keyboard handlers, same ref — it's just relocated to sit directly above the stage
+  // row instead of between two flex rows.
   const gridTemplateRows = useMemo(() => {
     if (isCompactHeight) {
       return compactEmphasis === 'workflow'
-        ? `minmax(0, 1fr) auto ${COMPACT_PEEK_STRIP_PX}px`
-        : `${COMPACT_PEEK_STRIP_PX}px auto minmax(0, 1fr)`
+        ? `minmax(0, 1fr) auto var(--meridian-stage-h) auto ${COMPACT_PEEK_STRIP_PX}px`
+        : `${COMPACT_PEEK_STRIP_PX}px auto var(--meridian-stage-h) auto minmax(0, 1fr)`
     }
 
-    return 'minmax(0, var(--meridian-sky)) auto minmax(0, var(--meridian-ground))'
+    return 'minmax(0, var(--meridian-sky)) auto var(--meridian-stage-h) auto minmax(0, var(--meridian-ground))'
   }, [compactEmphasis, isCompactHeight])
 
   const shellStyle = {
     gridTemplateRows,
-    '--meridian-sky': `${skyRatio * 100}%`,
-    '--meridian-ground': `${(1 - skyRatio) * 100}%`,
+    // fr units, NOT percentages — same contract as applyHorizonRatioToDom (review BLOCKING-2).
+    '--meridian-sky': horizonTrackSize(skyRatio),
+    '--meridian-ground': horizonTrackSize(1 - skyRatio),
+    '--meridian-stage-h': `${isCompactHeight ? COMPACT_HEIGHT_STAGE_ROW_PX : STAGE_ROW_HEIGHT_PX}px`,
   } as CSSProperties
 
   const skyCollapsed = isCompactHeight && compactEmphasis === 'timeline'
@@ -499,6 +539,29 @@ export function StrataShell({ className }: StrataShellProps) {
       >
         <div className="pointer-events-none h-px w-full bg-hairline transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out-quart)] group-hover:bg-white/25" />
       </div>
+
+      {/* Stage row (spec F/M.4): exactly three organs — job ledger (left, 216px), preview
+          stage (center, absorbs remaining width), inspector (right, 288px). Height is fixed via
+          the --meridian-stage-h var set above; this div only ever gets taller/shorter across a
+          density-mode or compact-height change, never during a horizon drag. */}
+      <div
+        data-meridian-stage-row
+        className="flex min-h-0 min-w-0 overflow-hidden bg-surface-2"
+      >
+        <ErrorBoundary label="Job ledger" compact>
+          <JobLedger />
+        </ErrorBoundary>
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+          <ErrorBoundary label="Preview stage" compact>
+            <PreviewPanel embedded />
+          </ErrorBoundary>
+        </div>
+        <ErrorBoundary label="Inspector" compact>
+          <StageInspector />
+        </ErrorBoundary>
+      </div>
+
+      <div aria-hidden="true" className="h-px w-full shrink-0 bg-hairline" />
 
       <div className="min-h-0 overflow-hidden">
         {groundCollapsed ? (

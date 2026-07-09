@@ -7,6 +7,7 @@ import {
   HORIZON_RATIO_TIMELINE_DEFAULT,
   HORIZON_RATIO_WORKFLOW_DEFAULT,
   clampHorizonRatio,
+  horizonTrackSize,
   nextHorizonDetent,
   snapToHorizonDetent,
   toggleHorizonDefaultRatio,
@@ -30,6 +31,29 @@ describe('horizon: clampHorizonRatio', () => {
     expect(clampHorizonRatio(Number.NaN)).toBe(DEFAULT_HORIZON_RATIO)
     expect(clampHorizonRatio(Number.POSITIVE_INFINITY)).toBe(DEFAULT_HORIZON_RATIO)
     expect(clampHorizonRatio(Number.NEGATIVE_INFINITY)).toBe(DEFAULT_HORIZON_RATIO)
+  })
+})
+
+describe('horizon: horizonTrackSize (strata grid track contract)', () => {
+  // Item-3 review BLOCKING-2 tripwire: the shell's sky/ground CSS vars MUST be fr units, never
+  // percentages. With the fixed-height stage row/splitter/hairline in the same grid template,
+  // `minmax(0, N%)` caps become unreachable below ~1071px shell height and grid equal-splits
+  // the strata — Tab flip and drag turn into visual no-ops. jsdom can't do real layout, so
+  // this string contract is the feasible guard (a browser-mode smoke test is separate infra).
+  it('emits fr-unit track sizes, never percentages', () => {
+    for (const detent of HORIZON_RATIO_DETENTS) {
+      expect(horizonTrackSize(detent)).toMatch(/^\d+(\.\d+)?fr$/)
+      expect(horizonTrackSize(1 - detent)).toMatch(/^\d+(\.\d+)?fr$/)
+      expect(horizonTrackSize(detent)).not.toContain('%')
+    }
+  })
+
+  it('scales the ratio to a clean 0-100 fr value (sky + ground stay proportional)', () => {
+    expect(horizonTrackSize(0.62)).toBe('62fr')
+    expect(horizonTrackSize(1 - 0.62)).toBe('38fr') // 0.38 * 100 is 38.000...004 in IEEE754
+    expect(horizonTrackSize(0.2)).toBe('20fr')
+    expect(horizonTrackSize(0.8)).toBe('80fr')
+    expect(horizonTrackSize(0.505)).toBe('50.5fr')
   })
 })
 

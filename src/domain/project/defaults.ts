@@ -456,6 +456,7 @@ export function createTemplateProject(templateId: ProjectTemplateId): FluxNodePr
       panelLayouts: createDefaultPanelLayouts(),
       sharing: createDefaultWorkspaceSharing(projectId, createdAt),
       horizonRatio: DEFAULT_HORIZON_RATIO,
+      stageRowCollapse: { ledger: false, inspector: false },
       section11TargetProfileOverride: null,
       section11ProofHistory: [],
       section11CoverageMapHistory: [],

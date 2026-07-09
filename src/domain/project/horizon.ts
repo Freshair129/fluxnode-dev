@@ -32,6 +32,23 @@ export const HORIZON_ANIMATION_MS = 200
 /** Global Ctrl+ArrowUp/ArrowDown nudge amount (spec H: "Ctrl+up/down nudge 10%"). */
 export const HORIZON_NUDGE_STEP = 0.1
 
+/**
+ * CSS grid track size for a stratum, in **fr units — never percentages** (item-3 review
+ * BLOCKING-2). The strata shell's 5-row template mixes these flexible sky/ground tracks with
+ * ~257px of fixed rows (splitter, stage row, hairline). Percentage tracks resolve against the
+ * shell's FULL height, so below ~1071px of shell height the `minmax(0, N%)` caps exceed the
+ * free space and become unreachable — grid then equal-splits the remainder and every ratio
+ * change from Tab/drag is a visual no-op while aria-valuenow keeps reporting the store value.
+ * `fr` tracks instead share only the free space left AFTER the fixed rows, so sky:ground is
+ * exactly `ratio : 1-ratio` at any shell height. Both writers of the CSS vars (the rAF drag
+ * path and the React style object in StrataShell) MUST go through this helper —
+ * horizon.test.ts pins the 'fr' suffix as the contract.
+ */
+export function horizonTrackSize(fraction: number): string {
+  // 0.38 * 100 === 38.000000000000004 under IEEE754; round to keep the CSS value clean.
+  return `${Math.round(fraction * 10000) / 100}fr`
+}
+
 export function clampHorizonRatio(ratio: number): number {
   if (!Number.isFinite(ratio)) {
     return DEFAULT_HORIZON_RATIO

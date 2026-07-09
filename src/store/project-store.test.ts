@@ -217,6 +217,21 @@ describe('project-store: horizon ratio (MERIDIAN strata shell)', () => {
     expect(useProjectStore.getState().project.meta.horizonRatio).toBe(0.62)
     expect(useProjectStore.getState().ui.activeView).toBe('workflow')
   })
+
+  it('toggleStageRowCollapse flips only the targeted rail and persists without touching history', () => {
+    expect(useProjectStore.getState().project.meta.stageRowCollapse).toEqual({ ledger: false, inspector: false })
+
+    useProjectStore.getState().toggleStageRowCollapse('ledger')
+    expect(useProjectStore.getState().project.meta.stageRowCollapse).toEqual({ ledger: true, inspector: false })
+
+    useProjectStore.getState().toggleStageRowCollapse('inspector')
+    expect(useProjectStore.getState().project.meta.stageRowCollapse).toEqual({ ledger: true, inspector: true })
+
+    useProjectStore.getState().toggleStageRowCollapse('ledger')
+    expect(useProjectStore.getState().project.meta.stageRowCollapse).toEqual({ ledger: false, inspector: true })
+
+    expect(useProjectStore.getState().history.undoStack).toHaveLength(0)
+  })
 })
 
 describe('project-store: split-clip id uniqueness', () => {

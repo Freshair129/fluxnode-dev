@@ -55,6 +55,7 @@ import type {
   Section11CapturePacketRecord,
   Section11ProofRecord,
   Section11TargetProfile,
+  StageRowSide,
   ThumbnailResult,
   Track,
   UserInterfaceState,
@@ -131,6 +132,7 @@ interface ProjectStoreState {
   workflowExecutionOrder: string[]
   setActiveView: (view: UserInterfaceState['activeView']) => void
   setHorizonRatio: (ratio: number) => void
+  toggleStageRowCollapse: (side: StageRowSide) => void
   toggleComputeMode: () => void
   toggleProxyMode: () => void
   dismissWelcome: () => void
@@ -2657,6 +2659,24 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         ui: { ...state.ui, activeView: nextView },
       }
     }),
+  // MERIDIAN stage row (item 3): mirrors `setHorizonRatio`'s pattern — a direct `set` on
+  // `project.meta`, not routed through `applyMutation`/undo history. Rail collapse is layout
+  // state (like the horizon ratio and detached-panel geometry), not project *content*, so it
+  // shouldn't show up in the undo stack or dirty the "unsaved changes" story any differently
+  // than dragging the horizon does.
+  toggleStageRowCollapse: (side) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        meta: {
+          ...state.project.meta,
+          stageRowCollapse: {
+            ...state.project.meta.stageRowCollapse,
+            [side]: !state.project.meta.stageRowCollapse[side],
+          },
+        },
+      },
+    })),
   recordViewSwitchMetric: (metric) =>
     set((state) => ({
       ui: {

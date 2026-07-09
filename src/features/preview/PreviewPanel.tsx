@@ -10,7 +10,18 @@ const PREVIEW_PREFETCH_FRAMES = 30
 // so rapid playhead ticks during playback/scrubbing don't flood the backend.
 const PREVIEW_DECODE_THROTTLE_MS = 120
 
-export function PreviewPanel() {
+export interface PreviewPanelProps {
+  /**
+   * MERIDIAN stage row (item 3): when mounted as the stage row's center organ, the panel no
+   * longer floats as its own card (no rounded/border/shadow/backdrop-blur chrome — the stage
+   * row itself owns that surface per spec I: "panels never cast shadows") and instead fills the
+   * fixed-height stage row, scrolling internally. The detached-window host (`App.tsx`'s
+   * `detachedPanel === 'preview'` branch) keeps the original floating-card look, unchanged.
+   */
+  embedded?: boolean
+}
+
+export function PreviewPanel({ embedded = false }: PreviewPanelProps = {}) {
   const project = useProjectStore((state) => state.project)
   const runtimeHealth = useProjectStore((state) => state.runtimeHealth)
   const activeView = useProjectStore((state) => state.ui.activeView)
@@ -138,6 +149,157 @@ export function PreviewPanel() {
     [],
   )
 
+  // The actual 16:9 monitor surface — shared verbatim between the detached-window layout and
+  // the embedded stage-row layout so decode/proxy/aspect behavior can't drift between hosts.
+  const monitorSurface = previewFrame ? (
+    <img
+      src={previewFrame.dataUrl}
+      alt={`${previewTitle} preview`}
+      className="h-full w-full object-contain bg-black"
+    />
+  ) : (
+    <div className="flex h-full flex-col justify-between p-4">
+      <div className="flex items-center justify-between gap-3 text-xs uppercase tracking-[0.2em] text-[#8d96a2]">
+        <span>{project.settings.resolution.width} x {project.settings.resolution.height}</span>
+        <span>{project.settings.frameRate} fps</span>
+      </div>
+      <div className="text-center">
+        <Film size={34} className="mx-auto text-accent" aria-hidden="true" />
+        <p className="mt-4 text-lg font-semibold text-white">{previewTitle}</p>
+        <p className="mt-2 text-sm leading-6 text-[#aab3bf]">
+          {effectivePreviewSource ?? routedWorkflowNode?.id ?? 'No preview source selected yet.'}
+        </p>
+      </div>
+      <div className="flex items-center justify-between gap-3 text-xs text-[#9ca3af]">
+        <span>Waiting for decoded frame</span>
+        <span>{requestedSourceTime !== null ? `${requestedSourceTime.toFixed(2)}s source` : 'No source time'}</span>
+      </div>
+    </div>
+  )
+
+  // The metadata/action payload (metric cards + proxy/lineage buttons) — also shared between
+  // hosts. In the detached window it renders as the right-hand aside; in the embedded stage
+  // row it renders BELOW the monitor fold (review round-1: the monitor must be visible inside
+  // the 248px row without scrolling; metadata below the fold is acceptable, a clipped monitor
+  // is not).
+  const previewDetails = (
+    <>
+      <MetricCard
+        icon={Link2}
+        label="Output Route"
+        value={routedWorkflowNode?.label ?? routedWorkflowNode?.id ?? 'Unrouted'}
+        note={outputNode ? `Output node ${outputNode.label ?? outputNode.id} is available.` : 'Output node missing from graph.'}
+      />
+      <MetricCard
+        icon={Sparkles}
+        label="Selection"
+        value={selectedAsset?.name ?? selectedNode?.label ?? 'No active selection'}
+        note={selectedAsset ? selectedAsset.sourcePath : selectedNode ? selectedNode.type.replace('_', ' ') : 'Select a clip or node to inspect context.'}
+      />
+      <MetricCard
+        icon={HardDrive}
+        label="Preview Source"
+        value={requestedSourceTime !== null ? `${requestedSourceTime.toFixed(2)}s` : 'No source time'}
+        note={
+          runtimeHealth.vramUtilizationPct !== null && runtimeHealth.vramUtilizationPct >= 95
+            ? 'Preview decode paused because VRAM usage crossed the 95% safety threshold.'
+            : runtimeHealth.vramUtilizationPct !== null && runtimeHealth.vramUtilizationPct >= 90
+              ? `Preview resolution reduced automatically to ${requestWidth}x${requestHeight} while VRAM is at ${runtimeHealth.vramUtilizationPct.toFixed(1)}%.`
+              : effectivePreviewSource ?? previewFrame?.mimeType ?? 'Decoded frame metadata will appear here once a visual clip is selected.'
+        }
+      />
+      <MetricCard
+        icon={HardDrive}
+        label="Preview Buffer"
+        value={selectedAsset?.type === 'video' ? `${bufferedFrameCount}/${PREVIEW_PREFETCH_FRAMES * 2 + 1} frames` : previewFrame ? '1 frame ready' : 'Idle'}
+        note={
+          selectedAsset?.type === 'video'
+            ? 'FluxNode now prefetches an on-demand frame window around the playhead to keep shuttle and scrubbing previews responsive.'
+            : 'Still images only need the current decoded frame.'
+        }
+      />
+      <MetricCard
+        icon={HardDrive}
+        label="Proxy Mode"
+        value={project.settings.proxyEnabled ? 'Enabled' : 'Disabled'}
+        note={
+          selectedAsset?.proxyPath
+            ? `Proxy ready at ${selectedAsset.proxyPath}`
+            : selectedAsset?.type === 'video'
+              ? 'No proxy yet. Generate one for smoother editing.'
+              : 'Proxy generation is only used for video assets.'
+        }
+      />
+      <MetricCard
+        icon={HardDrive}
+        label="Latest Export"
+        value={activeJob?.name ?? 'No export started'}
+        note={activeJob?.manifestPath ?? 'Queue a render to produce an export handoff manifest.'}
+      />
+      {selectedAsset?.type === 'video' && !selectedAsset.proxyPath ? (
+        <button
+          type="button"
+          onClick={() => void generateProxyForSelectedClip()}
+          className="rounded-[1.2rem] border border-accent/20 bg-accent/10 px-4 py-3 text-left text-sm text-[#f5ffd5]"
+        >
+          Generate proxy for this clip
+        </button>
+      ) : null}
+      {activeView === 'timeline' && selectedClip ? (
+        <button
+          type="button"
+          onClick={showSelectedClipInWorkflow}
+          className="rounded-[1.2rem] border border-white/10 bg-white/5 px-4 py-3 text-left text-sm text-white"
+        >
+          Show linked workflow node
+        </button>
+      ) : null}
+      {activeView === 'workflow' && selectedNode ? (
+        <button
+          type="button"
+          onClick={showSelectedNodeInTimeline}
+          className="rounded-[1.2rem] border border-white/10 bg-white/5 px-4 py-3 text-left text-sm text-white"
+        >
+          Show linked timeline clip
+        </button>
+      ) : null}
+    </>
+  )
+
+  if (embedded) {
+    // Stage-row layout (spec F: monitor is the center organ). The first-fold wrapper is
+    // `h-full` of the scroll container, i.e. exactly the stage row's fixed height, so the
+    // monitor always fits on screen: one slim header line (title + timecode), then the 16:9
+    // monitor letterboxed into the remaining height (`aspect-video h-full max-w-full` +
+    // object-contain on the frame). Everything else scrolls in below the fold.
+    return (
+      <section aria-label="Preview monitor" className="h-full overflow-y-auto bg-surface-2">
+        <div className="flex h-full flex-col p-3">
+          <div className="flex shrink-0 items-center justify-between gap-3 pb-2">
+            <p className="truncate text-[11px] uppercase tracking-[0.22em] text-text-secondary" title={previewTitle}>
+              {previewTitle}
+            </p>
+            <p
+              aria-live="polite"
+              aria-label={`Playback ${playbackState} at ${playhead.toFixed(2)} seconds`}
+              className="shrink-0 font-mono text-[11px] tabular-nums text-text-data"
+            >
+              {playbackState} · {playhead.toFixed(2)}s
+            </p>
+          </div>
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            <div className="aspect-video h-full max-w-full overflow-hidden rounded-[var(--radius-md)] border border-white/10 bg-[#0c0d0f]">
+              {monitorSurface}
+            </div>
+          </div>
+        </div>
+        <div aria-label="Preview details" className="grid gap-3 p-3 pt-1">
+          {previewDetails}
+        </div>
+      </section>
+    )
+  }
+
   return (
     <section
       aria-label="Preview monitor"
@@ -169,31 +331,7 @@ export function PreviewPanel() {
 
             <div className="rounded-[1.5rem] border border-white/10 bg-black/30 p-5">
               <div className="aspect-video overflow-hidden rounded-[1.2rem] border border-white/10 bg-[#0c0d0f]">
-                {previewFrame ? (
-                  <img
-                    src={previewFrame.dataUrl}
-                    alt={`${previewTitle} preview`}
-                    className="h-full w-full object-contain bg-black"
-                  />
-                ) : (
-                  <div className="flex h-full flex-col justify-between p-4">
-                    <div className="flex items-center justify-between gap-3 text-xs uppercase tracking-[0.2em] text-[#8d96a2]">
-                      <span>{project.settings.resolution.width} x {project.settings.resolution.height}</span>
-                      <span>{project.settings.frameRate} fps</span>
-                    </div>
-                    <div className="text-center">
-                      <Film size={34} className="mx-auto text-accent" aria-hidden="true" />
-                      <p className="mt-4 text-lg font-semibold text-white">{previewTitle}</p>
-                      <p className="mt-2 text-sm leading-6 text-[#aab3bf]">
-                        {effectivePreviewSource ?? routedWorkflowNode?.id ?? 'No preview source selected yet.'}
-                      </p>
-                    </div>
-                    <div className="flex items-center justify-between gap-3 text-xs text-[#9ca3af]">
-                      <span>Waiting for decoded frame</span>
-                      <span>{requestedSourceTime !== null ? `${requestedSourceTime.toFixed(2)}s source` : 'No source time'}</span>
-                    </div>
-                  </div>
-                )}
+                {monitorSurface}
               </div>
             </div>
 
@@ -204,85 +342,7 @@ export function PreviewPanel() {
         </div>
 
         <aside aria-label="Preview details" className="grid gap-3">
-          <MetricCard
-            icon={Link2}
-            label="Output Route"
-            value={routedWorkflowNode?.label ?? routedWorkflowNode?.id ?? 'Unrouted'}
-            note={outputNode ? `Output node ${outputNode.label ?? outputNode.id} is available.` : 'Output node missing from graph.'}
-          />
-          <MetricCard
-            icon={Sparkles}
-            label="Selection"
-            value={selectedAsset?.name ?? selectedNode?.label ?? 'No active selection'}
-            note={selectedAsset ? selectedAsset.sourcePath : selectedNode ? selectedNode.type.replace('_', ' ') : 'Select a clip or node to inspect context.'}
-          />
-          <MetricCard
-            icon={HardDrive}
-            label="Preview Source"
-            value={requestedSourceTime !== null ? `${requestedSourceTime.toFixed(2)}s` : 'No source time'}
-            note={
-              runtimeHealth.vramUtilizationPct !== null && runtimeHealth.vramUtilizationPct >= 95
-                ? 'Preview decode paused because VRAM usage crossed the 95% safety threshold.'
-                : runtimeHealth.vramUtilizationPct !== null && runtimeHealth.vramUtilizationPct >= 90
-                  ? `Preview resolution reduced automatically to ${requestWidth}x${requestHeight} while VRAM is at ${runtimeHealth.vramUtilizationPct.toFixed(1)}%.`
-                  : effectivePreviewSource ?? previewFrame?.mimeType ?? 'Decoded frame metadata will appear here once a visual clip is selected.'
-            }
-          />
-          <MetricCard
-            icon={HardDrive}
-            label="Preview Buffer"
-            value={selectedAsset?.type === 'video' ? `${bufferedFrameCount}/${PREVIEW_PREFETCH_FRAMES * 2 + 1} frames` : previewFrame ? '1 frame ready' : 'Idle'}
-            note={
-              selectedAsset?.type === 'video'
-                ? 'FluxNode now prefetches an on-demand frame window around the playhead to keep shuttle and scrubbing previews responsive.'
-                : 'Still images only need the current decoded frame.'
-            }
-          />
-          <MetricCard
-            icon={HardDrive}
-            label="Proxy Mode"
-            value={project.settings.proxyEnabled ? 'Enabled' : 'Disabled'}
-            note={
-              selectedAsset?.proxyPath
-                ? `Proxy ready at ${selectedAsset.proxyPath}`
-                : selectedAsset?.type === 'video'
-                  ? 'No proxy yet. Generate one for smoother editing.'
-                  : 'Proxy generation is only used for video assets.'
-            }
-          />
-          <MetricCard
-            icon={HardDrive}
-            label="Latest Export"
-            value={activeJob?.name ?? 'No export started'}
-            note={activeJob?.manifestPath ?? 'Queue a render to produce an export handoff manifest.'}
-          />
-          {selectedAsset?.type === 'video' && !selectedAsset.proxyPath ? (
-            <button
-              type="button"
-              onClick={() => void generateProxyForSelectedClip()}
-              className="rounded-[1.2rem] border border-accent/20 bg-accent/10 px-4 py-3 text-left text-sm text-[#f5ffd5]"
-            >
-              Generate proxy for this clip
-            </button>
-          ) : null}
-          {activeView === 'timeline' && selectedClip ? (
-            <button
-              type="button"
-              onClick={showSelectedClipInWorkflow}
-              className="rounded-[1.2rem] border border-white/10 bg-white/5 px-4 py-3 text-left text-sm text-white"
-            >
-              Show linked workflow node
-            </button>
-          ) : null}
-          {activeView === 'workflow' && selectedNode ? (
-            <button
-              type="button"
-              onClick={showSelectedNodeInTimeline}
-              className="rounded-[1.2rem] border border-white/10 bg-white/5 px-4 py-3 text-left text-sm text-white"
-            >
-              Show linked timeline clip
-            </button>
-          ) : null}
+          {previewDetails}
         </aside>
       </div>
     </section>

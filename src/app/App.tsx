@@ -525,26 +525,37 @@ export default function App() {
           className="relative z-10 h-[calc(100vh-4.5rem)] overflow-hidden p-4 md:p-5"
         >
           <ErrorBoundary label="Workspace">
-            <div className="flex h-full flex-col gap-4 overflow-auto">
-              <ErrorBoundary label="Preview monitor">
-                <PreviewPanel />
-              </ErrorBoundary>
-              {/* MERIDIAN strata shell (item 2): sky (WorkflowView) and ground (TimelineView)
-                  render simultaneously, separated by the horizon splitter — see
-                  docs/design/MERIDIAN-UI-SPEC.md sections D, F, H, J.2, J.4. `flex-1 min-h-0`
-                  is the minimum needed so the shell's CSS grid rows have real height to split;
-                  restructuring the stage row itself (fixed-height ledger/monitor/inspector) is
-                  item 3, not this change. */}
+            {/* MERIDIAN item-3 review BLOCKING-1: this column must be `overflow-hidden`, not
+                `overflow-auto`. SystemPanels' content is thousands of pixels tall; with the
+                column scrollable, that content made free space negative and StrataShell's
+                `flex-1` computed to 0px — the whole shell was overflow paint. With the column
+                clipped and SystemPanels capped to its own scrolling box (`max-h-56 shrink-0
+                overflow-y-auto` below), `flex-1` gets real free space and the shell owns the
+                viewport like spec F intends (one screen; status content dissolves into the
+                status bar/drawers in a later item — the wrapper here is deliberately minimal
+                and additive, no SystemPanels redesign). */}
+            <div className="flex h-full flex-col gap-4 overflow-hidden">
+              {/* MERIDIAN strata shell (item 2) + stage row (item 3): sky (WorkflowView) and
+                  ground (TimelineView) render simultaneously, separated by the horizon
+                  splitter, with the preview stage/job ledger/inspector folded onto the horizon
+                  itself as StrataShell's fixed-height stage row — see
+                  docs/design/MERIDIAN-UI-SPEC.md sections D, F, H, J.2, J.4. PreviewPanel used
+                  to render as its own row above the shell (item-2 review carried this forward
+                  as a blocking note for item 3: "must fold PreviewPanel onto the horizon").
+                  `flex-1 min-h-0` is the minimum needed so the shell's CSS grid rows have real
+                  height to split. */}
               <ErrorBoundary label="Strata shell">
                 <Suspense fallback={<PanelFallback label="Loading workspace" />}>
                   <StrataShell className="min-h-0 flex-1" />
                 </Suspense>
               </ErrorBoundary>
-              <ErrorBoundary label="System panels" compact>
-                <Suspense fallback={<PanelFallback label="Loading system panels" compact />}>
-                  <SystemPanels />
-                </Suspense>
-              </ErrorBoundary>
+              <div className="max-h-56 shrink-0 overflow-y-auto">
+                <ErrorBoundary label="System panels" compact>
+                  <Suspense fallback={<PanelFallback label="Loading system panels" compact />}>
+                    <SystemPanels />
+                  </Suspense>
+                </ErrorBoundary>
+              </div>
             </div>
           </ErrorBoundary>
         </main>
