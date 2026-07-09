@@ -31,7 +31,7 @@ spec section → [Fable 5] decompose into item + AC refs + complexity (C-1/C-2/C
 2. **Complexity routing (RWANG:Core C-scale):** C-1 = single-file, pattern-following → local. C-2 = multi-file, bounded design decisions → Sonnet 5. C-3 = architectural (horizon shell, thread overlay, command registry) → Sonnet 5 with a Fable 5 written brief; Fable 5 may implement directly when integration risk is high.
 3. **Local LLM boundaries:** never touches `src-tauri/` (Rust), Zustand store contracts, or the command registry schema. On top of that, every local dispatch must satisfy Dispatch v2 eligibility E1–E6 (pure, single-file, computable acceptance, prompt < ~500 tokens, no security/money/API-contract scope). C-1 items that are not decomposable into eligible micro-tasks route to Sonnet 5; the orchestrator (not the local model) does the decomposition.
 4. **Opus AC discipline:** reviews cite spec rule numbers (e.g. "violates H pointer-states: hover uses accent"). Style opinions without a spec/convention anchor are advisory, not blocking.
-5. **Final gate checklist (Fable 5, before every push):** `npm run build` clean · lint clean · no `--color-accent` usage outside the allowed component list (spec M.2) · all six required states present for any new surface (spec H) · reduced-motion path exists for any new animation.
+5. **Final gate checklist (Fable 5, before every push):** `npm run build` clean · lint clean · no `--color-accent` usage outside the allowed component list (spec M.2) · all six required states present for any new surface (spec H) · reduced-motion path exists for any new animation · **live-render check for any shell/layout-touching item** (dev server via `run-meridian.bat`, DOM-measure the affected geometry — jsdom tests cannot catch 0-height/track-collapse bugs; learned from item 3).
 6. **Merge to `master`** only via PR from `feat/meridian-ui`, opened by Fable 5 after the phase's items all hold PASS.
 
 ## Phase 1 work breakdown (initial)
@@ -46,6 +46,7 @@ spec section → [Fable 5] decompose into item + AC refs + complexity (C-1/C-2/C
 | 6 | Command registry unification (palette + context menu + shortcuts) | H, L.4 | C-3 | Sonnet 5 |
 | 7 | Density modes (`data-density`, CSS vars) | G, L.7 | C-1 | Sonnet 5 (multi-file → fails E3; local only for any carved-out pure helpers) |
 | 8 | Empty/error state copy pass across surfaces | H, M.6 | C-1 | Sonnet 5 (multi-file → fails E3) |
+| 9 | Dissolve SystemPanels into the 28px status bar + drawers (its 8000px+ boundary content fights every stratum item) | E, F, J | C-2 | Sonnet 5 |
 
 Reviewed by Opus per item; assembled and gated by Fable 5 per phase.
 
@@ -53,6 +54,6 @@ Reviewed by Opus per item; assembled and gated by Fable 5 per phase.
 
 - **Item 3 (stage row):** must fold PreviewPanel *onto* the horizon — it currently renders as a row above StrataShell, and the shell is a 3-row grid, not L.1's 5-row template. (item-2 review)
 - **Item 4 (command registry):** ship a "Focus horizon splitter" / focus-region palette verb — with resting focus on body, Tab/Shift+Tab both flip and a keyboard-only user cannot enter the tab ring (K.1 names palette verbs as the alternative). Also decide command scoping: `useKeyboardShortcuts` still gates timeline/workflow commands on `activeView`, leaving the visible non-emphasized stratum keyboard-inert (tension with M.1). (item-2 review)
-- **Item 5 (lineage thread):** unblocked — selection now survives horizon flips (regression-tested in project-store.test.ts).
+- **Item 5 (lineage thread):** selection now survives horizon flips (regression-tested in project-store.test.ts), but the thread overlay needs real geometry — hard dependency on item 3's shell-height fix landing first (item-3 review).
 - **Open advisory, fold into any later shell-touching item:** global keydown doesn't check `draggingRef` — Ctrl+Arrow/backtick during a pointer-drag races the drag's DOM writes; minimal fix is an early-return when dragging. (item-2 review, advisory 2)
 - **Accepted deviations (do not re-flag):** analytic easeOutQuart instead of the bezier token; two CSS vars (--meridian-sky/--meridian-ground); ArrowUp shrinks sky (spatial, not WAI-ARIA value convention); duplicate lazy(TimelineView) wrappers.
