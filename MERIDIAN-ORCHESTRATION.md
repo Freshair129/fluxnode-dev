@@ -48,3 +48,11 @@ spec section → [Fable 5] decompose into item + AC refs + complexity (C-1/C-2/C
 | 8 | Empty/error state copy pass across surfaces | H, M.6 | C-1 | Sonnet 5 (multi-file → fails E3) |
 
 Reviewed by Opus per item; assembled and gated by Fable 5 per phase.
+
+## Carried review notes (from closed items — bind on the items named)
+
+- **Item 3 (stage row):** must fold PreviewPanel *onto* the horizon — it currently renders as a row above StrataShell, and the shell is a 3-row grid, not L.1's 5-row template. (item-2 review)
+- **Item 4 (command registry):** ship a "Focus horizon splitter" / focus-region palette verb — with resting focus on body, Tab/Shift+Tab both flip and a keyboard-only user cannot enter the tab ring (K.1 names palette verbs as the alternative). Also decide command scoping: `useKeyboardShortcuts` still gates timeline/workflow commands on `activeView`, leaving the visible non-emphasized stratum keyboard-inert (tension with M.1). (item-2 review)
+- **Item 5 (lineage thread):** unblocked — selection now survives horizon flips (regression-tested in project-store.test.ts).
+- **Open advisory, fold into any later shell-touching item:** global keydown doesn't check `draggingRef` — Ctrl+Arrow/backtick during a pointer-drag races the drag's DOM writes; minimal fix is an early-return when dragging. (item-2 review, advisory 2)
+- **Accepted deviations (do not re-flag):** analytic easeOutQuart instead of the bezier token; two CSS vars (--meridian-sky/--meridian-ground); ArrowUp shrinks sky (spatial, not WAI-ARIA value convention); duplicate lazy(TimelineView) wrappers.
