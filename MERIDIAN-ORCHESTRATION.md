@@ -47,11 +47,14 @@ spec section → [Fable 5] decompose into item + AC refs + complexity (C-1/C-2/C
 | 7 | Density modes (`data-density`, CSS vars) | G, L.7 | C-1 | Sonnet 5 (multi-file → fails E3; local only for any carved-out pure helpers) |
 | 8 | Empty/error state copy pass across surfaces | H, M.6 | C-1 | Sonnet 5 (multi-file → fails E3) |
 | 9 | Dissolve SystemPanels into the 28px status bar + drawers (its 8000px+ boundary content fights every stratum item) | E, F, J | C-2 | Sonnet 5 |
-| 10 | Browser-mode smoke-test infra (vitest browser mode or Playwright): shell height>0 + sky/ground proportional to ratio (item 3); JobChip timed flash-settle + accent→success + 8s auto-clear/hover-pin driven by a real job in a throwaway project (item 4). Stand up before phase-level sign-off. | J (verify) | C-2 | Sonnet 5 |
+| 10 | **Browser-mode smoke-test infra — MUST use a real visible browser (headed Playwright, or vitest browser mode with a real window), NOT the CDP preview tab** (that tab reports `document.hidden===true` and rAF never fires: 0 callbacks in 1.4s, measured). Assert: shell height>0 + sky/ground proportional to ratio (item 3); JobChip timed flash-settle + accent→success + 8s auto-clear/hover-pin from a real job in a throwaway project (item 4); thread `d` endpoints track their articles after scroll/pan, primed thread reaches dashoffset 0 within the draw window, pills toggle hidden⇄shown as endpoints cross their band, draw-in fires once per selection change and is instant under reduced motion (item 5). Stand up before phase sign-off. | J (verify) | C-2 | Sonnet 5 |
+| 11 | Lineage hardening (deferred from item-5 review, needs item 10 to verify safely): `visibilitychange` re-prime so a thread stuck primed-hidden self-heals; drop the redundant `mousemove` listener; scope pointer-move recompute to active drags (pointerdown→up) and to the graph/timeline scroll containers; narrow the capture-phase `keydown` catch-all to the layout-changing shortcuts. | L.3, M.10 | C-2 | Sonnet 5 |
 
 Reviewed by Opus per item; assembled and gated by Fable 5 per phase.
 
-**Status (2026-07-09):** items 1, 2, 3, 4 = PASS + pushed. Remaining: 5, 6, 7, 8, 9, 10.
+**Status (2026-07-09):** items 1, 2, 3, 4, 5 = PASS + pushed. Remaining: 6, 7, 8, 9, 10, 11.
+
+**Phase-integration watch (item-5 review, advisory 4):** with the 248px stage row at the default 62/38 ratio, the visible sky/ground bands are only ~180px / ~111px, so on a fresh selection both lineage endpoints are usually *outside* their bands — the signature interaction then reads as "two edge pills + a clamped stub" rather than a thread rising through the horizon. Not a defect of any single item (item-3 layout + demo scroll state), but the phase must not sign off until a default selection shows a real thread. Candidate levers: a smaller default stage row, an auto-scroll-into-view on selection, or a different default detent.
 
 ## Carried review notes (from closed items — bind on the items named)
 
@@ -60,4 +63,9 @@ Reviewed by Opus per item; assembled and gated by Fable 5 per phase.
 - **Item 6 (command registry):** ship the "Focus horizon splitter" / focus-region palette verb (K.1 alternative for keyboard entry when focus rests on body). Rebind here.
 - **Item 5 (lineage thread):** selection survives horizon flips (regression-tested); shell now has real geometry (item 3 landed). Use `[data-meridian-stage-row]` as the horizon-crossing reference and `[data-meridian-stratum]` tags (added in item 4) for endpoint resolution.
 - **Open advisory, fold into any later shell-touching item:** global keydown doesn't check `draggingRef` — Ctrl+Arrow/backtick during a pointer-drag races the drag's DOM writes; minimal fix is an early-return when dragging. (item-2 review, advisory 2)
-- **Accepted deviations (do not re-flag):** analytic easeOutQuart instead of the bezier token; two CSS vars (--meridian-sky/--meridian-ground); ArrowUp shrinks sky (spatial, not WAI-ARIA value convention); duplicate lazy(TimelineView) wrappers.
+- **Accepted deviations (do not re-flag):** analytic easeOutQuart instead of the bezier token; two CSS vars (--meridian-sky/--meridian-ground); ArrowUp shrinks sky (spatial, not WAI-ARIA value convention); duplicate lazy(TimelineView) wrappers; `animate-pulse` 2s cadence vs spec H "1/s"; **lineage is `Clip → Node` via the existing `Clip.workflowNodeId`, not the spec's `Clip → Take → Output → Node`** — no Take model exists in the codebase and item 5 does not invent one (orchestrator decision, item-5 brief).
+
+## Standing invariants for the lineage work (item 5+)
+
+- The thread and `F` jump are **strictly observational**: they may select, focus, scroll-into-view, and slide the horizon. They must never create a node, mutate the project, or push undo history. In particular `showSelectedClipInWorkflow` **creates a workflow node when the clip has none** — never reuse it for the passive thread. A clip with `workflowNodeId === null` has no thread; silence is the correct answer.
+- `Shift+F` (Takes drawer) is out of scope until a Take model exists.
