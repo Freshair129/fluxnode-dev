@@ -188,12 +188,14 @@ Extends the existing `@theme` in `src/styles/index.css`; existing tokens unchang
   --color-border: rgba(255,255,255,0.10);
   --color-hairline: rgba(255,255,255,0.14);
 
-  /* Motion */
-  --ease-out: cubic-bezier(0.165,0.84,0.44,1);
+  /* Motion — named --ease-out-quart, NOT --ease-out, to avoid clobbering
+     Tailwind v4's built-in `ease-out` utility (item-1 review decision) */
+  --ease-out-quart: cubic-bezier(0.165,0.84,0.44,1);
   --dur-fast: 120ms; --dur-base: 200ms; --dur-draw: 240ms;
 
-  /* Radii */
-  --radius-s: 4px; --radius-m: 6px; --radius-l: 10px;
+  /* Radii — sm/md/lg naming; -s/-l would collide with Tailwind side
+     utilities `rounded-s` / `rounded-l` (item-1 review decision) */
+  --radius-sm: 4px; --radius-md: 6px; --radius-lg: 10px;
 
   /* Z scale (semantic) */
   --z-drawer: 10; --z-thread: 20; --z-sticky: 30;

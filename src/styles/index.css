@@ -24,6 +24,10 @@
   --color-accent-soft: #f5ffd5;
   --color-cloud: #3b82f6;
 
+  /* Phosphor (lineage) */
+  --color-phosphor: #aeca2a;
+  --color-phosphor-dim: #5a6a1c;
+
   /* Semantic */
   --color-success: #34d399;
   --color-warn: #fbbf24;
@@ -34,10 +38,37 @@
   /* Bumped from the previous #7f8691 — that shade fell at/below 4.5:1 AA
      contrast at the 10px uppercase label size it's used at everywhere. */
   --color-text-secondary: #a2abb6;
+  --color-text-data: #c8d1da;
 
   /* Borders */
   --color-border-subtle: rgba(255, 255, 255, 0.08);
   --color-border: rgba(255, 255, 255, 0.1);
+  --color-hairline: rgba(255, 255, 255, 0.14);
+
+  /* Motion */
+  --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-draw: 240ms;
+
+  /* Radii — sm/md/lg naming: `--radius-s`/`--radius-l` would be shadowed by
+     Tailwind's built-in `rounded-s` (start-side) / `rounded-l` (left-side)
+     utilities, per item-1 review. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* Elevation */
+  --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  /* Z scale */
+  --z-drawer: 10;
+  --z-thread: 20;
+  --z-sticky: 30;
+  --z-overlay-backdrop: 40;
+  --z-overlay: 50;
+  --z-toast: 60;
+  --z-tooltip: 70;
 }
 
 :root {
