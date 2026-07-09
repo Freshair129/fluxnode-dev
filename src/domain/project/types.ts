@@ -23,6 +23,12 @@ export interface ProjectMeta {
   section11ProofHistory: Section11ProofRecord[]
   section11CoverageMapHistory: Section11CoverageMapRecord[]
   section11CapturePacketHistory: Section11CapturePacketRecord[]
+  /**
+   * MERIDIAN strata shell: sky (workflow) fraction of the horizon splitter,
+   * in [HORIZON_RATIO_MIN, HORIZON_RATIO_MAX]. Persisted per-project (spec
+   * J.3). See `domain/project/horizon.ts` for the shared ratio math.
+   */
+  horizonRatio: number
 }
 
 export type DetachedPanelKind = 'preview' | 'timeline' | 'inspector'

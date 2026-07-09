@@ -22,8 +22,8 @@ import { useProjectStore } from '../store/project-store'
 const TimelineView = lazy(() =>
   import('../features/timeline/TimelineView').then((module) => ({ default: module.TimelineView })),
 )
-const WorkflowView = lazy(() =>
-  import('../features/workflow/WorkflowView').then((module) => ({ default: module.WorkflowView })),
+const StrataShell = lazy(() =>
+  import('../features/workspace/StrataShell').then((module) => ({ default: module.StrataShell })),
 )
 const SystemPanels = lazy(() =>
   import('../features/status/SystemPanels').then((module) => ({ default: module.SystemPanels })),
@@ -529,9 +529,15 @@ export default function App() {
               <ErrorBoundary label="Preview monitor">
                 <PreviewPanel />
               </ErrorBoundary>
-              <ErrorBoundary label={activeView === 'timeline' ? 'Timeline' : 'Workflow'}>
-                <Suspense fallback={<PanelFallback label={activeView === 'timeline' ? 'Loading timeline workspace' : 'Loading workflow workspace'} />}>
-                  {activeView === 'timeline' ? <TimelineView /> : <WorkflowView />}
+              {/* MERIDIAN strata shell (item 2): sky (WorkflowView) and ground (TimelineView)
+                  render simultaneously, separated by the horizon splitter — see
+                  docs/design/MERIDIAN-UI-SPEC.md sections D, F, H, J.2, J.4. `flex-1 min-h-0`
+                  is the minimum needed so the shell's CSS grid rows have real height to split;
+                  restructuring the stage row itself (fixed-height ledger/monitor/inspector) is
+                  item 3, not this change. */}
+              <ErrorBoundary label="Strata shell">
+                <Suspense fallback={<PanelFallback label="Loading workspace" />}>
+                  <StrataShell className="min-h-0 flex-1" />
                 </Suspense>
               </ErrorBoundary>
               <ErrorBoundary label="System panels" compact>
@@ -578,7 +584,7 @@ export default function App() {
   )
 }
 
-function PanelFallback({ label, compact = false }: { label: string; compact?: boolean }) {
+export function PanelFallback({ label, compact = false }: { label: string; compact?: boolean }) {
   return (
     <section
       aria-label={label}

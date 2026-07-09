@@ -1,4 +1,5 @@
 import { nextId } from '../id'
+import { DEFAULT_HORIZON_RATIO } from './horizon'
 import type {
   Asset,
   Clip,
@@ -454,6 +455,7 @@ export function createTemplateProject(templateId: ProjectTemplateId): FluxNodePr
       thumbnailPath: null,
       panelLayouts: createDefaultPanelLayouts(),
       sharing: createDefaultWorkspaceSharing(projectId, createdAt),
+      horizonRatio: DEFAULT_HORIZON_RATIO,
       section11TargetProfileOverride: null,
       section11ProofHistory: [],
       section11CoverageMapHistory: [],

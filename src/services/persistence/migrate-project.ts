@@ -1,3 +1,4 @@
+import { clampHorizonRatio, DEFAULT_HORIZON_RATIO } from '../../domain/project/horizon'
 import type { FluxNodeProject } from '../../domain/project/types'
 
 /**
@@ -58,16 +59,33 @@ function migrateSection11Fields(project: FluxNodeProject) {
 }
 
 /**
+ * MERIDIAN strata shell (item 2): saves written before the horizon splitter existed lack this
+ * field. Only writes when the value actually needs correcting (missing/garbage) — some load
+ * paths (e.g. WAL reconstruction via immer's `applyPatches`) hand back a frozen object, and an
+ * unconditional reassignment would throw even when the value is already valid.
+ */
+function migrateHorizonRatio(project: FluxNodeProject) {
+  const current = project.meta.horizonRatio
+  const normalized = typeof current === 'number' ? clampHorizonRatio(current) : DEFAULT_HORIZON_RATIO
+
+  if (current !== normalized) {
+    project.meta.horizonRatio = normalized
+  }
+}
+
+/**
  * Applies migrations in place and returns the (now current-version) project.
  * Safe to call on already-current projects — every step is idempotent.
  */
 export function migrateProject(raw: FluxNodeProject): FluxNodeProject {
   if (isOlderThan(raw, CURRENT_PROJECT_VERSION)) {
     migrateSection11Fields(raw)
+    migrateHorizonRatio(raw)
     raw.version = CURRENT_PROJECT_VERSION
   } else {
     // Still guard against partially-written saves even at the current version.
     migrateSection11Fields(raw)
+    migrateHorizonRatio(raw)
   }
 
   return raw

@@ -127,7 +127,11 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { command: 'global.undo', key: 'z', modifiers: ['Ctrl'], when: 'global' },
   { command: 'global.redo', key: 'z', modifiers: ['Ctrl', 'Shift'], when: 'global' },
   { command: 'global.redoAlt', key: 'y', modifiers: ['Ctrl'], when: 'global' },
-  { command: 'global.toggleView', key: '`', modifiers: [], when: 'global' },
+  // No default binding: MERIDIAN's strata shell (features/workspace/StrataShell) claims bare
+  // backtick globally for the horizon "peek" hold (spec H) and Tab for the horizon flip, so
+  // the old hard view-toggle default would double-fire alongside the peek. The command stays
+  // defined (see SHORTCUT_DEFINITIONS) so it remains remappable from Settings; it just has no
+  // out-of-the-box key.
   // '?' is Shift+/ on standard keyboards — the browser reports event.shiftKey
   // for it, so the modifier must be declared to match keybindingMatchesEvent.
   { command: 'global.openShortcutsHelp', key: '?', modifiers: ['Shift'], when: 'global' },
