@@ -1,30 +1,95 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, ListTree } from 'lucide-react'
 import { IconButton } from '../../components/IconButton'
+import { Meter } from '../../components/Meter'
 import { useProjectStore } from '../../store/project-store'
-import { RenderJobProgress } from './RenderJobProgress'
+import { canOpenPathInShell } from '../../services/ipc/app-shell'
+import { computeJobProgressRatio, computeQueuePosition, selectVisibleLedgerJobs } from '../../domain/project/jobLedger'
+import { JobChip } from './JobChip'
 
 const LEDGER_WIDTH_PX = 216
 const RAIL_WIDTH_PX = 40
+/** Shared ticking clock for elapsed/ETA readouts and the completed-chip auto-clear check. */
+const LEDGER_TICK_MS = 1000
 
-const ACTIVE_STATUSES = new Set(['queued', 'rendering', 'paused'])
+/** Statuses that count toward the collapsed rail's badge — everything still needing attention. */
+const RAIL_ACTIVE_STATUSES = new Set<string>(['queued', 'rendering', 'paused', 'failed'])
 
 /**
- * MERIDIAN stage row (item 3), left organ (spec F/M.4: "job ledger"). Docked, fixed-width
- * (216px), collapsible to a 40px icon rail (spec F.3).
+ * Statuses whose display or lifecycle depends on wall-clock time, so the 1 Hz `now` tick is only
+ * worth running while one is visible (advisory 2): `queued` (elapsed-since-created counter),
+ * `rendering` (frame/ETA refresh cadence), and `completed` (the 8s auto-clear countdown in
+ * `selectVisibleLedgerJobs` needs `now` to advance to fire). `paused`/`failed`/`cancelled` are
+ * static, so a ledger showing only those — or an empty/collapsed one — never re-renders on a timer.
+ */
+const TIME_DEPENDENT_STATUSES = new Set<string>(['queued', 'rendering', 'completed'])
+
+/**
+ * MERIDIAN stage row (item 3 shell, item 4 states), left organ (spec F/M.4: "job ledger").
+ * Docked, fixed-width (216px), collapsible to a 40px icon rail (spec F.3).
  *
- * This item ships the region shell (header, empty state, collapse rail) plus a minimal
- * read-only list sourced straight from `project.output.queue` — no chip styling, no
- * determinate-progress internals beyond what `RenderJobProgress` already renders. Item 4
- * ("JobChip + job ledger states") owns turning these rows into real JobChips (meter, ETA,
- * cancel, landed/auto-clear).
+ * Item 4 turns the plain rows item 3 shipped into real JobChips covering every job-ledger state
+ * from spec section H: Empty (this component's own empty copy), Loading/Active/Long-running
+ * (queued position+elapsed, rendering meter+ETA+cancel), Error (inline expandable failure +
+ * retry), and Success (landed row, auto-clear 8s unless hovered). The collapsed rail keeps a
+ * live active-job count plus a determinate aggregate meter so state survives collapse (spec F.3
+ * + H "ledger is source of truth").
  */
 export function JobLedger() {
   const collapsed = useProjectStore((state) => state.project.meta.stageRowCollapse.ledger)
   const toggleStageRowCollapse = useProjectStore((state) => state.toggleStageRowCollapse)
   const queue = useProjectStore((state) => state.project.output.queue)
+  const pauseActiveRender = useProjectStore((state) => state.pauseActiveRender)
+  const resumePausedRender = useProjectStore((state) => state.resumePausedRender)
+  const cancelActiveRender = useProjectStore((state) => state.cancelActiveRender)
+  const retryFailedRender = useProjectStore((state) => state.retryFailedRender)
+  const openRenderOutput = useProjectStore((state) => state.openRenderOutput)
 
-  const activeJobs = queue.filter((job) => ACTIVE_STATUSES.has(job.status))
-  const isRendering = activeJobs.some((job) => job.status === 'rendering')
+  const [now, setNow] = useState(() => Date.now())
+  const [hoveredJobIds, setHoveredJobIds] = useState<Set<string>>(() => new Set())
+
+  // Advisory 2: only run the 1 Hz clock when it can actually change something on screen — the
+  // ledger is expanded AND at least one visible job is time-dependent. An empty, collapsed, or
+  // all-static (paused/failed) ledger imposes no per-second re-render.
+  const needsTick = !collapsed && queue.some((job) => TIME_DEPENDENT_STATUSES.has(job.status))
+
+  useEffect(() => {
+    if (!needsTick) {
+      return
+    }
+
+    // Re-sync immediately on (re)arming so a job that just appeared doesn't show a stale `now`
+    // for up to a full second before the first interval fire.
+    setNow(Date.now())
+    const id = window.setInterval(() => setNow(Date.now()), LEDGER_TICK_MS)
+    return () => window.clearInterval(id)
+  }, [needsTick])
+
+  const setJobHovered = useCallback((jobId: string, hovered: boolean) => {
+    setHoveredJobIds((previous) => {
+      const isMember = previous.has(jobId)
+      if (hovered === isMember) {
+        return previous
+      }
+      const next = new Set(previous)
+      if (hovered) {
+        next.add(jobId)
+      } else {
+        next.delete(jobId)
+      }
+      return next
+    })
+  }, [])
+
+  const visibleJobs = useMemo(
+    () => selectVisibleLedgerJobs(queue, { now, hoveredJobIds }),
+    [queue, now, hoveredJobIds],
+  )
+
+  const renderingJob = queue.find((job) => job.status === 'rendering') ?? null
+  const railJobs = queue.filter((job) => RAIL_ACTIVE_STATUSES.has(job.status))
+  const railHasFailure = railJobs.some((job) => job.status === 'failed')
+  const railRatio = renderingJob ? computeJobProgressRatio(renderingJob) : 0
 
   if (collapsed) {
     return (
@@ -43,15 +108,28 @@ export function JobLedger() {
         >
           <ChevronRight size={14} aria-hidden="true" />
         </IconButton>
-        {activeJobs.length > 0 ? (
-          <span
-            aria-hidden="true"
-            className={`flex h-5 min-w-5 items-center justify-center rounded-full border px-1 text-[10px] font-semibold tabular-nums ${
-              isRendering ? 'animate-pulse border-accent/40 bg-accent/10 text-accent' : 'border-white/15 bg-white/5 text-text-secondary'
-            }`}
-          >
-            {activeJobs.length}
-          </span>
+        {railJobs.length > 0 ? (
+          <>
+            <span
+              aria-hidden="true"
+              className={`flex h-5 min-w-5 items-center justify-center rounded-full border px-1 text-[10px] font-semibold tabular-nums ${
+                railHasFailure
+                  ? 'border-danger/40 bg-danger/10 text-danger'
+                  : renderingJob
+                    ? 'animate-pulse border-accent/40 bg-accent/10 text-accent'
+                    : 'border-white/15 bg-white/5 text-text-secondary'
+              }`}
+            >
+              {railJobs.length}
+            </span>
+            <Meter
+              value={railRatio}
+              tone={railHasFailure ? 'danger' : renderingJob ? 'accent' : 'neutral'}
+              pulse={renderingJob !== null}
+              label="Aggregate render progress"
+              className="w-6"
+            />
+          </>
         ) : (
           <ListTree size={16} aria-hidden="true" className="text-text-secondary" />
         )}
@@ -80,17 +158,25 @@ export function JobLedger() {
         </IconButton>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {activeJobs.length === 0 ? (
+        {visibleJobs.length === 0 ? (
           <p className="text-xs leading-5 text-text-secondary">No jobs. G regenerates the selected node.</p>
         ) : (
-          <ul className="space-y-3">
-            {activeJobs.map((job) => (
-              <li key={job.id} className="rounded-md border border-white/8 bg-black/20 p-2">
-                <p className="truncate text-xs font-medium text-white" title={job.name}>
-                  {job.name}
-                </p>
-                <RenderJobProgress job={job} />
-              </li>
+          <ul className="space-y-2">
+            {visibleJobs.map((job) => (
+              <JobChip
+                key={job.id}
+                job={job}
+                now={now}
+                queuePosition={computeQueuePosition(queue, job.id)}
+                isHovered={hoveredJobIds.has(job.id)}
+                onHoverChange={(hovered) => setJobHovered(job.id, hovered)}
+                onCancel={() => void cancelActiveRender()}
+                onPause={() => void pauseActiveRender()}
+                onResume={() => void resumePausedRender(job.id)}
+                onRetry={() => void retryFailedRender(job.id)}
+                onReveal={() => void openRenderOutput(job.id)}
+                canReveal={job.status === 'completed' && canOpenPathInShell(job.outputPath)}
+              />
             ))}
           </ul>
         )}

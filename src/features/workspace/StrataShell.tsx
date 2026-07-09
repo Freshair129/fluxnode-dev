@@ -507,7 +507,7 @@ export function StrataShell({ className }: StrataShellProps) {
       className={`grid ${className ?? ''}`}
       style={shellStyle}
     >
-      <div className="min-h-0 overflow-hidden">
+      <div data-meridian-stratum="workflow" className="min-h-0 overflow-hidden">
         {skyCollapsed ? (
           <CollapsedStratumStrip label="Sky · Workflow" />
         ) : (
@@ -563,7 +563,7 @@ export function StrataShell({ className }: StrataShellProps) {
 
       <div aria-hidden="true" className="h-px w-full shrink-0 bg-hairline" />
 
-      <div className="min-h-0 overflow-hidden">
+      <div data-meridian-stratum="timeline" className="min-h-0 overflow-hidden">
         {groundCollapsed ? (
           <CollapsedStratumStrip label="Ground · Timeline" />
         ) : (

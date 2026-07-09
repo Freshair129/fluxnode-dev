@@ -12,6 +12,52 @@ import {
 } from '../../services/shortcuts/shortcut-config'
 import { useProjectStore } from '../../store/project-store'
 
+/**
+ * Duck-typed subset of `Element` this module needs — lets `resolveStratumScope` be unit tested
+ * with a plain mock instead of requiring a real DOM (this repo's vitest config has no jsdom
+ * environment set up; `domain/project/horizon.ts`'s `prefersReducedMotion` has the same
+ * `typeof window !== 'undefined'` guard for the same reason).
+ */
+interface StratumScopeTarget {
+  closest: (selector: string) => { getAttribute: (name: string) => string | null } | null
+}
+
+function isStratumScopeTarget(target: EventTarget | null): target is EventTarget & StratumScopeTarget {
+  return target !== null && typeof (target as Partial<StratumScopeTarget>).closest === 'function'
+}
+
+/**
+ * Carried review note (item-2 review, folded into item 4): `useKeyboardShortcuts` used to gate
+ * every timeline/workflow command on `activeView` alone. That made sense when the two strata
+ * were an either/or view switch, but MERIDIAN's shell (item 2/3) renders both sky and ground
+ * simultaneously — `activeView` now only tracks which one is *emphasized* (has the bigger
+ * horizon split), not which one the user is actually interacting with. Gating on it left the
+ * visible, non-emphasized stratum keyboard-inert, in tension with M.1 ("accent = live signal or
+ * selection only" implies the *other* visible surface is still a first-class target, not dead
+ * chrome).
+ *
+ * Fix: command scope follows DOM focus. `StrataShell` tags each stratum's wrapper with
+ * `data-meridian-stratum="workflow"` / `"timeline"`; this walks up from the keydown target to
+ * find that marker. If focus is genuinely inside one stratum (a node, a clip, a toolbar button
+ * within it, etc.), that stratum's commands fire regardless of horizon emphasis. If focus is
+ * "at rest" (body, or anything outside both strata — e.g. the job ledger, inspector, a drawer),
+ * scope falls back to `activeView`/emphasis, preserving today's default behavior when nothing
+ * more specific is focused.
+ */
+export function resolveStratumScope(
+  activeView: 'timeline' | 'workflow',
+  target: EventTarget | null,
+): 'timeline' | 'workflow' {
+  if (!isStratumScopeTarget(target)) {
+    return activeView
+  }
+
+  const stratumEl = target.closest('[data-meridian-stratum]')
+  const stratum = stratumEl?.getAttribute('data-meridian-stratum')
+
+  return stratum === 'timeline' || stratum === 'workflow' ? stratum : activeView
+}
+
 export function useKeyboardShortcuts(options?: { onOpenShortcutsHelp?: () => void }) {
   const { onOpenShortcutsHelp } = options ?? {}
   const activeView = useProjectStore((state) => state.ui.activeView)
@@ -75,6 +121,13 @@ export function useKeyboardShortcuts(options?: { onOpenShortcutsHelp?: () => voi
       if (event.key === 'Tab' && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
         return
       }
+
+      // Timeline/workflow command scope for THIS keydown — see resolveStratumScope's doc
+      // comment. Deliberately NOT used by 'global.toggleView' below, which flips which stratum
+      // is *emphasized* and must stay keyed to the real activeView/horizon state. Named
+      // `stratumScope` (not `scope`) to avoid shadowing the inner `matches()` helper's own
+      // `scope` parameter (the keybinding's `when` clause — a related but distinct concept).
+      const stratumScope = resolveStratumScope(activeView, event.target)
 
       if (matches('global.toggleView', 'global', event)) {
         event.preventDefault()
@@ -157,43 +210,43 @@ export function useKeyboardShortcuts(options?: { onOpenShortcutsHelp?: () => voi
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.selectAll', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.selectAll', 'timeline', event)) {
         event.preventDefault()
         selectAllTimelineClips()
         return
       }
 
-      if (activeView === 'workflow' && matches('workflow.selectAll', 'workflow', event)) {
+      if (stratumScope === 'workflow' && matches('workflow.selectAll', 'workflow', event)) {
         event.preventDefault()
         selectAllWorkflowNodes()
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.copy', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.copy', 'timeline', event)) {
         event.preventDefault()
         copySelectedClips()
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.paste', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.paste', 'timeline', event)) {
         event.preventDefault()
         pasteTimelineClipboard()
         return
       }
 
-      if (activeView === 'workflow' && matches('workflow.copy', 'workflow', event)) {
+      if (stratumScope === 'workflow' && matches('workflow.copy', 'workflow', event)) {
         event.preventDefault()
         copySelectedNodes()
         return
       }
 
-      if (activeView === 'workflow' && matches('workflow.paste', 'workflow', event)) {
+      if (stratumScope === 'workflow' && matches('workflow.paste', 'workflow', event)) {
         event.preventDefault()
         pasteWorkflowClipboard()
         return
       }
 
-      if (activeView === 'workflow' && matches('workflow.groupSelection', 'workflow', event)) {
+      if (stratumScope === 'workflow' && matches('workflow.groupSelection', 'workflow', event)) {
         event.preventDefault()
         groupSelectedWorkflowNodes()
         return
@@ -211,19 +264,19 @@ export function useKeyboardShortcuts(options?: { onOpenShortcutsHelp?: () => voi
         return
       }
 
-      if (activeView === 'workflow' && matches('workflow.openNodePicker', 'workflow', event)) {
+      if (stratumScope === 'workflow' && matches('workflow.openNodePicker', 'workflow', event)) {
         event.preventDefault()
         openNodePicker()
         return
       }
 
-      if (activeView === 'workflow' && matches('workflow.fitView', 'workflow', event)) {
+      if (stratumScope === 'workflow' && matches('workflow.fitView', 'workflow', event)) {
         event.preventDefault()
         fitWorkflowViewport()
         return
       }
 
-      if (activeView === 'workflow') {
+      if (stratumScope === 'workflow') {
         const quickAddMap: Array<[ShortcutCommand, Parameters<typeof addNodeOfType>[0]]> = [
           ['workflow.quickAddMedia', 'media_source'],
           ['workflow.quickAddCamera', 'camera'],
@@ -244,85 +297,85 @@ export function useKeyboardShortcuts(options?: { onOpenShortcutsHelp?: () => voi
         }
       }
 
-      if (activeView === 'timeline' && matches('timeline.playPause', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.playPause', 'timeline', event)) {
         event.preventDefault()
         togglePlayback()
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.shuttleReverse', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.shuttleReverse', 'timeline', event)) {
         event.preventDefault()
         shuttlePlayback('reverse')
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.pause', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.pause', 'timeline', event)) {
         event.preventDefault()
         pausePlayback()
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.shuttleForward', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.shuttleForward', 'timeline', event)) {
         event.preventDefault()
         shuttlePlayback('forward')
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.split', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.split', 'timeline', event)) {
         event.preventDefault()
         splitSelectedClip()
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.setInPoint', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.setInPoint', 'timeline', event)) {
         event.preventDefault()
         setInPoint()
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.setOutPoint', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.setOutPoint', 'timeline', event)) {
         event.preventDefault()
         setOutPoint()
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.clearInOut', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.clearInOut', 'timeline', event)) {
         event.preventDefault()
         clearInOutPoints()
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.moveLeft', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.moveLeft', 'timeline', event)) {
         event.preventDefault()
         movePlayhead(-1 / 30)
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.moveRight', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.moveRight', 'timeline', event)) {
         event.preventDefault()
         movePlayhead(1 / 30)
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.moveLeftFast', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.moveLeftFast', 'timeline', event)) {
         event.preventDefault()
         movePlayhead(-10 / 30)
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.moveRightFast', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.moveRightFast', 'timeline', event)) {
         event.preventDefault()
         movePlayhead(10 / 30)
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.goHome', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.goHome', 'timeline', event)) {
         event.preventDefault()
         setPlayhead(0)
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.goEnd', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.goEnd', 'timeline', event)) {
         event.preventDefault()
         const store = useProjectStore.getState()
         const timelineEnd = Math.max(
@@ -334,31 +387,31 @@ export function useKeyboardShortcuts(options?: { onOpenShortcutsHelp?: () => voi
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.moveClipUp', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.moveClipUp', 'timeline', event)) {
         event.preventDefault()
         moveSelectedClipToAdjacentTrack('up')
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.moveClipDown', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.moveClipDown', 'timeline', event)) {
         event.preventDefault()
         moveSelectedClipToAdjacentTrack('down')
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.zoomIn', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.zoomIn', 'timeline', event)) {
         event.preventDefault()
         adjustTimelineZoom(0.25)
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.zoomOut', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.zoomOut', 'timeline', event)) {
         event.preventDefault()
         adjustTimelineZoom(-0.25)
         return
       }
 
-      if (activeView === 'timeline' && matches('timeline.fitView', 'timeline', event)) {
+      if (stratumScope === 'timeline' && matches('timeline.fitView', 'timeline', event)) {
         event.preventDefault()
         fitTimelineToWindow()
       }
