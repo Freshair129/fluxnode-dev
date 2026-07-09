@@ -19,6 +19,8 @@ import { PanelFallback } from '../../app/App'
 import { PreviewPanel } from '../preview/PreviewPanel'
 import { JobLedger } from '../status/JobLedger'
 import { StageInspector } from '../inspector/StageInspector'
+import { LineageThread } from './LineageThread'
+import { isEditableTarget, isOverlayOpen } from '../shortcuts/guardTargets'
 
 const WorkflowView = lazy(() =>
   import('../workflow/WorkflowView').then((module) => ({ default: module.WorkflowView })),
@@ -50,32 +52,6 @@ const COMPACT_HEIGHT_STAGE_ROW_PX = 96
 /** Splitter's own focused-arrow-key resize steps (spec J.4), independent of the global Ctrl+arrow nudge. */
 const SPLITTER_ARROW_STEP_PX = 8
 const SPLITTER_SHIFT_ARROW_STEP_PX = 40
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false
-  }
-
-  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) {
-    return true
-  }
-
-  if (target.isContentEditable) {
-    return true
-  }
-
-  return target.closest('[role="combobox"]') !== null
-}
-
-/**
- * Every dialog/overlay in this app (ConfirmDialog, PromptDialog, WelcomeModal, SettingsModal,
- * WorkspaceSharingModal, ShortcutsCheatSheet) renders `aria-modal="true"`. Checking for that
- * attribute avoids threading a global "is a dialog open" flag through the store just for this
- * guard — see the CRITICAL a11y rule in the item-2 brief (mirrors spec J.4 / K.1).
- */
-function isOverlayOpen(): boolean {
-  return document.querySelector('[aria-modal="true"]') !== null
-}
 
 const NATIVELY_FOCUSABLE_TAGS = ['A', 'AREA', 'AUDIO', 'BUTTON', 'DETAILS', 'EMBED', 'IFRAME', 'INPUT', 'OBJECT', 'SELECT', 'SUMMARY', 'TEXTAREA', 'VIDEO']
 
@@ -574,6 +550,11 @@ export function StrataShell({ className }: StrataShellProps) {
           </ErrorBoundary>
         )}
       </div>
+
+      {/* MERIDIAN item 5: full-viewport lineage thread overlay. Fixed-positioned (escapes the
+          grid flow entirely), so its placement here in the child order only matters for paint
+          order (last = on top, honoring --z-thread regardless). */}
+      <LineageThread />
     </div>
   )
 }

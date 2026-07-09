@@ -53,6 +53,7 @@ export type ShortcutCommand =
   | 'workflow.quickAddOutput'
   | 'selection.delete'
   | 'selection.duplicate'
+  | 'lineage.followThread'
 
 export interface ShortcutDefinition {
   command: ShortcutCommand
@@ -113,6 +114,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   { command: 'workflow.quickAddOutput', label: 'Quick Add Output Node', when: 'workflow' },
   { command: 'selection.delete', label: 'Delete Current Selection', when: 'global' },
   { command: 'selection.duplicate', label: 'Duplicate Current Selection', when: 'global' },
+  { command: 'lineage.followThread', label: 'Follow Lineage Thread', when: 'global' },
 ]
 
 export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
@@ -162,7 +164,11 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { command: 'workflow.paste', key: 'v', modifiers: ['Ctrl'], when: 'workflow' },
   { command: 'workflow.groupSelection', key: 'g', modifiers: ['Ctrl'], when: 'workflow' },
   { command: 'workflow.openNodePicker', key: 'n', modifiers: [], when: 'workflow' },
-  { command: 'workflow.fitView', key: 'f', modifiers: [], when: 'workflow' },
+  // MERIDIAN item 5: spec H claims bare `f` globally for "follow lineage thread" — the
+  // interface's signature interaction — so this legacy binding moves to Ctrl+0, mirroring
+  // `timeline.fitView`'s own key (same pattern already used for copy/paste/selectAll: same key,
+  // different `when` scope). Still remappable from Settings.
+  { command: 'workflow.fitView', key: '0', modifiers: ['Ctrl'], when: 'workflow' },
   { command: 'workflow.quickAddMedia', key: '1', modifiers: [], when: 'workflow' },
   { command: 'workflow.quickAddCamera', key: '2', modifiers: [], when: 'workflow' },
   { command: 'workflow.quickAddShader', key: '3', modifiers: [], when: 'workflow' },
@@ -174,6 +180,11 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { command: 'workflow.quickAddOutput', key: '9', modifiers: [], when: 'workflow' },
   { command: 'selection.delete', key: 'Delete', modifiers: [], when: 'global' },
   { command: 'selection.duplicate', key: 'd', modifiers: ['Ctrl'], when: 'global' },
+  // Spec H "Lineage: F follow thread from selection". Global (not stratum-scoped) by design —
+  // like selection.delete/duplicate above, it acts on whatever's currently selected regardless
+  // of which stratum has DOM focus; gating it by stratumScope would block the exact cross-strata
+  // jumps that make it useful.
+  { command: 'lineage.followThread', key: 'f', modifiers: [], when: 'global' },
 ]
 
 export function normalizeBindingKey(value: string) {

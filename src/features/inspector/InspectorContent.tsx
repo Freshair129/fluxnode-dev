@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link2, Layers3, PlaySquare, SlidersHorizontal } from 'lucide-react'
-import type { AudioMixInputSetting, UniformValue, WorkflowNode } from '../../domain/project/types'
+import type { AudioMixInputSetting, Clip, UniformValue, WorkflowNode } from '../../domain/project/types'
 import { useProjectStore } from '../../store/project-store'
 import { PromptDialog } from '../../components/PromptDialog'
+import { revealLineageEndpoint } from '../workspace/followLineageThread'
 
 /**
  * The selection-inspector body — node/clip property editors, keyframes, transform, everything
@@ -61,6 +62,16 @@ export function InspectorContent() {
     selectedClip?.workflowNodeId
       ? project.workflow.nodes.find((node) => node.id === selectedClip.workflowNodeId) ?? null
       : null
+  /**
+   * MERIDIAN item 5, accessibility (spec K.4): "the lineage thread is decoratively redundant —
+   * same relation always available as text + menu action." This is the reverse of `linkedNode`
+   * above (`Clip.workflowNodeId -> Node`, decision A's relation) — every clip that names the
+   * selected node as its source, independent of `linkedClip`'s unrelated
+   * `WorkflowNode.data.timelineClipId` pointer (a media_source-only mirror field).
+   */
+  const lineageLinkedClips = selectedNode
+    ? project.timeline.tracks.flatMap((track) => track.clips).filter((clip) => clip.workflowNodeId === selectedNode.id)
+    : []
   const nodePreview = selectedNode ? nodePreviewFrames[selectedNode.id] ?? null : null
   const [nodeLabelDraft, setNodeLabelDraft] = useState('')
   const pendingNodeDataWritesRef = useRef<Map<string, unknown>>(new Map())
@@ -224,6 +235,7 @@ export function InspectorContent() {
           }
         />
       </div>
+      <LineageSection selectedClip={selectedClip} selectedNode={selectedNode} linkedNode={linkedNode} linkedClips={lineageLinkedClips} />
       <div className="mt-5 grid gap-4 @xl:grid-cols-2">
         <section className="rounded-[1.4rem] border border-white/8 bg-black/20 p-4">
           <div className="flex items-center gap-3">
@@ -579,6 +591,73 @@ export function InspectorContent() {
           )}
         </section>
       </div>
+    </div>
+  )
+}
+
+/**
+ * MERIDIAN item 5, spec K.4 accessibility: the same clip<->node relation the lineage thread
+ * draws, always available as text + a "Reveal" action — never color-only, never thread-only.
+ * `revealLineageEndpoint` is the exact function the `F` shortcut and the thread's edge pills
+ * call, so "Reveal in graph/timeline" here does what F does (item-5 brief point 4).
+ */
+function LineageSection({
+  selectedClip,
+  selectedNode,
+  linkedNode,
+  linkedClips,
+}: {
+  selectedClip: Clip | null
+  selectedNode: WorkflowNode | null
+  linkedNode: WorkflowNode | null
+  linkedClips: Clip[]
+}) {
+  if (!selectedClip && !selectedNode) {
+    return null
+  }
+
+  return (
+    <div className="mt-4 rounded-[1.25rem] border border-white/8 bg-black/20 p-4">
+      <div className="flex items-center gap-3">
+        <Link2 size={18} className="text-phosphor" />
+        <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">Lineage</p>
+      </div>
+
+      {selectedClip ? (
+        linkedNode ? (
+          <>
+            <p className="mt-3 text-base font-medium text-white">From node: {linkedNode.label ?? linkedNode.id}</p>
+            <p className="mt-2 text-sm leading-6 text-[#9ca3af]">This clip was produced by a {linkedNode.type.replace('_', ' ')} node.</p>
+            <button
+              type="button"
+              onClick={() => revealLineageEndpoint('node', linkedNode.id)}
+              className="mt-3 rounded-full border border-phosphor/40 bg-white/5 px-4 py-2 text-sm text-phosphor"
+            >
+              Reveal in graph
+            </button>
+          </>
+        ) : (
+          <p className="mt-3 text-sm leading-6 text-[#9ca3af]">This clip has no linked workflow node.</p>
+        )
+      ) : selectedNode && linkedClips.length > 0 ? (
+        <>
+          <p className="mt-3 text-base font-medium text-white">
+            Produces {linkedClips.length} clip{linkedClips.length === 1 ? '' : 's'}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-[#9ca3af]">
+            {linkedClips.map((clip) => clip.id).join(', ')}
+          </p>
+          <button
+            type="button"
+            onClick={() => revealLineageEndpoint('clip', linkedClips[0].id)}
+            className="mt-3 rounded-full border border-phosphor/40 bg-white/5 px-4 py-2 text-sm text-phosphor"
+          >
+            Reveal in timeline
+          </button>
+        </>
+      ) : (
+        <p className="mt-3 text-sm leading-6 text-[#9ca3af]">This node has no linked timeline clips yet.</p>
+      )}
     </div>
   )
 }

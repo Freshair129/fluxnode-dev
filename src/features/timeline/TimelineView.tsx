@@ -760,6 +760,7 @@ export function TimelineView() {
                       return (
                         <article
                           key={clip.id}
+                          data-meridian-clip-id={clip.id}
                           ref={(element) => {
                             if (element) {
                               clipNodeRefs.current.set(clip.id, element)

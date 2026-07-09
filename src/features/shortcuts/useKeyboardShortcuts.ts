@@ -11,6 +11,8 @@ import {
   type ShortcutCommand,
 } from '../../services/shortcuts/shortcut-config'
 import { useProjectStore } from '../../store/project-store'
+import { followLineageThread } from '../workspace/followLineageThread'
+import { isEditableTarget, isOverlayOpen } from './guardTargets'
 
 /**
  * Duck-typed subset of `Element` this module needs — lets `resolveStratumScope` be unit tested
@@ -261,6 +263,16 @@ export function useKeyboardShortcuts(options?: { onOpenShortcutsHelp?: () => voi
       if (matches('selection.duplicate', 'global', event)) {
         event.preventDefault()
         duplicateSelected()
+        return
+      }
+
+      // MERIDIAN item 5: F follows the lineage thread from the current selection. Reuses item
+      // 2's editable-target/overlay guards on top of the top-of-handler INPUT/TEXTAREA/SELECT
+      // check (that one doesn't cover contentEditable or an open dialog's own buttons).
+      // Strictly observational (decision B) — see followLineageThread's doc comment.
+      if (!event.repeat && matches('lineage.followThread', 'global', event) && !isEditableTarget(event.target) && !isOverlayOpen()) {
+        event.preventDefault()
+        followLineageThread()
         return
       }
 

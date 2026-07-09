@@ -1018,6 +1018,7 @@ export function WorkflowView() {
                   return (
                     <article
                       key={node.id}
+                      data-meridian-node-id={node.id}
                       ref={(element) => {
                         if (element) {
                           nodeElementRefs.current.set(node.id, element)
