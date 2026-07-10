@@ -54,7 +54,7 @@ spec section → [Fable 5] decompose into item + AC refs + complexity (C-1/C-2/C
 
 Reviewed by Opus per item; assembled and gated by Fable 5 per phase.
 
-**Status (2026-07-10):** items 1–7, 9–14 = PASS + pushed. Remaining: **8** (empty/error copy pass, in progress). Phase 1 is otherwise ready for a sign-off pass — see the pre-merge checklist below.
+**Status (2026-07-10): Phase 1 COMPLETE.** Items 1–14 all PASS + pushed to `feat/meridian-ui`. Every item in the original Phase 1 breakdown, plus the two review-discovered items (9's dissolution work, 11's hardening) and the two unplanned-but-reviewed items (12/13's modal fix, 14's extension of it), is closed. See the pre-merge checklist below — it is now fully closed.
 
 **Follow-ups opened by the item-7 review (not blocking, no item number yet):** widen the font-invariance e2e guard to a menu/palette row and a JobChip; stamp `data-density` on detached preview/timeline/inspector window roots so they honour the user's preference instead of falling back to comfortable; `ExportSheet`'s inner content spacing does not follow density (only its shell/edge inset does).
 
@@ -64,9 +64,11 @@ Reviewed by Opus per item; assembled and gated by Fable 5 per phase.
 1. ~~Item-11 BLOCKING-1 fix confirmed~~ — done, red/green proven, re-reviewed PASS.
 2. ~~Full-suite green run~~ — done: two clean-room `CI=1` runs, 45/45 both times.
 3. ~~Item-9 aria-modal decision~~ — resolved (resolution A: `aria-modal` + trap, moved to `--z-overlay`), shipped in item 9 rounds 2–3, passed re-review.
-4. ~~Item-10 headed-browser confirmation~~ — confirmed: `playwright.config.ts` sets `headless: false` (not the rAF-dead CDP tab).
-5. ~~Item 14~~ — reviewed, PASS, committed and pushed.
-6. **New, from item-14's review:** re-run the full suite hermetically (no other agent editing the shared worktree) for a certified clean-room number before merge — item 14's own numbers were taken while item 8 was concurrently landing files.
+4. ~~Item-10 headed-browser confirmation~~ — confirmed twice: `playwright.config.ts` sets `headless: false` (grepped directly, not the rAF-dead CDP tab), and item 8's Opus review independently flagged this as its one remaining open question — same answer stands.
+5. ~~Item 14~~ — reviewed by Opus (see item 14's own entry above), PASS, committed and pushed as `be8dbd8`. Item 8's reviewer asked for a paper-trail confirmation since it wasn't in that reviewer's context: item 14 was an out-of-protocol background session (the user's own) that extended the item-12/13 WelcomeModal scroll-strand fix to four more modals; it went through the same Opus review gate as every other item before being committed. Confirmed here for the record.
+6. ~~Hermetic full-suite run~~ — done for item 8: two clean-room `CI=1` runs with no other agent touching the worktree, **49/49 both times**. This is the first fully clean-room evidence all phase (items 1-7/9-14's numbers were taken with a concurrent worker present at various points).
+
+**Phase 1 is closed. `feat/meridian-ui` is ready for a PR into `master`**, per item 8's Opus review (the phase's final sign-off) once the two items above were confirmed.
 
 **Overlay vocabulary (settled in the item-9 review — bind on every future surface):** spec E's *Drawers* are the in-stratum, co-interactive surfaces (node library, Takes, asset strip). None are built. They live at `--z-drawer` (10), never block, and correctly sit beneath the lineage thread. Everything transient, single-active and dismiss-me — command palette, export sheet, settings sheet, status drawers — is an *Overlay*: `aria-modal="true"`, focus-trapped, `--z-overlay` (50), Escape owned by the surface with topmost-first ordering by DOM position. **Trap and ARIA declaration must always agree**, and an `aria-modal` surface must never be painted over by the decorative thread. J.7's "nothing blocks" governs the export *process*, not the ARIA attribute.
 
