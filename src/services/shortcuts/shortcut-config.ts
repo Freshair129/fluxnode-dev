@@ -55,6 +55,11 @@ export type ShortcutCommand =
   | 'selection.duplicate'
   | 'lineage.followThread'
   | 'global.openCommandPalette'
+  | 'global.openExportSheet'
+  | 'status.openConnectivityDrawer'
+  | 'status.openAppUpdatesDrawer'
+  | 'status.openWorkspaceDrawer'
+  | 'status.openAudioDrawer'
   | 'workspace.focusHorizonSplitter'
   | 'workspace.focusSky'
   | 'workspace.focusStage'
@@ -121,6 +126,15 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   { command: 'selection.duplicate', label: 'Duplicate Current Selection', when: 'global' },
   { command: 'lineage.followThread', label: 'Follow Lineage Thread', when: 'global' },
   { command: 'global.openCommandPalette', label: 'Open Command Palette', when: 'global' },
+  // MERIDIAN item 9 (spec H global keys: "Ctrl+E export"). Opens the export sheet — Export queue +
+  // Export preset, dissolved off the main surface out of SystemPanels.
+  { command: 'global.openExportSheet', label: 'Open Export Sheet', when: 'global' },
+  // MERIDIAN item 9 (round-2 advisory 5): the four status drawers are directly openable from the
+  // status bar's segments; these give them the same Ctrl+K discoverability the export sheet has.
+  { command: 'status.openConnectivityDrawer', label: 'Open Connectivity Drawer', when: 'global' },
+  { command: 'status.openAppUpdatesDrawer', label: 'Open App Updates Drawer', when: 'global' },
+  { command: 'status.openWorkspaceDrawer', label: 'Open Workspace Drawer', when: 'global' },
+  { command: 'status.openAudioDrawer', label: 'Open Audio and Runtime Drawer', when: 'global' },
   // MERIDIAN item 6, carried note from item 4 (re-deferred from item 4 since no palette existed
   // yet): K.1's "palette verbs are the keyboard alternative" for a keyboard-only user who can't
   // enter the tab ring while focus rests on body (Tab there flips the horizon instead — see
@@ -202,6 +216,11 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { command: 'lineage.followThread', key: 'f', modifiers: [], when: 'global' },
   // Spec H "Global: Ctrl+K palette". MERIDIAN item 6.
   { command: 'global.openCommandPalette', key: 'k', modifiers: ['Ctrl'], when: 'global' },
+  // Spec H "Global: Ctrl+E export". MERIDIAN item 9.
+  { command: 'global.openExportSheet', key: 'e', modifiers: ['Ctrl'], when: 'global' },
+  // MERIDIAN item 9 (round-2 advisory 5): the four status drawers ship with NO default key —
+  // like the workspace.focus* verbs below, they are palette-only (Ctrl+K) entries whose direct
+  // manipulation is the status bar segment. Still remappable from Settings.
   // MERIDIAN item 6 carried note (K.1): 'workspace.focusHorizonSplitter' / 'focusSky' /
   // 'focusStage' / 'focusGround' deliberately ship with NO default key binding, mirroring
   // 'global.toggleView' above. They are the palette-only (Ctrl+K) keyboard alternative for

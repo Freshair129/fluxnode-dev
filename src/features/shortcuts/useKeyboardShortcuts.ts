@@ -71,8 +71,10 @@ export function resolveStratumScope(
 export function useKeyboardShortcuts(options?: {
   onOpenShortcutsHelp?: () => void
   onOpenCommandPalette?: () => void
+  onOpenExportSheet?: () => void
+  onOpenStatusDrawer?: (drawer: 'connectivity' | 'appUpdates' | 'workspace' | 'audio') => void
 }) {
-  const { onOpenShortcutsHelp, onOpenCommandPalette } = options ?? {}
+  const { onOpenShortcutsHelp, onOpenCommandPalette, onOpenExportSheet, onOpenStatusDrawer } = options ?? {}
   const keybindings = useProjectStore((state) => state.preferences.keybindings)
 
   useEffect(() => {
@@ -105,6 +107,8 @@ export function useKeyboardShortcuts(options?: {
       const ctx = buildCommandContext({
         showShortcutsHelp: () => onOpenShortcutsHelp?.(),
         openCommandPalette: () => onOpenCommandPalette?.(),
+        openExportSheet: () => onOpenExportSheet?.(),
+        openStatusDrawer: (drawer) => onOpenStatusDrawer?.(drawer),
       })
 
       // Timeline/workflow command scope for THIS keydown — see resolveStratumScope's doc
@@ -140,6 +144,21 @@ export function useKeyboardShortcuts(options?: {
       ) {
         event.preventDefault()
         runCommand('global.openCommandPalette', ctx, { skipEnabledCheck: true })
+        return
+      }
+
+      // MERIDIAN item 9: Ctrl+E opens the export sheet (spec H). Same editable-target/overlay guard
+      // shape as global.openCommandPalette above — typing "e" in a text field must never pop the
+      // sheet, and an already-open overlay (palette, settings, a destructive confirm) blocks it so
+      // Escape's "topmost overlay only" contract stays simple.
+      if (
+        !event.repeat &&
+        matches('global.openExportSheet', 'global', event) &&
+        !isEditableTarget(event.target) &&
+        !isOverlayOpen()
+      ) {
+        event.preventDefault()
+        runCommand('global.openExportSheet', ctx, { skipEnabledCheck: true })
         return
       }
 
@@ -423,5 +442,5 @@ export function useKeyboardShortcuts(options?: {
     window.addEventListener('keydown', handleKeyDown)
 
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [keybindings, onOpenShortcutsHelp, onOpenCommandPalette])
+  }, [keybindings, onOpenShortcutsHelp, onOpenCommandPalette, onOpenExportSheet, onOpenStatusDrawer])
 }

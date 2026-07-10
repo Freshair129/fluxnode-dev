@@ -215,7 +215,9 @@ Shadows: one token, `shadow-overlay: 0 8px 24px rgba(0,0,0,0.5)`, only on floati
 4. All splitters keyboard-operable: focusable, arrows = 8px, `Shift+arrows` = 40px, `Enter` cycles detents.
 5. `Ctrl+Shift+P` pops preview into a second borderless window; stage row collapses to transport-only.
 6. Taskbar progress mirrors front job; title shows dirty state (`● ProjectName`); Explorer file drops land as Assets (ground) or source nodes (sky); native file dialogs only.
-7. Nothing blocks: export/generation never modal-lock. Only modals: destructive confirms + first-run onboarding.
+7. Nothing blocks: export/generation never modal-lock. The *work* never waits on a dialog — a queued render keeps running in the job ledger whether or not any surface is open, and no long-running task is gated behind a window the user must dismiss.
+
+   **Clarification (added after the item-9 review; the original wording caused a real defect).** "Modal" here means *process-blocking*, not the ARIA attribute. Transient, single-active, dismiss-me overlays — the command palette, the export sheet, the settings sheet, the status drawers — are `aria-modal="true"` and that is correct: they trap focus, `Escape` closes them, and the app resumes untouched. `aria-modal` is what makes `isOverlayOpen()` a single honest rule for suppressing the horizon Tab-flip, backtick peek, and the `F` jump. A surface that traps focus while declaring itself non-modal is the worst of both worlds: a keyboard user cannot Tab out, yet assistive tech is told the background is live. Trap and declaration must always agree. The surfaces that must *never* appear at all outside destructive confirms and first-run onboarding are the ones that interrupt the user unbidden — an export finishing, a job failing, or a node generating must surface in the ledger or inline in a chip, never by opening a window.
 
 ## K. Accessibility
 

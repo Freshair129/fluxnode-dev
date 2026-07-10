@@ -61,7 +61,13 @@
   /* Elevation */
   --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.5);
 
-  /* Z scale */
+  /* Z scale.
+     `--z-drawer` is reserved for the in-stratum, co-interactive drawers of spec E — the node
+     library, the Takes drawer, the asset strip. None are built yet. They sit *inside* a stratum,
+     never block, and correctly live beneath the lineage thread. Transient focus-trapping surfaces
+     (command palette, export sheet, settings sheet, status drawers) are Overlays, not drawers:
+     they are `aria-modal`, they suppress the horizon keys, and they belong at `--z-overlay`.
+     An `aria-modal` surface must never be painted over by the decorative thread. */
   --z-drawer: 10;
   --z-thread: 20;
   --z-sticky: 30;

@@ -1,10 +1,12 @@
-import { bootFreshWithClock, dismissWelcomeModal, expect, freezeClock, test } from './fixtures'
+import { bootFreshWithClock, dismissWelcomeModal, expect, freezeClock, openExportSheet, test } from './fixtures'
 
 /**
  * MERIDIAN item 4 — JobChip (spec H job-ledger states, M.5, M.10; src/features/status/JobChip.tsx
- * + JobLedger.tsx). Drives the REAL export-queue UI in src/features/status/SystemPanels.tsx
- * (`aria-label="Export queue"`) — "Queue Render", "Refresh Status", "Simulate Failure", etc. — no
- * store stubbing.
+ * + JobLedger.tsx). Drives the REAL export-queue UI, relocated by item 9 into the `Ctrl+E` export
+ * sheet (src/features/status/export/ExportSheet.tsx, same `aria-label="Export queue"` the pre-item-9
+ * SystemPanels.tsx used) — "Queue Render", "Refresh Status", "Simulate Failure", etc. — no store
+ * stubbing. Each test opens the sheet first via the status bar's "jobs" segment (`openExportSheet`
+ * fixture helper) since, unlike the pre-item-9 SystemPanels layout, it is not visible by default.
  *
  * IMPORTANT — read before touching this file: one of the six spec-H job-ledger states this item
  * is supposed to cover (the `rendering` row: determinate meter + ETA + cancel) is IMPOSSIBLE to
@@ -34,6 +36,7 @@ const EXPORT_QUEUE = () => 'section[aria-label="Export queue"]'
 
 test.beforeEach(async ({ freshPage }) => {
   await dismissWelcomeModal(freshPage)
+  await openExportSheet(freshPage)
 })
 
 test.describe('JobChip (item 4)', () => {
@@ -85,13 +88,19 @@ test.describe('JobChip (item 4)', () => {
     await expect(failedChip).toHaveClass(/border-danger/)
 
     // Inline, never modal (spec H Error row) — the JobChip's own log lives directly inside the
-    // ledger `<aside>`, not behind any dialog/alertdialog wrapper. Asserted against the whole
-    // `page`, not just the ledger: a failing job must not raise ANY modal, anywhere. This is the
-    // regression guard for the `FailureInspectorModal` auto-open bug this spec's authoring found
-    // (SystemPanels.tsx used to derive its open state from "the last job with an errorCategory",
-    // so any failure modal-locked the app in violation of spec J.7). 06-modals.spec.ts covers the
-    // inspector's own open/close contract directly.
-    await expect(page.getByRole('dialog')).toHaveCount(0)
+    // ledger `<aside>`, not behind any dialog/alertdialog wrapper. This is the regression guard for
+    // the `FailureInspectorModal` auto-open bug this spec's authoring found (SystemPanels.tsx used
+    // to derive its open state from "the last job with an errorCategory", so any failure modal-
+    // locked the app in violation of spec J.7). 06-modals.spec.ts covers the inspector's own
+    // open/close contract directly.
+    //
+    // This test's `beforeEach` opens the item-9 export sheet, which IS itself `role="dialog"`/
+    // `aria-modal="true"` (round-2 fix — trap and declaration agree, spec J.7 clarification). So the
+    // guard is that a failing job raises NO ADDITIONAL modal on top of it: exactly one
+    // `[aria-modal="true"]` (the sheet) and specifically no failure-inspector dialog. A regression
+    // that auto-opened the inspector on failure would make the aria-modal count 2 — red.
+    await expect(page.locator('[aria-modal="true"]')).toHaveCount(1)
+    await expect(page.getByRole('dialog', { name: /inspector/i })).toHaveCount(0)
     await expect(ledger.locator('[role="dialog"], [role="alertdialog"]')).toHaveCount(0)
 
     // Matches both "Show log" and "Hide log" (JobChip.tsx toggles the button's own accessible
@@ -181,6 +190,7 @@ test.describe('JobChip (item 4)', () => {
 test.describe('JobChip completed-chip flash (item 4, deterministic via page.clock)', () => {
   test('mounts in the accent flash tone, then settles to success after 400ms', async ({ page }) => {
     await bootFreshWithClock(page)
+    await openExportSheet(page)
     const ledger = page.locator('[data-meridian-ledger]')
 
     // Freeze BEFORE producing the completion, so the CompletedChip's mount-time setTimeout(400ms)

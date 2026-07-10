@@ -255,3 +255,24 @@ Per the task brief, this suite does not stub the store to fake `rendering`; `04-
 instead asserts the ceiling itself (a queued job, refreshed, goes straight to `completed`, never
 `rendering`) so a future regression toward "browser mode CAN now reach rendering" is caught and
 that Tauri-backed variant can be added at the right layer.
+
+## Known harness-only gap (item 9 command palette: `Ctrl+K` cannot be exercised in headed Chrome)
+
+The command palette's ONLY keyboard entry point is `Ctrl+K` (spec H). In this suite's headed
+Chromium, `Ctrl+K` is consumed by the browser chrome (the omnibox owns that chord) before it ever
+reaches the page — so no spec here can open the palette by key, and in fact **no e2e in this repo
+drives the palette at all** for this reason. This is a property of the *browser harness*, not the
+app: the shipping target is a Tauri window with `decorations: false` and no omnibox, where `Ctrl+K`
+reaches the page normally and the palette opens.
+
+**The load-bearing consequence:** item 9 (round 2, advisory 5) added four palette verbs — `status.
+openConnectivityDrawer` / `openAppUpdatesDrawer` / `openWorkspaceDrawer` / `openAudioDrawer` — so the
+four status-bar drawers are Ctrl+K–discoverable like the export sheet. Because the palette can't be
+opened in headed Chrome, these verbs' registration and their wiring to `openStatusDrawer` are proven
+instead at the unit layer — red-and-green — in `src/services/commands/command-registry.test.ts` (the
+"status.open*Drawer verbs" test asserts each command dispatches `openStatusDrawer` with its own
+drawer id, plus the reach-classification count lock). Per the orchestrator's ruling, NO fake keyboard
+workaround was added (dispatching a synthetic event that bypasses the browser-chrome interception
+would test nothing real). Closing this gap end-to-end needs a **Tauri-backed e2e variant** (a real
+window where `Ctrl+K` reaches the page), the same layer already noted for the M.5 rendering gap
+above.

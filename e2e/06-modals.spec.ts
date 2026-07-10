@@ -1,4 +1,4 @@
-import { WELCOME_DIALOG_NAME, dismissWelcomeModal, expect, test } from './fixtures'
+import { WELCOME_DIALOG_NAME, dismissWelcomeModal, expect, openExportSheet, test } from './fixtures'
 
 /**
  * Regression guards for the two real defects uncovered while authoring this suite (both were
@@ -11,7 +11,8 @@ import { WELCOME_DIALOG_NAME, dismissWelcomeModal, expect, test } from './fixtur
  *     the card's own "Close welcome modal" button at y ≈ -157 — permanently unreachable by a real
  *     click, with nothing able to scroll it back.
  *
- *  B. `FailureInspectorModal` (src/features/status/SystemPanels.tsx) derived its open state from
+ *  B. `FailureInspectorModal` (relocated by item 9 to src/features/status/FailureInspectorModal.tsx,
+ *     was in SystemPanels.tsx at the time this bug was found) derived its open state from
  *     `[...queue].reverse().find(job => job.errorCategory !== null)` whenever `activeInspectorJobId`
  *     was null. So it auto-opened on ANY failed job (spec J.7: exports never modal-lock), and its
  *     own close button — which only sets that id back to null — could never close it, because the
@@ -88,6 +89,7 @@ test.describe('WelcomeModal focus/scroll (bug A)', () => {
 test.describe('FailureInspectorModal open/close contract (bug B)', () => {
   test.beforeEach(async ({ freshPage }) => {
     await dismissWelcomeModal(freshPage)
+    await openExportSheet(freshPage)
   })
 
   test('a failed job never auto-opens the inspector, and Inspect/Close actually toggle it', async ({

@@ -45,7 +45,10 @@ describe('COMMAND_REGISTRY: shape and coverage', () => {
       { direct: 0, menu: 0, accelerator: 0 },
     )
 
-    expect(counts).toEqual({ direct: 39, menu: 9, accelerator: 10 })
+    // MERIDIAN item 9 added five new commands, all reach 'direct' (each has a status bar segment as
+    // its direct-manipulation equivalent): global.openExportSheet + the four status.open*Drawer
+    // verbs (round-2 advisory 5).
+    expect(counts).toEqual({ direct: 44, menu: 9, accelerator: 10 })
     expect(counts.direct + counts.menu + counts.accelerator).toBe(COMMAND_REGISTRY.length)
   })
 
@@ -83,6 +86,8 @@ describe('runCommand', () => {
       store: storeOverrides as unknown as CommandContext['store'],
       showShortcutsHelp: () => {},
       openCommandPalette: () => {},
+      openExportSheet: () => {},
+      openStatusDrawer: () => {},
     }
   }
 
@@ -152,5 +157,25 @@ describe('runCommand', () => {
   it('does not crash the workspace.focus* commands when no DOM is present (this repo\'s vitest env has no jsdom)', () => {
     expect(() => runCommand('workspace.focusSky', fakeContext({}))).not.toThrow()
     expect(() => runCommand('workspace.focusHorizonSplitter', fakeContext({}))).not.toThrow()
+  })
+
+  // MERIDIAN item 9 round-2, advisory 5: the four status-drawer palette verbs each dispatch
+  // ctx.openStatusDrawer with their own drawer id. This is the discoverability wiring the palette
+  // consumes (the palette itself can't be e2e-driven — headed Chrome eats Ctrl+K; see the note in
+  // e2e/09-status-bar.spec.ts). Red-able: swap any id and the matching case below fails.
+  it('the status.open*Drawer verbs each open the drawer they name', () => {
+    const cases: Array<[ShortcutCommand, 'connectivity' | 'appUpdates' | 'workspace' | 'audio']> = [
+      ['status.openConnectivityDrawer', 'connectivity'],
+      ['status.openAppUpdatesDrawer', 'appUpdates'],
+      ['status.openWorkspaceDrawer', 'workspace'],
+      ['status.openAudioDrawer', 'audio'],
+    ]
+
+    for (const [commandId, expectedDrawer] of cases) {
+      let opened: string | null = null
+      const ctx: CommandContext = { ...fakeContext({}), openStatusDrawer: (drawer) => (opened = drawer) }
+      runCommand(commandId, ctx, { skipEnabledCheck: true })
+      expect(opened, `${commandId} should open the "${expectedDrawer}" drawer`).toBe(expectedDrawer)
+    }
   })
 })

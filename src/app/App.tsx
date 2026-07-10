@@ -18,6 +18,9 @@ import { checkNetworkConnectivity } from '../services/connectivity/check-network
 import { useTimelineAudio, type TimelineAudioClip } from '../services/audio'
 import { ErrorToasts } from '../features/notifications/ErrorToasts'
 import { useProjectStore } from '../store/project-store'
+import { focusShellRegion, resolveShellFocusTargets } from '../features/workspace/shellFocusTargets'
+import { StatusBar } from '../features/status/statusBar/StatusBar'
+import type { StatusBarAction, StatusDrawerId } from '../features/status/statusBar/segments'
 
 const TimelineView = lazy(() =>
   import('../features/timeline/TimelineView').then((module) => ({ default: module.TimelineView })),
@@ -25,8 +28,8 @@ const TimelineView = lazy(() =>
 const StrataShell = lazy(() =>
   import('../features/workspace/StrataShell').then((module) => ({ default: module.StrataShell })),
 )
-const SystemPanels = lazy(() =>
-  import('../features/status/SystemPanels').then((module) => ({ default: module.SystemPanels })),
+const StatusOverlays = lazy(() =>
+  import('../features/status/StatusOverlays').then((module) => ({ default: module.StatusOverlays })),
 )
 const DetachedInspectorPanel = lazy(() =>
   import('../features/inspector/DetachedInspectorPanel').then((module) => ({ default: module.DetachedInspectorPanel })),
@@ -92,11 +95,59 @@ export default function App() {
   const previousActiveViewRef = useRef(activeView)
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
+  // MERIDIAN item 9: the status bar's secondary surfaces (export sheet + the four drawers) are
+  // UI-local state, same as showShortcutsHelp/showCommandPalette above — not store state, per the
+  // item-9 hard constraint ("do not change the store contract... adding UI-state fields... is
+  // fine" — this just doesn't need to be in the store at all). At most one is open at a time
+  // (single active secondary surface — see StatusOverlays' doc comment).
+  const [showExportSheet, setShowExportSheet] = useState(false)
+  const [openStatusDrawer, setOpenStatusDrawer] = useState<StatusDrawerId | null>(null)
+  const [inspectorJobId, setInspectorJobId] = useState<string | null>(null)
+  const saveProject = useProjectStore((state) => state.saveProject)
+
+  // Opening any status drawer closes the export sheet (single active secondary surface — see
+  // StatusOverlays' doc comment); passed to both the palette (Ctrl+K "Open … drawer" verbs) and
+  // the status bar segments so both entry points share one exclusivity rule.
+  function openStatusDrawerExclusive(drawer: StatusDrawerId) {
+    setShowExportSheet(false)
+    setOpenStatusDrawer((current) => (current === drawer ? null : drawer))
+  }
 
   useKeyboardShortcuts({
     onOpenShortcutsHelp: () => setShowShortcutsHelp((current) => !current),
     onOpenCommandPalette: () => setShowCommandPalette(true),
+    onOpenExportSheet: () => {
+      setOpenStatusDrawer(null)
+      setShowExportSheet((current) => !current)
+    },
+    onOpenStatusDrawer: openStatusDrawerExclusive,
   })
+
+  function handleStatusBarActivate(action: StatusBarAction) {
+    if (action.kind === 'openDrawer') {
+      openStatusDrawerExclusive(action.drawer)
+      return
+    }
+
+    if (action.kind === 'openExportSheet') {
+      setOpenStatusDrawer(null)
+      setShowExportSheet((current) => !current)
+      return
+    }
+
+    if (action.kind === 'save') {
+      void saveProject()
+      return
+    }
+
+    focusShellRegion(resolveShellFocusTargets().ground)
+  }
+
+  // MERIDIAN item 9 (round-2 fix): Escape for the export sheet + drawers is owned by `DrawerShell`
+  // itself now, not here. Those surfaces became `aria-modal="true"` (trap and declaration must
+  // agree — spec J.7 clarification), so an `isOverlayOpen()`-gated handler here would bail on them.
+  // DrawerShell's own topmost-only Escape handler preserves the "closes topmost overlay only"
+  // ordering against a stacked FailureInspectorModal — see its doc comment.
 
   // Map timeline clips with an audio stream onto the decoupled audio-engine
   // input shape, then drive Web Audio playback in sync with the playhead.
@@ -532,16 +583,14 @@ export default function App() {
           className="relative z-10 h-[calc(100vh-4.5rem)] overflow-hidden p-4 md:p-5"
         >
           <ErrorBoundary label="Workspace">
-            {/* MERIDIAN item-3 review BLOCKING-1: this column must be `overflow-hidden`, not
-                `overflow-auto`. SystemPanels' content is thousands of pixels tall; with the
-                column scrollable, that content made free space negative and StrataShell's
-                `flex-1` computed to 0px — the whole shell was overflow paint. With the column
-                clipped and SystemPanels capped to its own scrolling box (`max-h-56 shrink-0
-                overflow-y-auto` below), `flex-1` gets real free space and the shell owns the
-                viewport like spec F intends (one screen; status content dissolves into the
-                status bar/drawers in a later item — the wrapper here is deliberately minimal
-                and additive, no SystemPanels redesign). */}
-            <div className="flex h-full flex-col gap-4 overflow-hidden">
+            {/* MERIDIAN item 9: dissolved SystemPanels' thousands-of-pixels-tall content into the
+                28px status bar + drawers/export sheet (docs/design/MERIDIAN-UI-SPEC.md section F's
+                wireframe). This column now holds exactly the shell and the status bar (item-9
+                destination map D) — the item-3 "SystemPanels capped to its own scrolling box"
+                stopgap is gone; StrataShell's `flex-1` gets the full remaining height honestly.
+                The drawers/export sheet/failure inspector are fixed-position overlays, not part of
+                this flex column — see the `StatusOverlays` mount near the other modals below. */}
+            <div className="flex h-full flex-col gap-2 overflow-hidden">
               {/* MERIDIAN strata shell (item 2) + stage row (item 3): sky (WorkflowView) and
                   ground (TimelineView) render simultaneously, separated by the horizon
                   splitter, with the preview stage/job ledger/inspector folded onto the horizon
@@ -556,13 +605,9 @@ export default function App() {
                   <StrataShell className="min-h-0 flex-1" />
                 </Suspense>
               </ErrorBoundary>
-              <div className="max-h-56 shrink-0 overflow-y-auto">
-                <ErrorBoundary label="System panels" compact>
-                  <Suspense fallback={<PanelFallback label="Loading system panels" compact />}>
-                    <SystemPanels />
-                  </Suspense>
-                </ErrorBoundary>
-              </div>
+              <ErrorBoundary label="Status bar" compact>
+                <StatusBar className="shrink-0" onActivate={handleStatusBarActivate} />
+              </ErrorBoundary>
             </div>
           </ErrorBoundary>
         </main>
@@ -600,10 +645,28 @@ export default function App() {
               <CommandPalette
                 onClose={() => setShowCommandPalette(false)}
                 onOpenShortcutsHelp={() => setShowShortcutsHelp((current) => !current)}
+                onOpenExportSheet={() => {
+                  setOpenStatusDrawer(null)
+                  setShowExportSheet((current) => !current)
+                }}
+                onOpenStatusDrawer={openStatusDrawerExclusive}
               />
             </Suspense>
           </ErrorBoundary>
         ) : null}
+        <ErrorBoundary label="Status overlays" compact>
+          <Suspense fallback={null}>
+            <StatusOverlays
+              openDrawer={openStatusDrawer}
+              onCloseDrawer={() => setOpenStatusDrawer(null)}
+              showExportSheet={showExportSheet}
+              onCloseExportSheet={() => setShowExportSheet(false)}
+              inspectorJobId={inspectorJobId}
+              onInspect={(jobId) => setInspectorJobId(jobId)}
+              onCloseInspector={() => setInspectorJobId(null)}
+            />
+          </Suspense>
+        </ErrorBoundary>
         <ErrorBoundary label="Notifications" compact>
           <ErrorToasts />
         </ErrorBoundary>

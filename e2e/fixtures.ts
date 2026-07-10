@@ -143,3 +143,20 @@ export async function readComputedDashoffset(page: Page, selector: string): Prom
   const parsed = Number.parseFloat(value)
   return Number.isFinite(parsed) ? parsed : Number.NaN
 }
+
+/** The 28px status bar (MERIDIAN item 9), always mounted at the bottom of the workspace column. */
+export function statusBarLocator(page: Page) {
+  return page.locator('[data-meridian-statusbar]')
+}
+
+/**
+ * Opens the `Ctrl+E` export sheet (item 9's relocation of `SystemPanels.tsx`'s "Export queue" +
+ * "Export preset" sections) via the status bar's "jobs" segment — its real, always-visible
+ * direct-manipulation entry point — rather than the keyboard shortcut, so these specs exercise the
+ * same click path a mouse-only user would use. `Ctrl+E` itself is covered by its own dedicated
+ * spec (09-status-bar.spec.ts).
+ */
+export async function openExportSheet(page: Page): Promise<void> {
+  await page.locator('[data-meridian-statusbar-segment="jobs"]').click()
+  await page.locator('section[aria-label="Export queue"]').waitFor({ state: 'visible' })
+}

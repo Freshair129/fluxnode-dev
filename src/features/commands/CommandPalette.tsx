@@ -22,6 +22,8 @@ import { PaletteResultRow } from './PaletteResultRow'
 export interface CommandPaletteProps {
   onClose: () => void
   onOpenShortcutsHelp: () => void
+  onOpenExportSheet: () => void
+  onOpenStatusDrawer: (drawer: 'connectivity' | 'appUpdates' | 'workspace' | 'audio') => void
 }
 
 /** Cheap, hand-written reasons for the small set of commands with an `enabled()` gate — spec H: "disabled ones may show, greyed, with the reason if cheap." */
@@ -62,7 +64,7 @@ interface ResultEntry {
  * StrataShell are all in the same boat), but `PaletteResultRow`/`PaletteEmptyState` — the
  * presentational pieces this component composes — are, via `renderToStaticMarkup`.
  */
-export function CommandPalette({ onClose, onOpenShortcutsHelp }: CommandPaletteProps) {
+export function CommandPalette({ onClose, onOpenShortcutsHelp, onOpenExportSheet, onOpenStatusDrawer }: CommandPaletteProps) {
   const dialogRef = useModalA11y<HTMLDialogElement>(true)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
@@ -111,7 +113,12 @@ export function CommandPalette({ onClose, onOpenShortcutsHelp }: CommandPaletteP
 
   // Fresh per render (cheap: a plain object of already-created references, not a deep clone) so
   // `enabled()` predicates and executed commands always see current selection/clipboard/history.
-  const ctx = buildCommandContext({ showShortcutsHelp: onOpenShortcutsHelp, openCommandPalette: () => {} })
+  const ctx = buildCommandContext({
+    showShortcutsHelp: onOpenShortcutsHelp,
+    openCommandPalette: () => {},
+    openExportSheet: onOpenExportSheet,
+    openStatusDrawer: onOpenStatusDrawer,
+  })
 
   const commandEntries: ResultEntry[] = useMemo(() => {
     const entries: ResultEntry[] = []

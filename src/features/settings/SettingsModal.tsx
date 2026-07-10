@@ -1,4 +1,4 @@
-import { Keyboard, MonitorCog, PlugZap, RotateCcw, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Keyboard, MonitorCog, PlugZap, RotateCcw, Wrench, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { ShortcutScope } from '../../domain/project/types'
 import { pickProjectDirectory } from '../../services/ipc/file-dialog'
@@ -11,6 +11,7 @@ import {
   type ShortcutCommand,
 } from '../../services/shortcuts/shortcut-config'
 import { useProjectStore } from '../../store/project-store'
+import { DiagnosticsPanel } from '../diagnostics/DiagnosticsPanel'
 import { useModalA11y } from './useModalA11y'
 
 const shortcutGroups: Array<{ title: string; scope: ShortcutScope }> = [
@@ -34,6 +35,11 @@ export function SettingsModal() {
   const resetKeybinding = useProjectStore((state) => state.resetKeybinding)
   const [editingCommand, setEditingCommand] = useState<ShortcutCommand | null>(null)
   const [captureMessage, setCaptureMessage] = useState<string | null>(null)
+  // MERIDIAN item 9: Section 11 proof/diagnostics tooling is developer/QA surface, not user
+  // workflow (destination map decision B) — collapsed by default so Settings doesn't balloon back
+  // to SystemPanels-scale content on every open, but still reachable in one click plus the
+  // existing "Open Settings" palette command (Ctrl+,), which is this surface's whole container.
+  const [showDiagnostics, setShowDiagnostics] = useState(false)
   const [cloudApiKeyDraft, setCloudApiKeyDraft] = useState(preferences.cloudApiKey)
   const [updateChannelDraft, setUpdateChannelDraft] = useState(preferences.updateChannel)
   const [updateManifestUrlDraft, setUpdateManifestUrlDraft] = useState(preferences.updateManifestUrl ?? '')
@@ -400,6 +406,33 @@ export function SettingsModal() {
             </div>
           </section>
         </div>
+
+        <section className="mt-4 rounded-[1.5rem] border border-white/10 bg-black/20 p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Wrench size={18} className="text-[#e0ff00]" />
+              <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-white">Diagnostics</h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDiagnostics((value) => !value)}
+              aria-expanded={showDiagnostics}
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-white transition hover:border-white/20"
+            >
+              {showDiagnostics ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              {showDiagnostics ? 'Hide Diagnostics' : 'Show Diagnostics'}
+            </button>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-[#9ca3af]">
+            Section 11 system-requirement proof tooling (masterplan QA evidence, not day-to-day editing workflow) —
+            relocated here from the main workspace surface.
+          </p>
+          {showDiagnostics ? (
+            <div className="mt-4">
+              <DiagnosticsPanel />
+            </div>
+          ) : null}
+        </section>
       </section>
     </div>
   )

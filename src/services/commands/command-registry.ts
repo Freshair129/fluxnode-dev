@@ -51,15 +51,25 @@ export interface CommandContext {
   store: StoreState
   showShortcutsHelp: () => void
   openCommandPalette: () => void
+  /** MERIDIAN item 9: opens the `Ctrl+E` export sheet — a UI-local callback (not store state), same
+   *  pattern as `showShortcutsHelp`/`openCommandPalette` above. */
+  openExportSheet: () => void
+  /** MERIDIAN item 9 (round-2 advisory 5): opens one of the four status drawers — UI-local, same
+   *  pattern as `openExportSheet`. */
+  openStatusDrawer: (drawer: 'connectivity' | 'appUpdates' | 'workspace' | 'audio') => void
 }
 
 export function buildCommandContext(
-  overrides: Partial<Pick<CommandContext, 'showShortcutsHelp' | 'openCommandPalette'>> = {},
+  overrides: Partial<
+    Pick<CommandContext, 'showShortcutsHelp' | 'openCommandPalette' | 'openExportSheet' | 'openStatusDrawer'>
+  > = {},
 ): CommandContext {
   return {
     store: useProjectStore.getState(),
     showShortcutsHelp: overrides.showShortcutsHelp ?? (() => {}),
     openCommandPalette: overrides.openCommandPalette ?? (() => {}),
+    openExportSheet: overrides.openExportSheet ?? (() => {}),
+    openStatusDrawer: overrides.openStatusDrawer ?? (() => {}),
   }
 }
 
@@ -185,6 +195,31 @@ const COMMAND_BEHAVIORS: Record<ShortcutCommand, CommandBehavior> = {
     reach: 'accelerator',
     reachNote: 'The palette is the entry point being opened — by definition it cannot itself be a menu row inside that palette.',
     run: (ctx) => ctx.openCommandPalette(),
+  },
+  'global.openExportSheet': {
+    reach: 'direct',
+    reachNote: 'Status bar\'s "jobs" segment opens the same export sheet directly.',
+    run: (ctx) => ctx.openExportSheet(),
+  },
+  'status.openConnectivityDrawer': {
+    reach: 'direct',
+    reachNote: 'Status bar\'s "compute" / "connectivity" segments open the same drawer directly.',
+    run: (ctx) => ctx.openStatusDrawer('connectivity'),
+  },
+  'status.openAppUpdatesDrawer': {
+    reach: 'direct',
+    reachNote: 'Status bar\'s "Updates" segment opens the same drawer directly.',
+    run: (ctx) => ctx.openStatusDrawer('appUpdates'),
+  },
+  'status.openWorkspaceDrawer': {
+    reach: 'direct',
+    reachNote: 'Status bar\'s "Workspace" segment opens the same drawer directly.',
+    run: (ctx) => ctx.openStatusDrawer('workspace'),
+  },
+  'status.openAudioDrawer': {
+    reach: 'direct',
+    reachNote: 'Status bar\'s "Audio" segment opens the same drawer directly.',
+    run: (ctx) => ctx.openStatusDrawer('audio'),
   },
   'timeline.selectAll': {
     reach: 'direct',
