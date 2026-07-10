@@ -178,7 +178,9 @@ fn asset_has_audio(asset: &Value) -> bool {
 /// h264 -> h264_nvenc, hevc/h265 -> hevc_nvenc, vp9/webm -> libvpx-vp9,
 /// prores -> prores_ks, av1 -> libaom-av1, else fallback mpeg4.
 pub fn select_video_encoder(preset: &Value) -> &'static str {
-    let codec = obj_str(preset, "videoCodec").unwrap_or("").to_ascii_lowercase();
+    let codec = obj_str(preset, "videoCodec")
+        .unwrap_or("")
+        .to_ascii_lowercase();
     let format = obj_str(preset, "format").unwrap_or("").to_ascii_lowercase();
 
     match codec.as_str() {
@@ -219,7 +221,12 @@ fn quality_args(encoder: &str, preset: &Value) -> Vec<String> {
                 "lossless" => "10",
                 _ => "24",
             };
-            vec!["-crf".to_string(), crf.to_string(), "-b:v".to_string(), "0".to_string()]
+            vec![
+                "-crf".to_string(),
+                crf.to_string(),
+                "-b:v".to_string(),
+                "0".to_string(),
+            ]
         }
         "libaom-av1" => {
             let crf = match quality {
@@ -229,7 +236,12 @@ fn quality_args(encoder: &str, preset: &Value) -> Vec<String> {
                 "lossless" => "12",
                 _ => "30",
             };
-            vec!["-crf".to_string(), crf.to_string(), "-b:v".to_string(), "0".to_string()]
+            vec![
+                "-crf".to_string(),
+                crf.to_string(),
+                "-b:v".to_string(),
+                "0".to_string(),
+            ]
         }
         "prores_ks" => {
             // ProRes profile: 3 = HQ, 4 = 4444 for lossless.
@@ -409,9 +421,8 @@ pub fn build_render_plan(
 
             let start_time = obj_f64(clip, "startTime").unwrap_or(0.0);
             let in_point = obj_f64(clip, "inPoint").unwrap_or(0.0);
-            let out_point = obj_f64(clip, "outPoint").unwrap_or_else(|| {
-                in_point + obj_f64(clip, "duration").unwrap_or(0.0)
-            });
+            let out_point = obj_f64(clip, "outPoint")
+                .unwrap_or_else(|| in_point + obj_f64(clip, "duration").unwrap_or(0.0));
             let mut speed = obj_f64(clip, "speed").unwrap_or(1.0);
             if !speed.is_finite() || speed <= 0.0 {
                 speed = 1.0;
@@ -520,7 +531,12 @@ pub fn build_render_plan(
             chain.push(format!("colorchannelmixer=aa={}", num(vc.opacity)));
         }
 
-        graph_parts.push(format!("[{}:v]{}[{}]", vc.input_index, chain.join(","), src_label));
+        graph_parts.push(format!(
+            "[{}:v]{}[{}]",
+            vc.input_index,
+            chain.join(","),
+            src_label
+        ));
 
         // Overlay this processed layer onto the accumulator, enabled only
         // during the clip's active window.
@@ -567,7 +583,12 @@ pub fn build_render_plan(
         chain.push(atempo_chain(ac.speed));
         chain.push(format!("volume={}", num(ac.volume)));
         chain.push(format!("adelay={}|{}", num(delay_ms), num(delay_ms)));
-        graph_parts.push(format!("[{}:a]{}[{}]", ac.input_index, chain.join(","), label));
+        graph_parts.push(format!(
+            "[{}:a]{}[{}]",
+            ac.input_index,
+            chain.join(","),
+            label
+        ));
         audio_labels.push(label);
     }
 
@@ -584,7 +605,9 @@ pub fn build_render_plan(
 
     // ---- Assemble argv ----
     let video_encoder = select_video_encoder(preset);
-    let format = obj_str(preset, "format").unwrap_or("mp4").to_ascii_lowercase();
+    let format = obj_str(preset, "format")
+        .unwrap_or("mp4")
+        .to_ascii_lowercase();
     let is_image_sequence = format == "png_sequence";
 
     let mut args: Vec<String> = Vec::new();
@@ -646,7 +669,9 @@ mod tests {
 
     /// Helper: locate the value following the first occurrence of `flag`.
     fn arg_after<'a>(args: &'a [String], flag: &str) -> Option<&'a String> {
-        args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1))
+        args.iter()
+            .position(|a| a == flag)
+            .and_then(|i| args.get(i + 1))
     }
 
     fn count(args: &[String], target: &str) -> usize {
@@ -745,7 +770,10 @@ mod tests {
     fn video_graph_has_base_trim_setpts_and_overlays() {
         let plan = build_render_plan(&sample_project(), &h264_preset(), "out.mp4").unwrap();
         let g = filter_graph(&plan);
-        assert!(g.contains("color=c=black:s=1920x1080"), "black base present: {g}");
+        assert!(
+            g.contains("color=c=black:s=1920x1080"),
+            "black base present: {g}"
+        );
         assert!(g.contains("trim=start=0:end=8"), "first clip trim: {g}");
         assert!(g.contains("trim=start=1:end=5"), "second clip trim: {g}");
         assert!(g.contains("setpts=(PTS-STARTPTS)"), "setpts present: {g}");
@@ -787,7 +815,10 @@ mod tests {
         let plan = build_render_plan(&sample_project(), &h264_preset(), "out.mp4").unwrap();
         let g = filter_graph(&plan);
         // Clip B is offset (100,50) and active between t=2 and t=6.
-        assert!(g.contains("overlay=x=100:y=50:enable='between(t,2,6)'"), "{g}");
+        assert!(
+            g.contains("overlay=x=100:y=50:enable='between(t,2,6)'"),
+            "{g}"
+        );
     }
 
     #[test]
@@ -818,29 +849,62 @@ mod tests {
 
     #[test]
     fn encoder_selection_per_preset() {
-        assert_eq!(select_video_encoder(&json!({ "videoCodec": "h264", "format": "mp4" })), "h264_nvenc");
-        assert_eq!(select_video_encoder(&json!({ "videoCodec": "h265", "format": "mp4" })), "hevc_nvenc");
-        assert_eq!(select_video_encoder(&json!({ "videoCodec": "hevc", "format": "mkv" })), "hevc_nvenc");
-        assert_eq!(select_video_encoder(&json!({ "videoCodec": "vp9", "format": "webm" })), "libvpx-vp9");
-        assert_eq!(select_video_encoder(&json!({ "videoCodec": "prores", "format": "mov" })), "prores_ks");
-        assert_eq!(select_video_encoder(&json!({ "videoCodec": "av1", "format": "mp4" })), "libaom-av1");
+        assert_eq!(
+            select_video_encoder(&json!({ "videoCodec": "h264", "format": "mp4" })),
+            "h264_nvenc"
+        );
+        assert_eq!(
+            select_video_encoder(&json!({ "videoCodec": "h265", "format": "mp4" })),
+            "hevc_nvenc"
+        );
+        assert_eq!(
+            select_video_encoder(&json!({ "videoCodec": "hevc", "format": "mkv" })),
+            "hevc_nvenc"
+        );
+        assert_eq!(
+            select_video_encoder(&json!({ "videoCodec": "vp9", "format": "webm" })),
+            "libvpx-vp9"
+        );
+        assert_eq!(
+            select_video_encoder(&json!({ "videoCodec": "prores", "format": "mov" })),
+            "prores_ks"
+        );
+        assert_eq!(
+            select_video_encoder(&json!({ "videoCodec": "av1", "format": "mp4" })),
+            "libaom-av1"
+        );
         // No codec but webm format -> vp9 fallback.
-        assert_eq!(select_video_encoder(&json!({ "videoCodec": null, "format": "webm" })), "libvpx-vp9");
+        assert_eq!(
+            select_video_encoder(&json!({ "videoCodec": null, "format": "webm" })),
+            "libvpx-vp9"
+        );
         // Unknown -> mpeg4 fallback.
-        assert_eq!(select_video_encoder(&json!({ "videoCodec": "weird", "format": "xyz" })), "mpeg4");
+        assert_eq!(
+            select_video_encoder(&json!({ "videoCodec": "weird", "format": "xyz" })),
+            "mpeg4"
+        );
     }
 
     #[test]
     fn encoder_args_wired_into_plan() {
         let plan = build_render_plan(&sample_project(), &h264_preset(), "out.mp4").unwrap();
-        assert_eq!(arg_after(&plan.args, "-c:v").map(|s| s.as_str()), Some("h264_nvenc"));
-        assert_eq!(arg_after(&plan.args, "-c:a").map(|s| s.as_str()), Some("aac"));
+        assert_eq!(
+            arg_after(&plan.args, "-c:v").map(|s| s.as_str()),
+            Some("h264_nvenc")
+        );
+        assert_eq!(
+            arg_after(&plan.args, "-c:a").map(|s| s.as_str()),
+            Some("aac")
+        );
         // fps flag.
         assert_eq!(arg_after(&plan.args, "-r").map(|s| s.as_str()), Some("30"));
         // nvenc quality flag.
         assert_eq!(arg_after(&plan.args, "-cq").map(|s| s.as_str()), Some("20"));
         // audio bitrate.
-        assert_eq!(arg_after(&plan.args, "-b:a").map(|s| s.as_str()), Some("320k"));
+        assert_eq!(
+            arg_after(&plan.args, "-b:a").map(|s| s.as_str()),
+            Some("320k")
+        );
     }
 
     #[test]
@@ -905,8 +969,7 @@ mod tests {
     fn rotation_emits_rotate_filter_when_nonzero() {
         let mut project = sample_project();
         // Give clip A a rotation of 1.5708 radians (~90deg).
-        project["timeline"]["tracks"][0]["clips"][0]["transform"]["rotation"] =
-            json!(1.5708);
+        project["timeline"]["tracks"][0]["clips"][0]["transform"]["rotation"] = json!(1.5708);
         let plan = build_render_plan(&project, &h264_preset(), "out.mp4").unwrap();
         let g = filter_graph(&plan);
         assert!(g.contains("rotate=1.5708"), "{g}");
@@ -930,7 +993,10 @@ mod tests {
                 }
             ]
         });
-        project["timeline"]["tracks"].as_array_mut().unwrap().push(solo_track);
+        project["timeline"]["tracks"]
+            .as_array_mut()
+            .unwrap()
+            .push(solo_track);
 
         let plan = build_render_plan(&project, &h264_preset(), "out.mp4").unwrap();
         // Inputs: 2 video + only the soloed audio = 3 (original audio excluded).
@@ -998,8 +1064,14 @@ mod tests {
         // total_frames recomputed at 24 fps: 8s * 24 = 192.
         assert_eq!(plan.total_frames, 192);
         // vp9 encoder + crf quality flag.
-        assert_eq!(arg_after(&plan.args, "-c:v").map(|s| s.as_str()), Some("libvpx-vp9"));
-        assert_eq!(arg_after(&plan.args, "-crf").map(|s| s.as_str()), Some("24"));
+        assert_eq!(
+            arg_after(&plan.args, "-c:v").map(|s| s.as_str()),
+            Some("libvpx-vp9")
+        );
+        assert_eq!(
+            arg_after(&plan.args, "-crf").map(|s| s.as_str()),
+            Some("24")
+        );
     }
 
     #[test]

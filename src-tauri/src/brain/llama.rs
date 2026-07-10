@@ -26,9 +26,11 @@ pub struct LlamaBrain {
 impl LlamaBrain {
     /// Not yet wired — see the module docs. Returns an error so the caller can fall back.
     pub fn new(_model_path: &str) -> Result<Self, String> {
-        Err("llama.cpp backend not implemented: build with a C++ toolchain and wire llama-cpp-2 \
+        Err(
+            "llama.cpp backend not implemented: build with a C++ toolchain and wire llama-cpp-2 \
              (see brain/llama.rs docs)"
-            .to_string())
+                .to_string(),
+        )
     }
 }
 

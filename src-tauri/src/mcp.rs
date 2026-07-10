@@ -25,13 +25,13 @@ use serde_json::{Map, Value};
 use tauri::AppHandle;
 
 use rmcp::{
-    ErrorData as McpError, RoleServer, ServerHandler, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResult, Content, Implementation, ListToolsResult,
         PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
     },
     service::RequestContext,
     transport::stdio,
+    ErrorData as McpError, RoleServer, ServerHandler, ServiceExt,
 };
 
 use crate::action::{Registry, SideEffect};
@@ -140,21 +140,20 @@ impl ServerHandler for RegistryMcp {
         // The MCP server is read-only by design (no confirmation UI exists over this transport):
         // `allow_writes = false` means `Registry::invoke` refuses every `Mutating`/`LongJob`
         // action before it runs, regardless of what the tool schema might suggest.
-        let result = tokio::task::spawn_blocking(move || {
-            registry.invoke(&app, &name_for_task, args, false)
-        })
-        .await
-        .map_err(|join_err| {
-            // The blocking task panicked or was cancelled — that's a server-internal fault.
-            McpError::internal_error(format!("action task failed: {join_err}"), None)
-        })?;
+        let result =
+            tokio::task::spawn_blocking(move || registry.invoke(&app, &name_for_task, args, false))
+                .await
+                .map_err(|join_err| {
+                    // The blocking task panicked or was cancelled — that's a server-internal fault.
+                    McpError::internal_error(format!("action task failed: {join_err}"), None)
+                })?;
 
         match result {
             // Success: return the JSON value as pretty text content. (Clients that want the raw
             // JSON can parse this back; MCP tool output is text/content blocks.)
             Ok(value) => {
-                let text = serde_json::to_string_pretty(&value)
-                    .unwrap_or_else(|_| value.to_string());
+                let text =
+                    serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
                 Ok(CallToolResult::success(vec![Content::text(text)]))
             }
             // Action returned an error String → surface it as a *tool-level* error so the caller

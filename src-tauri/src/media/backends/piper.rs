@@ -10,8 +10,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use crate::media::types::MediaArtifact;
 use crate::media::traits::SpeechSynthesizer;
+use crate::media::types::MediaArtifact;
 
 /// On Windows, prevent the spawned child from flashing a console window (which also steals focus
 /// from the foreground app).
@@ -67,8 +67,12 @@ impl SpeechSynthesizer for PiperBackend {
                 .unwrap_or(0)
         );
 
-        std::fs::create_dir_all(&self.out_dir)
-            .map_err(|error| format!("failed to create piper out_dir ({}): {error}", self.out_dir.display()))?;
+        std::fs::create_dir_all(&self.out_dir).map_err(|error| {
+            format!(
+                "failed to create piper out_dir ({}): {error}",
+                self.out_dir.display()
+            )
+        })?;
 
         let wav_path = self.out_dir.join(format!("{asset_id}.wav"));
 

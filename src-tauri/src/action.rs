@@ -76,12 +76,23 @@ impl Registry {
     /// ever called; only `ReadOnly` actions execute. This mirrors (and now backs) the gating that
     /// used to live only in `brain::run_agent`, which let `action_invoke` and the MCP server
     /// bypass it entirely.
-    pub fn invoke(&self, app: &AppHandle, name: &str, args: Value, allow_writes: bool) -> ActionResult {
+    pub fn invoke(
+        &self,
+        app: &AppHandle,
+        name: &str,
+        args: Value,
+        allow_writes: bool,
+    ) -> ActionResult {
         let action = self
             .get(name)
             .ok_or_else(|| format!("unknown action: {name}"))?;
 
-        if !allow_writes && matches!(action.def().side_effect, SideEffect::Mutating | SideEffect::LongJob) {
+        if !allow_writes
+            && matches!(
+                action.def().side_effect,
+                SideEffect::Mutating | SideEffect::LongJob
+            )
+        {
             return Err(format!(
                 "'{name}' is a write/long-running action and requires user confirmation; not executed"
             ));
@@ -106,7 +117,10 @@ impl Registry {
         if let Some(required) = required {
             for name in required.iter().filter_map(Value::as_str) {
                 if args.get(name).is_none() {
-                    return Err(format!("'{}' is missing required parameter '{name}'", def.name));
+                    return Err(format!(
+                        "'{}' is missing required parameter '{name}'",
+                        def.name
+                    ));
                 }
             }
         }

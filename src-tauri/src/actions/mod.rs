@@ -38,8 +38,8 @@ impl Action for InspectAssetPath {
             .to_string();
 
         let inspection = crate::inspect_asset_path(app.clone(), path)?;
-        let inspection =
-            serde_json::from_str::<Value>(&inspection).unwrap_or_else(|_| Value::String(inspection));
+        let inspection = serde_json::from_str::<Value>(&inspection)
+            .unwrap_or_else(|_| Value::String(inspection));
 
         Ok(json!({ "inspection": inspection }))
     }
@@ -353,10 +353,14 @@ impl Action for AssetGenerateWaveform {
             .get("bucket_count")
             .and_then(Value::as_u64)
             .ok_or_else(|| "Missing or invalid 'bucket_count'".to_string())?;
+        let waveform = crate::asset_generate_waveform_blocking(
+            app,
+            asset_id,
+            source_path,
+            bucket_count as usize,
+        )?;
         let waveform =
-            crate::asset_generate_waveform_blocking(app, asset_id, source_path, bucket_count as usize)?;
-        let waveform = serde_json::from_str::<Value>(&waveform)
-            .unwrap_or_else(|_| Value::String(waveform));
+            serde_json::from_str::<Value>(&waveform).unwrap_or_else(|_| Value::String(waveform));
         Ok(json!({ "waveform": waveform }))
     }
 }
@@ -397,8 +401,8 @@ impl Action for AssetGenerateThumbnail {
             .and_then(Value::as_f64)
             .ok_or_else(|| "Missing or invalid 'time'".to_string())?;
         let thumbnail = crate::asset_generate_thumbnail_blocking(app, asset_id, source_path, time)?;
-        let thumbnail = serde_json::from_str::<Value>(&thumbnail)
-            .unwrap_or_else(|_| Value::String(thumbnail));
+        let thumbnail =
+            serde_json::from_str::<Value>(&thumbnail).unwrap_or_else(|_| Value::String(thumbnail));
         Ok(json!({ "thumbnail": thumbnail }))
     }
 }
@@ -584,7 +588,8 @@ impl Action for RenderStart {
             .ok_or_else(|| "Missing or invalid 'preset_json'".to_string())?
             .to_string();
         let render = crate::render_start(app.clone(), job_id, project_json, preset_json)?;
-        let render = serde_json::from_str::<Value>(&render).unwrap_or_else(|_| Value::String(render));
+        let render =
+            serde_json::from_str::<Value>(&render).unwrap_or_else(|_| Value::String(render));
         Ok(json!({ "render": render }))
     }
 }
@@ -614,7 +619,8 @@ impl Action for RenderGetStatus {
             .ok_or_else(|| "Missing or invalid 'job_id'".to_string())?
             .to_string();
         let status = crate::render_get_status(app.clone(), job_id)?;
-        let status = serde_json::from_str::<Value>(&status).unwrap_or_else(|_| Value::String(status));
+        let status =
+            serde_json::from_str::<Value>(&status).unwrap_or_else(|_| Value::String(status));
         Ok(json!({ "status": status }))
     }
 }
@@ -819,9 +825,15 @@ impl Action for ComfyGenerate {
             .and_then(Value::as_u64)
             .ok_or_else(|| "Missing or invalid 'timeout_secs'".to_string())?;
         let allow_remote = crate::read_allow_remote_comfy(app);
+        let result = crate::comfy_generate_blocking(
+            project_json,
+            node_id,
+            endpoint,
+            timeout_secs,
+            allow_remote,
+        )?;
         let result =
-            crate::comfy_generate_blocking(project_json, node_id, endpoint, timeout_secs, allow_remote)?;
-        let result = serde_json::from_str::<Value>(&result).unwrap_or_else(|_| Value::String(result));
+            serde_json::from_str::<Value>(&result).unwrap_or_else(|_| Value::String(result));
         Ok(json!({ "result": result }))
     }
 }
@@ -840,7 +852,8 @@ impl Action for HealthPing {
 
     fn run(&self, app: &AppHandle, _args: Value) -> ActionResult {
         let health = crate::health_ping(app.clone())?;
-        let health = serde_json::from_str::<Value>(&health).unwrap_or_else(|_| Value::String(health));
+        let health =
+            serde_json::from_str::<Value>(&health).unwrap_or_else(|_| Value::String(health));
         Ok(json!({ "health": health }))
     }
 }
@@ -1036,7 +1049,10 @@ impl Action for Synthesize {
             .get("text")
             .and_then(Value::as_str)
             .ok_or_else(|| "Missing or invalid 'text'".to_string())?;
-        let voice = args.get("voice").and_then(Value::as_str).unwrap_or("default");
+        let voice = args
+            .get("voice")
+            .and_then(Value::as_str)
+            .unwrap_or("default");
         let art = crate::services::media_broker().synth(text, voice)?;
         Ok(json!({ "asset_id": art.asset_id, "path": art.path, "kind": art.kind }))
     }

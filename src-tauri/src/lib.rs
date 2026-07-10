@@ -364,7 +364,11 @@ fn open_project_at_path(app: AppHandle, path: String) -> Result<Option<String>, 
 }
 
 #[tauri::command]
-fn create_project_at_path(app: AppHandle, path: String, project_json: String) -> Result<String, String> {
+fn create_project_at_path(
+    app: AppHandle,
+    path: String,
+    project_json: String,
+) -> Result<String, String> {
     let project_dir = security::ensure_allowed_path(&app, &normalize_project_dir(&path))?;
     write_project_state_to_dir(&app, &project_dir, &project_json, true)?;
     Ok(project_dir.to_string_lossy().to_string())
@@ -391,7 +395,8 @@ fn autosave_project_state(app: AppHandle, project_json: String) -> Result<String
     let timestamp = current_timestamp();
     let snapshot_id = format!("snapshot-{timestamp}");
     let snapshot_path = autosave_dir.join(format!("{snapshot_id}.json"));
-    security::atomic_write(&snapshot_path, project_json.as_bytes()).map_err(|error| error.to_string())?;
+    security::atomic_write(&snapshot_path, project_json.as_bytes())
+        .map_err(|error| error.to_string())?;
 
     trim_autosave_snapshots(&autosave_dir)?;
     // The autosave snapshot is now a durable recovery source, so the crash-recovery WAL can be
@@ -474,7 +479,8 @@ fn build_bounded_wal_lines(existing: Vec<String>, entry_json: &str) -> Result<Ve
     let has_snapshot = entry
         .get("projectSnapshot")
         .map_or(false, |value| !value.is_null());
-    let embed_snapshot = has_snapshot && (!found_snapshot || since_snapshot >= WAL_SNAPSHOT_INTERVAL);
+    let embed_snapshot =
+        has_snapshot && (!found_snapshot || since_snapshot >= WAL_SNAPSHOT_INTERVAL);
 
     let mut stored = serde_json::Map::new();
     for key in ["id", "timestamp", "type", "label"] {
@@ -531,7 +537,10 @@ fn inspect_asset_path(app: AppHandle, path: String) -> Result<String, String> {
     let path_buf = security::ensure_allowed_path(&app, Path::new(&path))?;
     let metadata = fs::metadata(&path_buf).ok();
     let exists = metadata.is_some();
-    let is_file = metadata.as_ref().map(|value| value.is_file()).unwrap_or(false);
+    let is_file = metadata
+        .as_ref()
+        .map(|value| value.is_file())
+        .unwrap_or(false);
     let file_size = metadata.as_ref().map(|value| value.len()).unwrap_or(0);
     let file_name = path_buf
         .file_name()
@@ -785,7 +794,10 @@ fn asset_probe_blocking(app: &AppHandle, path: String) -> Result<String, String>
 ///
 /// Returns `None` when ffmpeg can't be launched, exits non-zero, or yields no
 /// usable samples — callers should fall back to the byte/seed heuristics.
-fn decode_waveform_peaks_via_ffmpeg(source_path: &str, bucket_count: usize) -> Option<Vec<WaveformPeak>> {
+fn decode_waveform_peaks_via_ffmpeg(
+    source_path: &str,
+    bucket_count: usize,
+) -> Option<Vec<WaveformPeak>> {
     let bin = sidecar_path("ffmpeg");
     let output = Command::new(&bin)
         .args([
@@ -832,7 +844,9 @@ fn waveform_peaks_from_f32le(bytes: &[u8], bucket_count: usize) -> Option<Vec<Wa
         })
         .collect();
 
-    let chunk_size = ((sample_count as f64) / (bucket_count as f64)).ceil().max(1.0) as usize;
+    let chunk_size = ((sample_count as f64) / (bucket_count as f64))
+        .ceil()
+        .max(1.0) as usize;
 
     let peaks = (0..bucket_count)
         .map(|index| {
@@ -848,7 +862,10 @@ fn waveform_peaks_from_f32le(bytes: &[u8], bucket_count: usize) -> Option<Vec<Wa
                 }
             }
             let peak = peak.clamp(0.0, 1.0);
-            WaveformPeak { min: -peak, max: peak }
+            WaveformPeak {
+                min: -peak,
+                max: peak,
+            }
         })
         .collect();
 
@@ -877,7 +894,11 @@ fn asset_generate_waveform_blocking(
     bucket_count: usize,
 ) -> Result<String, String> {
     let project_dir = get_current_project_dir(app)?
-        .or_else(|| ensure_app_dir(&app).ok().map(|dir| dir.join("workspace").join("unsaved.fluxnode")))
+        .or_else(|| {
+            ensure_app_dir(&app)
+                .ok()
+                .map(|dir| dir.join("workspace").join("unsaved.fluxnode"))
+        })
         .ok_or_else(|| "Unable to resolve project directory for waveform cache".to_string())?;
     ensure_project_structure(&project_dir)?;
 
@@ -923,8 +944,7 @@ fn asset_generate_waveform_blocking(
 
 /// Minimal, dependency-free base64 (standard alphabet, padded) encoder.
 fn base64_encode(input: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {
         let b0 = chunk[0] as u32;
@@ -1003,11 +1023,23 @@ mod waveform_tests {
         let peaks = waveform_peaks_from_f32le(&bytes, 4).expect("should produce peaks");
         assert_eq!(peaks.len(), 4);
         for peak in &peaks {
-            assert!(peak.max >= 0.0 && peak.max <= 1.0, "max in range, got {}", peak.max);
-            assert!(peak.min >= -1.0 && peak.min <= 0.0, "min in range, got {}", peak.min);
+            assert!(
+                peak.max >= 0.0 && peak.max <= 1.0,
+                "max in range, got {}",
+                peak.max
+            );
+            assert!(
+                peak.min >= -1.0 && peak.min <= 0.0,
+                "min in range, got {}",
+                peak.min
+            );
         }
         // Last bucket holds the largest magnitude sample (0.8).
-        assert!((peaks[3].max - 0.8).abs() < 1e-6, "expected 0.8, got {}", peaks[3].max);
+        assert!(
+            (peaks[3].max - 0.8).abs() < 1e-6,
+            "expected 0.8, got {}",
+            peaks[3].max
+        );
     }
 
     #[test]
@@ -1029,17 +1061,14 @@ mod waveform_tests {
         let _ = fs::remove_file(&out);
 
         let status = Command::new(&ffmpeg)
-            .args([
-                "-y",
-                "-f",
-                "lavfi",
-                "-i",
-                "sine=frequency=440:duration=1",
-            ])
+            .args(["-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1"])
             .arg(&out)
             .status()
             .expect("ffmpeg should launch");
-        assert!(status.success(), "ffmpeg failed to synthesize the test tone");
+        assert!(
+            status.success(),
+            "ffmpeg failed to synthesize the test tone"
+        );
 
         let bucket_count = 64;
         let peaks = decode_waveform_peaks_via_ffmpeg(&out.to_string_lossy(), bucket_count)
@@ -1047,8 +1076,16 @@ mod waveform_tests {
 
         assert_eq!(peaks.len(), bucket_count, "expected one peak per bucket");
         for peak in &peaks {
-            assert!(peak.max >= 0.0 && peak.max <= 1.0, "max in 0..=1, got {}", peak.max);
-            assert!(peak.min >= -1.0 && peak.min <= 0.0, "min in -1..=0, got {}", peak.min);
+            assert!(
+                peak.max >= 0.0 && peak.max <= 1.0,
+                "max in 0..=1, got {}",
+                peak.max
+            );
+            assert!(
+                peak.min >= -1.0 && peak.min <= 0.0,
+                "min in -1..=0, got {}",
+                peak.min
+            );
         }
         assert!(
             peaks.iter().any(|peak| peak.max > 0.1),
@@ -1081,8 +1118,14 @@ fn asset_generate_thumbnail_blocking(
     time: f64,
 ) -> Result<String, String> {
     let project_dir = get_current_project_dir(app)?
-        .or_else(|| ensure_app_dir(&app).ok().map(|dir| dir.join("workspace").join("unsaved.fluxnode")))
-        .ok_or_else(|| "Unable to resolve project directory for thumbnail generation".to_string())?;
+        .or_else(|| {
+            ensure_app_dir(&app)
+                .ok()
+                .map(|dir| dir.join("workspace").join("unsaved.fluxnode"))
+        })
+        .ok_or_else(|| {
+            "Unable to resolve project directory for thumbnail generation".to_string()
+        })?;
     ensure_project_structure(&project_dir)?;
 
     let thumbnail_dir = project_dir.join("thumbnails");
@@ -1182,7 +1225,10 @@ mod thumbnail_tests {
             .arg(&clip)
             .status()
             .expect("ffmpeg should launch");
-        assert!(status.success(), "ffmpeg failed to synthesize the test clip");
+        assert!(
+            status.success(),
+            "ffmpeg failed to synthesize the test clip"
+        );
 
         let dest = std::env::temp_dir().join("fluxnode-thumb-test.png");
         let _ = fs::remove_file(&dest);
@@ -1211,9 +1257,17 @@ mod thumbnail_tests {
 }
 
 #[tauri::command]
-fn asset_copy_into_project(app: AppHandle, asset_id: String, source_path: String) -> Result<String, String> {
+fn asset_copy_into_project(
+    app: AppHandle,
+    asset_id: String,
+    source_path: String,
+) -> Result<String, String> {
     let project_dir = get_current_project_dir(&app)?
-        .or_else(|| ensure_app_dir(&app).ok().map(|dir| dir.join("workspace").join("unsaved.fluxnode")))
+        .or_else(|| {
+            ensure_app_dir(&app)
+                .ok()
+                .map(|dir| dir.join("workspace").join("unsaved.fluxnode"))
+        })
         .ok_or_else(|| "Unable to resolve project directory for asset copy".to_string())?;
     ensure_project_structure(&project_dir)?;
 
@@ -1249,7 +1303,13 @@ fn fs_pick_media_file(initial_directory: Option<String>) -> Result<Option<String
     }
 
     let picked = dialog
-        .add_filter("Media", &["mp4", "mov", "mkv", "webm", "wav", "mp3", "flac", "aac", "png", "jpg", "jpeg", "webp"])
+        .add_filter(
+            "Media",
+            &[
+                "mp4", "mov", "mkv", "webm", "wav", "mp3", "flac", "aac", "png", "jpg", "jpeg",
+                "webp",
+            ],
+        )
         .pick_file();
 
     // The user explicitly chose this path via a native dialog — legitimize it (and its parent
@@ -1283,8 +1343,8 @@ fn load_app_preferences(app: AppHandle) -> Result<String, String> {
     // Defense in depth: the path is always app-dir-derived (never caller-supplied), but routing
     // it through the same containment check as every other path-taking command guards against a
     // future regression that lets a caller influence it.
-    let preferences_path = security::ensure_allowed_path(&app, &preferences_path)
-        .unwrap_or(preferences_path);
+    let preferences_path =
+        security::ensure_allowed_path(&app, &preferences_path).unwrap_or(preferences_path);
 
     if !preferences_path.exists() {
         return Ok(r#"{"defaultProjectDirectory":null,"comfyUiEndpoint":"http://127.0.0.1:8188","cloudApiKey":"","updateChannel":"stable","updateManifestUrl":null,"allowRemoteComfy":false}"#.to_string());
@@ -1296,8 +1356,8 @@ fn load_app_preferences(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn save_app_preferences(app: AppHandle, preferences_json: String) -> Result<(), String> {
     let preferences_path = app_preferences_path(&app)?;
-    let preferences_path = security::ensure_allowed_path(&app, &preferences_path)
-        .unwrap_or(preferences_path);
+    let preferences_path =
+        security::ensure_allowed_path(&app, &preferences_path).unwrap_or(preferences_path);
 
     // Route `cloudApiKey` through the OS keychain instead of persisting it to preferences.json
     // in plaintext: if the incoming payload carries a (non-empty) key, stash it via `keyring`
@@ -1320,7 +1380,8 @@ fn save_app_preferences(app: AppHandle, preferences_json: String) -> Result<(), 
         Err(_) => preferences_json,
     };
 
-    security::atomic_write(&preferences_path, sanitized_json.as_bytes()).map_err(|error| error.to_string())
+    security::atomic_write(&preferences_path, sanitized_json.as_bytes())
+        .map_err(|error| error.to_string())
 }
 
 const CLOUD_API_KEY_SERVICE: &str = "com.fluxnode.app";
@@ -1330,8 +1391,8 @@ const CLOUD_API_KEY_ACCOUNT: &str = "cloud-api-key";
 /// (Windows Credential Manager / macOS Keychain / Linux Secret Service, via the `keyring`
 /// crate) instead of writing it to `preferences.json` in plaintext.
 fn store_cloud_api_key(key: &str) -> Result<(), String> {
-    let entry =
-        keyring::Entry::new(CLOUD_API_KEY_SERVICE, CLOUD_API_KEY_ACCOUNT).map_err(|error| error.to_string())?;
+    let entry = keyring::Entry::new(CLOUD_API_KEY_SERVICE, CLOUD_API_KEY_ACCOUNT)
+        .map_err(|error| error.to_string())?;
     if key.trim().is_empty() {
         return match entry.delete_password() {
             Ok(()) => Ok(()),
@@ -1345,8 +1406,8 @@ fn store_cloud_api_key(key: &str) -> Result<(), String> {
 /// Reads the cloud API key back from the OS credential store. Returns `""` (not an error) when
 /// nothing has been stored yet.
 fn read_cloud_api_key() -> Result<String, String> {
-    let entry =
-        keyring::Entry::new(CLOUD_API_KEY_SERVICE, CLOUD_API_KEY_ACCOUNT).map_err(|error| error.to_string())?;
+    let entry = keyring::Entry::new(CLOUD_API_KEY_SERVICE, CLOUD_API_KEY_ACCOUNT)
+        .map_err(|error| error.to_string())?;
     match entry.get_password() {
         Ok(password) => Ok(password),
         Err(keyring::Error::NoEntry) => Ok(String::new()),
@@ -1398,9 +1459,12 @@ fn check_for_app_update(manifest_url: String) -> Result<String, String> {
         .header("accept", "application/json")
         .send()
         .map_err(|error| error.to_string())?;
-    let response = response.error_for_status().map_err(|error| error.to_string())?;
+    let response = response
+        .error_for_status()
+        .map_err(|error| error.to_string())?;
     let body = security::read_capped_bytes(response, security::MAX_JSON_RESPONSE_BYTES)?;
-    let manifest: AppUpdateManifest = serde_json::from_slice(&body).map_err(|error| error.to_string())?;
+    let manifest: AppUpdateManifest =
+        serde_json::from_slice(&body).map_err(|error| error.to_string())?;
 
     let latest_version = manifest.version.trim().to_string();
     if latest_version.is_empty() {
@@ -1414,7 +1478,8 @@ fn check_for_app_update(manifest_url: String) -> Result<String, String> {
     let sha256 = manifest.sha256.and_then(normalize_optional_string);
     if download_url.is_some() && sha256.is_none() {
         return Err(
-            "Update manifest is missing a required 'sha256' field for the download URL.".to_string(),
+            "Update manifest is missing a required 'sha256' field for the download URL."
+                .to_string(),
         );
     }
 
@@ -1443,7 +1508,11 @@ fn check_for_app_update(manifest_url: String) -> Result<String, String> {
 /// expected SHA-256 hash. This is still *not* publisher signature verification — see the note on
 /// `check_for_app_update` and `SIGNING.md`.
 #[tauri::command]
-fn download_app_update(app: AppHandle, download_url: String, expected_sha256: String) -> Result<String, String> {
+fn download_app_update(
+    app: AppHandle,
+    download_url: String,
+    expected_sha256: String,
+) -> Result<String, String> {
     let trimmed_url = download_url.trim();
     if trimmed_url.is_empty() {
         return Err("Update download URL is not available.".to_string());
@@ -1462,7 +1531,9 @@ fn download_app_update(app: AppHandle, download_url: String, expected_sha256: St
         .get(trimmed_url)
         .send()
         .map_err(|error| error.to_string())?;
-    let response = response.error_for_status().map_err(|error| error.to_string())?;
+    let response = response
+        .error_for_status()
+        .map_err(|error| error.to_string())?;
     let bytes = security::read_capped_bytes(response, security::MAX_DOWNLOAD_BYTES)?;
 
     let actual_sha256 = security::sha256_hex(&bytes);
@@ -1635,17 +1706,21 @@ fn panel_window_close(app: AppHandle, panel: String) -> Result<Option<String>, S
 
 #[tauri::command]
 fn panel_window_broadcast_state(app: AppHandle, snapshot_json: String) -> Result<(), String> {
-    let snapshot = serde_json::from_str::<Value>(&snapshot_json).map_err(|error| error.to_string())?;
+    let snapshot =
+        serde_json::from_str::<Value>(&snapshot_json).map_err(|error| error.to_string())?;
     app.emit("fluxnode://detached-panel-state", snapshot)
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn asset_watch_sync(app: AppHandle, targets_json: String) -> Result<(), String> {
-    let targets = serde_json::from_str::<Vec<AssetWatchTarget>>(&targets_json).map_err(|error| error.to_string())?;
+    let targets = serde_json::from_str::<Vec<AssetWatchTarget>>(&targets_json)
+        .map_err(|error| error.to_string())?;
     ensure_asset_watch_thread(&app);
     let watch_state = asset_watch_state();
-    let mut guard = watch_state.lock().map_err(|_| "Asset watch state lock poisoned".to_string())?;
+    let mut guard = watch_state
+        .lock()
+        .map_err(|_| "Asset watch state lock poisoned".to_string())?;
     let mut next_targets = HashMap::new();
 
     for target in targets {
@@ -1735,7 +1810,11 @@ fn asset_generate_proxy_blocking(
     target_height: u32,
 ) -> Result<String, String> {
     let project_dir = get_current_project_dir(app)?
-        .or_else(|| ensure_app_dir(&app).ok().map(|dir| dir.join("workspace").join("unsaved.fluxnode")))
+        .or_else(|| {
+            ensure_app_dir(&app)
+                .ok()
+                .map(|dir| dir.join("workspace").join("unsaved.fluxnode"))
+        })
         .ok_or_else(|| "Unable to resolve project directory for proxy generation".to_string())?;
     ensure_project_structure(&project_dir)?;
 
@@ -1748,7 +1827,14 @@ fn asset_generate_proxy_blocking(
     // app never hard-crashes on proxy generation.
     let ffmpeg = sidecar_path("ffmpeg");
     if ffmpeg.exists()
-        && transcode_proxy(&ffmpeg, &source_path, &proxy_path, target_width, target_height).is_ok()
+        && transcode_proxy(
+            &ffmpeg,
+            &source_path,
+            &proxy_path,
+            target_width,
+            target_height,
+        )
+        .is_ok()
     {
         return Ok(proxy_path.to_string_lossy().to_string());
     }
@@ -1800,7 +1886,10 @@ mod proxy_tests {
             .arg(&source)
             .status()
             .expect("ffmpeg should launch");
-        assert!(status.success(), "ffmpeg failed to synthesize the source clip");
+        assert!(
+            status.success(),
+            "ffmpeg failed to synthesize the source clip"
+        );
 
         // Transcode it into a downscaled proxy.
         let proxy = std::env::temp_dir().join("fluxnode-proxy-out.mp4");
@@ -1821,9 +1910,20 @@ mod proxy_tests {
         let size = fs::metadata(&proxy).map(|meta| meta.len()).unwrap_or(0);
         let probe = probe_result_from_ffprobe(&report, size);
 
-        assert_eq!(probe.width, Some(target_width), "proxy width should match target");
-        assert_eq!(probe.height, Some(target_height), "proxy height should match target");
-        assert!(probe.codec.is_some(), "proxy should have a decodable video codec");
+        assert_eq!(
+            probe.width,
+            Some(target_width),
+            "proxy width should match target"
+        );
+        assert_eq!(
+            probe.height,
+            Some(target_height),
+            "proxy height should match target"
+        );
+        assert!(
+            probe.codec.is_some(),
+            "proxy should have a decodable video codec"
+        );
         assert!(size > 0, "proxy file should be non-empty");
 
         let _ = fs::remove_file(&source);
@@ -1849,7 +1949,9 @@ fn decode_preview_frame(
 
     let dest = std::env::temp_dir().join(format!(
         "fluxnode-preview-{}-{}.png",
-        asset_id.bytes().fold(0_u32, |sum, byte| sum.wrapping_add(byte as u32)),
+        asset_id
+            .bytes()
+            .fold(0_u32, |sum, byte| sum.wrapping_add(byte as u32)),
         current_timestamp().replace([':', '.', '-'], "")
     ));
     let _ = fs::remove_file(&dest);
@@ -1917,9 +2019,11 @@ async fn workflow_render_node(
     width: u32,
     height: u32,
 ) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || workflow_render_node_blocking(project_json, node_id, width, height))
-        .await
-        .map_err(|error| error.to_string())?
+    tokio::task::spawn_blocking(move || {
+        workflow_render_node_blocking(project_json, node_id, width, height)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn workflow_render_node_blocking(
@@ -1932,7 +2036,9 @@ fn workflow_render_node_blocking(
 
     let temp_out = std::env::temp_dir().join(format!(
         "fluxnode-node-{}-{}.mp4",
-        node_id.bytes().fold(0_u32, |sum, byte| sum.wrapping_add(byte as u32)),
+        node_id
+            .bytes()
+            .fold(0_u32, |sum, byte| sum.wrapping_add(byte as u32)),
         current_timestamp().replace([':', '.', '-'], "")
     ));
     let temp_out_str = temp_out.to_string_lossy().to_string();
@@ -1955,13 +2061,20 @@ fn workflow_render_node_blocking(
             ));
         }
         // Grab the first frame of the node's rendered output as the preview.
-        Ok(decode_preview_frame(node_id.clone(), temp_out_str.clone(), 0.0, width, height))
+        Ok(decode_preview_frame(
+            node_id.clone(),
+            temp_out_str.clone(),
+            0.0,
+            width,
+            height,
+        ))
     })();
 
     let _ = fs::remove_file(&temp_out);
 
-    let result =
-        frame.unwrap_or_else(|_| build_preview_frame(node_id.clone(), String::new(), 0.0, width, height));
+    let result = frame.unwrap_or_else(|_| {
+        build_preview_frame(node_id.clone(), String::new(), 0.0, width, height)
+    });
     serde_json::to_string(&result).map_err(|e| e.to_string())
 }
 
@@ -1977,7 +2090,10 @@ fn read_allow_remote_comfy(app: &AppHandle) -> bool {
     let Ok(value) = serde_json::from_str::<Value>(&contents) else {
         return false;
     };
-    value.get("allowRemoteComfy").and_then(Value::as_bool).unwrap_or(false)
+    value
+        .get("allowRemoteComfy")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 /// Checks whether the user's ComfyUI server is reachable (BYOM).
@@ -2148,7 +2264,10 @@ mod preview_decode_tests {
             .arg(&clip)
             .status()
             .expect("ffmpeg should launch");
-        assert!(status.success(), "ffmpeg failed to synthesize the test clip");
+        assert!(
+            status.success(),
+            "ffmpeg failed to synthesize the test clip"
+        );
 
         let json = video_decode_frame_blocking(
             "preview-asset".to_string(),
@@ -2162,7 +2281,9 @@ mod preview_decode_tests {
         let frame: Value = serde_json::from_str(&json).expect("result should be valid JSON");
         assert_eq!(frame["mimeType"], "image/png", "mime should be image/png");
 
-        let data_url = frame["dataUrl"].as_str().expect("dataUrl should be a string");
+        let data_url = frame["dataUrl"]
+            .as_str()
+            .expect("dataUrl should be a string");
         assert!(
             data_url.starts_with("data:image/png;base64,"),
             "data_url should be a PNG data URL, got: {}",
@@ -2203,8 +2324,16 @@ mod preview_decode_tests {
             let pad = chunk.iter().filter(|&&b| b == b'=').count();
             let c0 = val(chunk[0])?;
             let c1 = val(chunk[1])?;
-            let c2 = if chunk.len() > 2 && chunk[2] != b'=' { val(chunk[2])? } else { 0 };
-            let c3 = if chunk.len() > 3 && chunk[3] != b'=' { val(chunk[3])? } else { 0 };
+            let c2 = if chunk.len() > 2 && chunk[2] != b'=' {
+                val(chunk[2])?
+            } else {
+                0
+            };
+            let c3 = if chunk.len() > 3 && chunk[3] != b'=' {
+                val(chunk[3])?
+            } else {
+                0
+            };
             let triple = (c0 << 18) | (c1 << 12) | (c2 << 6) | c3;
             out.push(((triple >> 16) & 0xff) as u8);
             if pad < 2 {
@@ -2225,8 +2354,10 @@ fn start_export_job(
     project_json: String,
     preset_json: String,
 ) -> Result<String, String> {
-    let project_value = serde_json::from_str::<Value>(&project_json).map_err(|error| error.to_string())?;
-    let preset_value = serde_json::from_str::<Value>(&preset_json).map_err(|error| error.to_string())?;
+    let project_value =
+        serde_json::from_str::<Value>(&project_json).map_err(|error| error.to_string())?;
+    let preset_value =
+        serde_json::from_str::<Value>(&preset_json).map_err(|error| error.to_string())?;
 
     let project_meta = project_value
         .get("meta")
@@ -2259,7 +2390,11 @@ fn start_export_job(
         .ok_or_else(|| "Render preset format is missing".to_string())?;
 
     let started_at = current_timestamp();
-    let output_extension = if format == "png_sequence" { "zip" } else { format };
+    let output_extension = if format == "png_sequence" {
+        "zip"
+    } else {
+        format
+    };
     let export_dir = resolve_export_directory(&app, output_directory)?;
     fs::create_dir_all(&export_dir).map_err(|error| error.to_string())?;
 
@@ -2321,7 +2456,11 @@ fn kill_render_process(job_id: &str) {
 /// Spawns ffmpeg for a compiled render plan and a monitor thread that streams
 /// real `-progress` output into the status file. The status file must already
 /// read `rendering` before this is called.
-fn spawn_ffmpeg_render(job_id: String, plan_args: Vec<String>, status_path: PathBuf) -> Result<(), String> {
+fn spawn_ffmpeg_render(
+    job_id: String,
+    plan_args: Vec<String>,
+    status_path: PathBuf,
+) -> Result<(), String> {
     let ffmpeg = sidecar_path("ffmpeg");
     let mut args: Vec<String> = vec!["-nostats".into(), "-progress".into(), "pipe:1".into()];
     args.extend(plan_args);
@@ -2402,7 +2541,8 @@ fn spawn_ffmpeg_render(job_id: String, plan_args: Vec<String>, status_path: Path
                 let detail = stderr_handle
                     .and_then(|handle| handle.join().ok())
                     .map(|log| {
-                        let tail: Vec<&str> = log.lines().filter(|l| !l.trim().is_empty()).collect();
+                        let tail: Vec<&str> =
+                            log.lines().filter(|l| !l.trim().is_empty()).collect();
                         let start = tail.len().saturating_sub(4);
                         tail[start..].join(" ")
                     })
@@ -2477,8 +2617,10 @@ fn render_start(
 ) -> Result<String, String> {
     let project_dir = get_or_create_current_project_dir(&app, &project_json)?;
     ensure_project_structure(&project_dir)?;
-    let project_value = serde_json::from_str::<Value>(&project_json).map_err(|error| error.to_string())?;
-    let preset_value = serde_json::from_str::<Value>(&preset_json).map_err(|error| error.to_string())?;
+    let project_value =
+        serde_json::from_str::<Value>(&project_json).map_err(|error| error.to_string())?;
+    let preset_value =
+        serde_json::from_str::<Value>(&preset_json).map_err(|error| error.to_string())?;
     let started_at = current_timestamp();
 
     let output_state = project_value
@@ -2503,7 +2645,11 @@ fn render_start(
         .and_then(|value| value.as_str())
         .ok_or_else(|| "Project id is missing".to_string())?;
 
-    let output_extension = if format == "png_sequence" { "zip" } else { format };
+    let output_extension = if format == "png_sequence" {
+        "zip"
+    } else {
+        format
+    };
     let output_dir = resolve_export_directory(&app, output_directory)?;
     fs::create_dir_all(&output_dir).map_err(|error| error.to_string())?;
     let output_path = output_dir.join(format!("{project_id}-{job_id}.{output_extension}"));
@@ -2568,7 +2714,10 @@ fn render_start(
 fn render_get_status(app: AppHandle, job_id: String) -> Result<String, String> {
     let project_dir = get_current_project_dir(&app)?
         .ok_or_else(|| "No active project directory is available".to_string())?;
-    let status_path = project_dir.join("cache").join("renders").join(format!("{job_id}.status.json"));
+    let status_path = project_dir
+        .join("cache")
+        .join("renders")
+        .join(format!("{job_id}.status.json"));
     // The background render thread maintains the status file in real time;
     // just read and return the latest snapshot.
     let status = read_render_status(&status_path)?;
@@ -2579,7 +2728,10 @@ fn render_get_status(app: AppHandle, job_id: String) -> Result<String, String> {
 fn render_cancel(app: AppHandle, job_id: String) -> Result<(), String> {
     let project_dir = get_current_project_dir(&app)?
         .ok_or_else(|| "No active project directory is available".to_string())?;
-    let status_path = project_dir.join("cache").join("renders").join(format!("{job_id}.status.json"));
+    let status_path = project_dir
+        .join("cache")
+        .join("renders")
+        .join(format!("{job_id}.status.json"));
     let mut status = read_render_status(&status_path)?;
     if status.status == "completed" {
         return Ok(());
@@ -2598,7 +2750,10 @@ fn render_cancel(app: AppHandle, job_id: String) -> Result<(), String> {
 fn render_pause(app: AppHandle, job_id: String) -> Result<(), String> {
     let project_dir = get_current_project_dir(&app)?
         .ok_or_else(|| "No active project directory is available".to_string())?;
-    let status_path = project_dir.join("cache").join("renders").join(format!("{job_id}.status.json"));
+    let status_path = project_dir
+        .join("cache")
+        .join("renders")
+        .join(format!("{job_id}.status.json"));
     let mut status = read_render_status(&status_path)?;
     if status.status != "rendering" {
         return Ok(());
@@ -2606,7 +2761,8 @@ fn render_pause(app: AppHandle, job_id: String) -> Result<(), String> {
     // Mark paused BEFORE killing so the monitor thread leaves it paused.
     status.status = "paused".to_string();
     status.updated_at = current_timestamp();
-    status.estimated_time_remaining = Some(status.total_frames.saturating_sub(status.current_frame));
+    status.estimated_time_remaining =
+        Some(status.total_frames.saturating_sub(status.current_frame));
     write_render_status(&status_path, &status)?;
     kill_render_process(&job_id);
     Ok(())
@@ -2619,7 +2775,11 @@ fn render_resume(app: AppHandle, job_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn render_retry(app: AppHandle, job_id: String, resume_from_current_frame: bool) -> Result<(), String> {
+fn render_retry(
+    app: AppHandle,
+    job_id: String,
+    resume_from_current_frame: bool,
+) -> Result<(), String> {
     // ffmpeg cannot resume a partial encode; always re-render from frame 0.
     let _ = resume_from_current_frame;
     restart_render_from_manifest(&app, &job_id)
@@ -2671,10 +2831,15 @@ fn write_project_state_to_dir(
     mark_project_opened_at_path(app, project_json, project_dir)
 }
 
-fn mark_project_opened_at_path(app: &AppHandle, project_json: &str, project_dir: &Path) -> Result<(), String> {
+fn mark_project_opened_at_path(
+    app: &AppHandle,
+    project_json: &str,
+    project_dir: &Path,
+) -> Result<(), String> {
     let app_dir = ensure_app_dir(app)?;
     let recents_path = app_dir.join("recent.json");
-    let project_value = serde_json::from_str::<Value>(project_json).map_err(|error| error.to_string())?;
+    let project_value =
+        serde_json::from_str::<Value>(project_json).map_err(|error| error.to_string())?;
     let meta = project_value
         .get("meta")
         .and_then(|value| value.as_object())
@@ -2688,13 +2853,17 @@ fn mark_project_opened_at_path(app: &AppHandle, project_json: &str, project_dir:
     let path_string = project_dir.to_string_lossy().to_string();
 
     let mut recents = if recents_path.exists() {
-        serde_json::from_str::<Vec<Value>>(&fs::read_to_string(&recents_path).map_err(|error| error.to_string())?)
-            .map_err(|error| error.to_string())?
+        serde_json::from_str::<Vec<Value>>(
+            &fs::read_to_string(&recents_path).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?
     } else {
         Vec::new()
     };
 
-    recents.retain(|entry| entry.get("path").and_then(|value| value.as_str()) != Some(path_string.as_str()));
+    recents.retain(|entry| {
+        entry.get("path").and_then(|value| value.as_str()) != Some(path_string.as_str())
+    });
     recents.insert(
         0,
         serde_json::json!({
@@ -2718,8 +2887,10 @@ fn ensure_project_structure(project_dir: &Path) -> Result<(), String> {
     fs::create_dir_all(project_dir.join("thumbnails")).map_err(|error| error.to_string())?;
     fs::create_dir_all(project_dir.join("proxies")).map_err(|error| error.to_string())?;
     fs::create_dir_all(project_dir.join("media")).map_err(|error| error.to_string())?;
-    fs::create_dir_all(project_dir.join("cache").join("waveforms")).map_err(|error| error.to_string())?;
-    fs::create_dir_all(project_dir.join("cache").join("renders")).map_err(|error| error.to_string())?;
+    fs::create_dir_all(project_dir.join("cache").join("waveforms"))
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(project_dir.join("cache").join("renders"))
+        .map_err(|error| error.to_string())?;
     fs::create_dir_all(project_dir.join("exports")).map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -2761,10 +2932,11 @@ fn reconstruct_project_from_wal(project_dir: &Path) -> Result<Option<String>, St
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .collect::<Vec<_>>();
 
-    let Some(base_index) = entries
-        .iter()
-        .rposition(|entry| entry.get("projectSnapshot").map_or(false, |value| !value.is_null()))
-    else {
+    let Some(base_index) = entries.iter().rposition(|entry| {
+        entry
+            .get("projectSnapshot")
+            .map_or(false, |value| !value.is_null())
+    }) else {
         return Ok(None);
     };
 
@@ -2827,7 +2999,10 @@ fn apply_immer_patch_at(root: &mut Value, path: &[Value], op: &str, value: Optio
                 child
             }
             Value::Array(items) => {
-                let Some(child) = segment.as_u64().and_then(|index| items.get_mut(index as usize)) else {
+                let Some(child) = segment
+                    .as_u64()
+                    .and_then(|index| items.get_mut(index as usize))
+                else {
                     return;
                 };
                 child
@@ -2913,8 +3088,10 @@ fn read_latest_autosave_snapshot(project_dir: &Path) -> Result<Option<String>, S
         return Ok(None);
     };
 
-    let snapshot_value = serde_json::from_str::<Value>(&fs::read_to_string(entry.path()).map_err(|error| error.to_string())?)
-        .map_err(|error| error.to_string())?;
+    let snapshot_value = serde_json::from_str::<Value>(
+        &fs::read_to_string(entry.path()).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
 
     if let Some(project) = snapshot_value.get("project") {
         return serde_json::to_string(project)
@@ -2963,10 +3140,14 @@ fn get_current_project_dir(app: &AppHandle) -> Result<Option<PathBuf>, String> {
 
 fn set_current_project_dir(app: &AppHandle, project_dir: &Path) -> Result<(), String> {
     let pointer_path = current_project_pointer_path(app)?;
-    fs::write(pointer_path, project_dir.to_string_lossy().to_string()).map_err(|error| error.to_string())
+    fs::write(pointer_path, project_dir.to_string_lossy().to_string())
+        .map_err(|error| error.to_string())
 }
 
-fn get_or_create_current_project_dir(app: &AppHandle, project_json: &str) -> Result<PathBuf, String> {
+fn get_or_create_current_project_dir(
+    app: &AppHandle,
+    project_json: &str,
+) -> Result<PathBuf, String> {
     if let Some(path) = get_current_project_dir(app)? {
         return Ok(path);
     }
@@ -2977,7 +3158,10 @@ fn get_or_create_current_project_dir(app: &AppHandle, project_json: &str) -> Res
     Ok(default_dir)
 }
 
-fn get_or_create_project_dir_from_wal(app: &AppHandle, entry_json: &str) -> Result<PathBuf, String> {
+fn get_or_create_project_dir_from_wal(
+    app: &AppHandle,
+    entry_json: &str,
+) -> Result<PathBuf, String> {
     if let Some(path) = get_current_project_dir(app)? {
         return Ok(path);
     }
@@ -2986,21 +3170,27 @@ fn get_or_create_project_dir_from_wal(app: &AppHandle, entry_json: &str) -> Resu
     let project_snapshot = value
         .get("projectSnapshot")
         .ok_or_else(|| "WAL entry is missing projectSnapshot".to_string())?;
-    let default_dir = default_project_dir(app, &serde_json::to_string(project_snapshot).map_err(|error| error.to_string())?)?;
+    let default_dir = default_project_dir(
+        app,
+        &serde_json::to_string(project_snapshot).map_err(|error| error.to_string())?,
+    )?;
     ensure_project_structure(&default_dir)?;
     set_current_project_dir(app, &default_dir)?;
     Ok(default_dir)
 }
 
 fn default_project_dir(app: &AppHandle, project_json: &str) -> Result<PathBuf, String> {
-    let project_value = serde_json::from_str::<Value>(project_json).map_err(|error| error.to_string())?;
+    let project_value =
+        serde_json::from_str::<Value>(project_json).map_err(|error| error.to_string())?;
     let project_id = project_value
         .get("meta")
         .and_then(|value| value.get("id"))
         .and_then(|value| value.as_str())
         .unwrap_or("fluxnode-project");
 
-    Ok(ensure_app_dir(app)?.join("workspace").join(format!("{project_id}.fluxnode")))
+    Ok(ensure_app_dir(app)?
+        .join("workspace")
+        .join(format!("{project_id}.fluxnode")))
 }
 
 fn normalize_project_dir(path: &str) -> PathBuf {
@@ -3042,7 +3232,10 @@ fn ensure_asset_watch_thread(app: &AppHandle) {
                         pending_events.push(AssetWatchEvent {
                             asset_id: asset_id.clone(),
                             path: watched_asset.path.clone(),
-                            change_type: classify_asset_change(&watched_asset.last_observation, &next_observation),
+                            change_type: classify_asset_change(
+                                &watched_asset.last_observation,
+                                &next_observation,
+                            ),
                             exists: next_observation.exists,
                             modified_at: next_observation.modified_at,
                             file_size: next_observation.file_size,
@@ -3116,7 +3309,11 @@ fn build_waveform_peaks_from_bytes(bytes: &[u8], bucket_count: usize) -> Vec<Wav
         .map(|index| {
             let start = index * chunk_size;
             let end = usize::min(bytes.len(), start + chunk_size);
-            let chunk = if start < end { &bytes[start..end] } else { &bytes[bytes.len() - 1..bytes.len()] };
+            let chunk = if start < end {
+                &bytes[start..end]
+            } else {
+                &bytes[bytes.len() - 1..bytes.len()]
+            };
             let mut min = 1.0_f32;
             let mut max = -1.0_f32;
 
@@ -3136,7 +3333,9 @@ fn build_waveform_peaks_from_bytes(bytes: &[u8], bucket_count: usize) -> Vec<Wav
 }
 
 fn build_waveform_peaks_from_seed(seed: &str, bucket_count: usize) -> Vec<WaveformPeak> {
-    let seed_value = seed.bytes().fold(0_u32, |sum, byte| sum.wrapping_add(byte as u32));
+    let seed_value = seed
+        .bytes()
+        .fold(0_u32, |sum, byte| sum.wrapping_add(byte as u32));
 
     (0..bucket_count)
         .map(|index| {
@@ -3161,7 +3360,9 @@ fn build_preview_frame(
         .and_then(|value| value.to_str())
         .unwrap_or(source_path.as_str())
         .to_string();
-    let seed = source_path.bytes().fold(0_u32, |sum, byte| sum.wrapping_add(byte as u32));
+    let seed = source_path
+        .bytes()
+        .fold(0_u32, |sum, byte| sum.wrapping_add(byte as u32));
     let primary = format!("#{:06x}", (seed.wrapping_mul(2654435761) & 0x00ff_ffff));
     let secondary = format!("#{:06x}", ((seed ^ 0x00ab_cdef) & 0x00ff_ffff));
     let svg = format!(
@@ -3238,7 +3439,10 @@ fn estimate_total_frames(project_value: &Value) -> u32 {
         .and_then(|value| value.get("frameRate"))
         .and_then(|value| value.as_f64())
         .unwrap_or(30.0);
-    let timeline = match project_value.get("timeline").and_then(|value| value.as_object()) {
+    let timeline = match project_value
+        .get("timeline")
+        .and_then(|value| value.as_object())
+    {
         Some(value) => value,
         None => return 120,
     };
@@ -3253,8 +3457,14 @@ fn estimate_total_frames(project_value: &Value) -> u32 {
     for track in tracks {
         if let Some(clips) = track.get("clips").and_then(|value| value.as_array()) {
             for clip in clips {
-                let start = clip.get("startTime").and_then(|value| value.as_f64()).unwrap_or(0.0);
-                let clip_duration = clip.get("duration").and_then(|value| value.as_f64()).unwrap_or(0.0);
+                let start = clip
+                    .get("startTime")
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(0.0);
+                let clip_duration = clip
+                    .get("duration")
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(0.0);
                 duration = duration.max(start + clip_duration);
             }
         }
@@ -3264,7 +3474,10 @@ fn estimate_total_frames(project_value: &Value) -> u32 {
 }
 
 fn describe_workflow_audio_output(project_value: &Value) -> Value {
-    let Some(workflow) = project_value.get("workflow").and_then(|value| value.as_object()) else {
+    let Some(workflow) = project_value
+        .get("workflow")
+        .and_then(|value| value.as_object())
+    else {
         return serde_json::json!({
             "mode": "muted",
             "summary": "Workflow state missing"
@@ -3284,7 +3497,9 @@ fn describe_workflow_audio_output(project_value: &Value) -> Value {
 
     let output_node_id = nodes.iter().find_map(|node| {
         if node.get("type").and_then(|value| value.as_str()) == Some("output") {
-            node.get("id").and_then(|value| value.as_str()).map(|value| value.to_string())
+            node.get("id")
+                .and_then(|value| value.as_str())
+                .map(|value| value.to_string())
         } else {
             None
         }
@@ -3313,9 +3528,9 @@ fn describe_workflow_audio_output(project_value: &Value) -> Value {
         .get("source")
         .and_then(|value| value.as_str())
         .unwrap_or_default();
-    let source_node = nodes.iter().find(|node| {
-        node.get("id").and_then(|value| value.as_str()) == Some(source_node_id)
-    });
+    let source_node = nodes
+        .iter()
+        .find(|node| node.get("id").and_then(|value| value.as_str()) == Some(source_node_id));
 
     let Some(source_node) = source_node else {
         return serde_json::json!({
@@ -3508,7 +3723,14 @@ fn agent_chat_blocking(
         ),
         Some(model) => {
             let engine = brain::ollama::OllamaBrain::local(model);
-            brain::run_agent(&app, actions::registry(), &engine, &message, 8, allow_writes)
+            brain::run_agent(
+                &app,
+                actions::registry(),
+                &engine,
+                &message,
+                8,
+                allow_writes,
+            )
         }
     }
 }
@@ -3682,8 +3904,14 @@ mod tests {
         let first = build_bounded_wal_lines(Vec::new(), &base).unwrap();
         assert_eq!(first.len(), 1);
         let stored: Value = serde_json::from_str(&first[0]).unwrap();
-        assert!(stored.get("projectSnapshot").is_some(), "first entry embeds a snapshot");
-        assert!(stored.get("patches").is_none(), "snapshot entry drops redundant patches");
+        assert!(
+            stored.get("projectSnapshot").is_some(),
+            "first entry embeds a snapshot"
+        );
+        assert!(
+            stored.get("patches").is_none(),
+            "snapshot entry drops redundant patches"
+        );
 
         // A subsequent entry (snapshot still within interval) stores patches only, even though the
         // store handed us a full projectSnapshot alongside them.
@@ -3696,7 +3924,10 @@ mod tests {
         let second = build_bounded_wal_lines(first, &follow).unwrap();
         assert_eq!(second.len(), 2);
         let stored: Value = serde_json::from_str(&second[1]).unwrap();
-        assert!(stored.get("projectSnapshot").is_none(), "non-base entry drops the snapshot");
+        assert!(
+            stored.get("projectSnapshot").is_none(),
+            "non-base entry drops the snapshot"
+        );
         assert!(stored.get("patches").is_some());
     }
 
@@ -3711,7 +3942,10 @@ mod tests {
             })
             .to_string();
             lines = build_bounded_wal_lines(lines, &entry).unwrap();
-            assert!(lines.len() <= WAL_LIMIT, "never exceeds the ring-buffer cap");
+            assert!(
+                lines.len() <= WAL_LIMIT,
+                "never exceeds the ring-buffer cap"
+            );
         }
         assert_eq!(lines.len(), WAL_LIMIT);
         let has_snapshot = lines.iter().any(|line| {
@@ -3719,13 +3953,16 @@ mod tests {
                 .map(|value| value.get("projectSnapshot").is_some())
                 .unwrap_or(false)
         });
-        assert!(has_snapshot, "a trimmed window still contains a snapshot to reconstruct from");
+        assert!(
+            has_snapshot,
+            "a trimmed window still contains a snapshot to reconstruct from"
+        );
     }
 
     #[test]
     fn reconstruct_project_from_wal_replays_patches_onto_latest_snapshot() {
-        let dir = std::env::temp_dir()
-            .join(format!("fluxnode-wal-reconstruct-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("fluxnode-wal-reconstruct-{}", std::process::id()));
         let autosave = dir.join("autosave");
         fs::create_dir_all(&autosave).unwrap();
 
@@ -3755,7 +3992,11 @@ mod tests {
         // Base snapshot is retained (the follow-up entry's snapshot was dropped in favor of its
         // patches), and the forward patch is replayed on top of it.
         assert_eq!(value["meta"]["name"], serde_json::json!("base"));
-        assert_eq!(value["value"], serde_json::json!(2), "forward patch replayed on recovery");
+        assert_eq!(
+            value["value"],
+            serde_json::json!(2),
+            "forward patch replayed on recovery"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -3813,7 +4054,10 @@ mod tests {
             .arg(&out)
             .status()
             .expect("ffmpeg should launch");
-        assert!(status.success(), "ffmpeg failed to synthesize the test clip");
+        assert!(
+            status.success(),
+            "ffmpeg failed to synthesize the test clip"
+        );
 
         let report = run_ffprobe(&out.to_string_lossy()).expect("ffprobe should succeed");
         let size = fs::metadata(&out).map(|meta| meta.len()).unwrap_or(0);
@@ -3825,7 +4069,10 @@ mod tests {
         assert!(probe.codec.is_some(), "codec should be detected");
         assert_eq!(probe.channels, Some(1));
         let duration = probe.duration.expect("duration should be present");
-        assert!((duration - 1.0).abs() < 0.25, "duration ~1s, got {duration}");
+        assert!(
+            (duration - 1.0).abs() < 0.25,
+            "duration ~1s, got {duration}"
+        );
 
         let _ = fs::remove_file(&out);
     }
@@ -3856,9 +4103,20 @@ mod render_pipeline_tests {
         // Synthesize a 1s 320x240@25 video (with audio) and a 1s tone.
         let ok_v = Command::new(&ffmpeg)
             .args([
-                "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=1",
-                "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
-                "-c:v", "mpeg4", "-c:a", "aac", "-shortest",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x240:rate=25:duration=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=1",
+                "-c:v",
+                "mpeg4",
+                "-c:a",
+                "aac",
+                "-shortest",
             ])
             .arg(&vsrc)
             .status()
@@ -3944,7 +4202,13 @@ mod workflow_exec_tests {
         let _ = fs::remove_file(&vsrc);
         let ok = Command::new(&ffmpeg)
             .args([
-                "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=1", "-c:v", "mpeg4",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x240:rate=25:duration=1",
+                "-c:v",
+                "mpeg4",
             ])
             .arg(&vsrc)
             .status()
@@ -4000,6 +4264,9 @@ mod workflow_exec_tests {
             false,
         )
         .expect_err("unreachable ComfyUI should error");
-        assert!(err.contains("not reachable"), "expected unreachable error, got: {err}");
+        assert!(
+            err.contains("not reachable"),
+            "expected unreachable error, got: {err}"
+        );
     }
 }
