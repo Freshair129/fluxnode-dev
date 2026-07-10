@@ -252,3 +252,30 @@ export function resolveHorizonRevealRatio(
 ): number | null {
   return activeViewForRatio(currentRatio) === targetView ? null : defaultRatioForView(targetView)
 }
+
+// ---------------------------------------------------------------------------------------------
+// Item 11 (lineage hardening): visibilitychange re-prime detection
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * `primeThreadDrawIn` (LineageThread.tsx) sets the *specified* inline `stroke-dashoffset` equal
+ * to the *specified* `stroke-dasharray` (both the path's full length) SYNCHRONOUSLY, fully
+ * hiding the thread, then flips ONLY `stroke-dashoffset`'s specified value to `'0'` inside a
+ * `requestAnimationFrame` callback a frame later. If that rAF never runs — e.g. it was queued
+ * while `document.hidden`, since browsers suspend/throttle rAF callbacks in background tabs — the
+ * two specified values stay equal forever: `recompute`'s non-animate branch deliberately never
+ * touches `strokeDashoffset` (only `strokeDasharray`, to keep a fully-drawn thread's dash pattern
+ * in sync with its own possibly-changed length), so nothing else will ever unstick it.
+ *
+ * Detecting that stuck state is pure string comparison over the two specified CSS values already
+ * sitting in `pathEl.style` — no DOM read needed beyond what the caller already has — so it lives
+ * here (not LineageThread.tsx) to stay unit-testable without jsdom, matching this module's
+ * existing split from the DOM-facing rect registry.
+ */
+export function isPrimedHiddenDashoffset(specifiedDashoffset: string, specifiedDasharray: string): boolean {
+  if (specifiedDashoffset === '' || specifiedDasharray === '' || specifiedDashoffset === '0') {
+    return false
+  }
+
+  return specifiedDashoffset === specifiedDasharray
+}

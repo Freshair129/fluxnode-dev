@@ -6,6 +6,7 @@ import {
   buildStageRowExclusionBands,
   clampPointToRect,
   clipAnchorPoint,
+  isPrimedHiddenDashoffset,
   isRectVisibleWithin,
   nodeAnchorPoint,
   rectFromDomRect,
@@ -211,5 +212,32 @@ describe('lineageThread: rectFromDomRect', () => {
   it('copies the plain-object fields off a DOMRect-shaped value', () => {
     const domRect = { top: 1, left: 2, right: 3, bottom: 4, width: 1, height: 3, x: 2, y: 1, toJSON: () => ({}) }
     expect(rectFromDomRect(domRect)).toEqual({ top: 1, left: 2, right: 3, bottom: 4, width: 1, height: 3 })
+  })
+})
+
+describe('lineageThread: isPrimedHiddenDashoffset (item 11 visibilitychange re-prime)', () => {
+  it('is stuck-primed when dashoffset still equals dasharray (the priming rAF never ran)', () => {
+    expect(isPrimedHiddenDashoffset('186.4', '186.4')).toBe(true)
+  })
+
+  it('is NOT stuck when dashoffset has already resolved to 0 (the normal drawn-in state)', () => {
+    expect(isPrimedHiddenDashoffset('0', '186.4')).toBe(false)
+  })
+
+  it('is NOT stuck when dashoffset is mid-tween (differs from dasharray but is not 0 either)', () => {
+    // The *specified* value flips straight from length -> '0' the instant the rAF runs (only the
+    // *computed*/animating value passes through intermediate numbers) — but guard the general
+    // case anyway: anything that isn't exactly equal to dasharray is not the stuck state.
+    expect(isPrimedHiddenDashoffset('90', '186.4')).toBe(false)
+  })
+
+  it('is NOT stuck when either value is unset (path never primed at all)', () => {
+    expect(isPrimedHiddenDashoffset('', '')).toBe(false)
+    expect(isPrimedHiddenDashoffset('', '186.4')).toBe(false)
+    expect(isPrimedHiddenDashoffset('186.4', '')).toBe(false)
+  })
+
+  it('treats a zero-length path (dashoffset === dasharray === "0") as not stuck', () => {
+    expect(isPrimedHiddenDashoffset('0', '0')).toBe(false)
   })
 })
