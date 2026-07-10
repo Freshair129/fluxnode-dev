@@ -38,7 +38,7 @@ export function ExportSheet({ onClose, onInspect }: { onClose: () => void; onIns
         <section aria-label="Export queue" className="rounded-[1.5rem] border border-white/8 bg-[#151618]/90 p-4">
           <PanelHeading icon={Rocket} title="Export Queue" />
           <p aria-live="polite" className="mt-3 text-sm text-[#cbd2dc]">
-            {queue.length === 0 ? 'No render jobs yet.' : `${queue.length} render job(s) tracked in the project queue.`}
+            {queue.length === 0 ? 'No render jobs yet. Use Queue Render below.' : `${queue.length} render job(s) tracked in the project queue.`}
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <button type="button" onClick={enqueueRender} className="rounded-full bg-[#e0ff00] px-4 py-2 text-sm font-semibold text-black">

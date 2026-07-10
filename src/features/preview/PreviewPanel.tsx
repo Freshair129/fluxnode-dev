@@ -149,6 +149,14 @@ export function PreviewPanel({ embedded = false }: PreviewPanelProps = {}) {
     [],
   )
 
+  // MERIDIAN item 8 (spec H Preview "Empty" row: "No frame under playhead"; M.6: name the fix).
+  // `previewFrame` being null is ambiguous on its own — it's either "nothing is selected yet" (a
+  // true empty state, needs a named action) or "a selection exists but the frame hasn't decoded
+  // yet" (a loading state, self-resolving). Distinguish them from the same selection state this
+  // component already computes, so the fallback text always tells the user the one concrete thing
+  // that gets a frame on screen.
+  const hasPreviewSelection = activeView === 'timeline' ? Boolean(selectedClip) : Boolean(selectedNode || routedWorkflowNode)
+
   // The actual 16:9 monitor surface — shared verbatim between the detached-window layout and
   // the embedded stage-row layout so decode/proxy/aspect behavior can't drift between hosts.
   const monitorSurface = previewFrame ? (
@@ -165,13 +173,17 @@ export function PreviewPanel({ embedded = false }: PreviewPanelProps = {}) {
       </div>
       <div className="text-center">
         <Film size={34} className="mx-auto text-accent" aria-hidden="true" />
-        <p className="mt-4 text-lg font-semibold text-white">{previewTitle}</p>
+        <p className="mt-4 text-lg font-semibold text-white">{hasPreviewSelection ? previewTitle : 'No frame under playhead'}</p>
         <p className="mt-2 text-sm leading-6 text-[#aab3bf]">
-          {effectivePreviewSource ?? routedWorkflowNode?.id ?? 'No preview source selected yet.'}
+          {hasPreviewSelection
+            ? effectivePreviewSource ?? routedWorkflowNode?.id ?? 'Decoding the selected frame…'
+            : activeView === 'timeline'
+              ? 'Select a clip on the timeline to preview it here.'
+              : 'Select a node, or connect one to Output, to preview it here.'}
         </p>
       </div>
       <div className="flex items-center justify-between gap-3 text-xs text-[#9ca3af]">
-        <span>Waiting for decoded frame</span>
+        <span>{hasPreviewSelection ? 'Waiting for decoded frame' : 'Nothing selected'}</span>
         <span>{requestedSourceTime !== null ? `${requestedSourceTime.toFixed(2)}s source` : 'No source time'}</span>
       </div>
     </div>

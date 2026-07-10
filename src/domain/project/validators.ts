@@ -53,7 +53,7 @@ export function validateProject(project: FluxNodeProject): ProjectValidationIssu
     issues.push({
       level: 'warning',
       scope: 'timeline',
-      message: 'Timeline has no tracks yet.',
+      message: 'Timeline has no tracks yet. Use Add Track Above or Add Track Below in the Timeline view.',
     })
   }
 
@@ -82,13 +82,13 @@ export function validateProject(project: FluxNodeProject): ProjectValidationIssu
         issues.push({
           level: 'warning',
           scope: 'assets',
-          message: `${asset.name} is offline and needs relinking.`,
+          message: `${asset.name} is offline. Use Replace Media or Batch Relink to fix it.`,
         })
       } else if (asset.status === 'corrupt') {
         issues.push({
           level: 'error',
           scope: 'assets',
-          message: `${asset.name} cannot be decoded and should be replaced or removed.`,
+          message: `${asset.name} cannot be decoded. Use Replace Media to relink it, or Delete the clip.`,
         })
       }
 
