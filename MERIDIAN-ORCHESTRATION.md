@@ -54,18 +54,19 @@ spec section → [Fable 5] decompose into item + AC refs + complexity (C-1/C-2/C
 
 Reviewed by Opus per item; assembled and gated by Fable 5 per phase.
 
-**Status (2026-07-10):** items 1–7, 9, 10, 11, 12, 13 = PASS + pushed. Remaining: **8** (empty/error copy pass). Phase 1 is otherwise ready for a sign-off pass — see the pre-merge checklist below.
+**Status (2026-07-10):** items 1–7, 9–14 = PASS + pushed. Remaining: **8** (empty/error copy pass, in progress). Phase 1 is otherwise ready for a sign-off pass — see the pre-merge checklist below.
 
 **Follow-ups opened by the item-7 review (not blocking, no item number yet):** widen the font-invariance e2e guard to a menu/palette row and a JobChip; stamp `data-density` on detached preview/timeline/inspector window roots so they honour the user's preference instead of falling back to comfortable; `ExportSheet`'s inner content spacing does not follow density (only its shell/edge inset does).
 
-**Item 14 (unplanned — landed via an out-of-protocol session, needs its own review before it counts as closed):** the same scroll-strand fix approved for `WelcomeModal` in items 12/13 (`items-center` → `justify-center overflow-y-auto` + `my-auto h-fit` on the card) applied to four more modals: `ConfirmDialog`, `PromptDialog`, `FailureInspectorModal`, `WorkspaceSharingModal`, plus a `useModalA11y.ts` `active`→`focused` rename fixing the long-standing pre-existing `no-shadow` warning, new e2e coverage in `06-modals.spec.ts`, and a `README.md` update. Discovered mid-item-11-review as unstaged drift in the shared worktree (a background session the user started independently). Left uncommitted and untouched by the orchestrator. **Before it merges:** route it through the same Opus review gate as every other item, confirm it doesn't collide with anything item 9/12/13 already shipped in these files, and give it a real item number in this table.
+**Item 14 (unplanned — landed via an out-of-protocol session) — CLOSED, PASS + pushed.** The same scroll-strand fix approved for `WelcomeModal` in items 12/13 (`items-center` → `justify-center overflow-y-auto` + `my-auto h-fit` on the card) applied to four more modals: `ConfirmDialog`, `PromptDialog`, `FailureInspectorModal`, `WorkspaceSharingModal`, plus a `useModalA11y.ts` `active`→`focused` rename fixing the long-standing pre-existing `no-shadow` warning, new e2e coverage in `06-modals.spec.ts`, and a `README.md` update. Opus confirmed pattern fidelity across all four modals and a clean rename. **Follow-up, not blocking:** only `FailureInspectorModal` got a red-capable e2e guard — `ConfirmDialog`, `PromptDialog`, `WorkspaceSharingModal` carry the identical fix unguarded (nothing in the suite opens any of the three). Low risk, same proven pattern, but worth three more guards someday.
 
 **Phase 1 pre-merge checklist (Opus's item-11 sign-off note):**
 1. ~~Item-11 BLOCKING-1 fix confirmed~~ — done, red/green proven, re-reviewed PASS.
 2. ~~Full-suite green run~~ — done: two clean-room `CI=1` runs, 45/45 both times.
 3. ~~Item-9 aria-modal decision~~ — resolved (resolution A: `aria-modal` + trap, moved to `--z-overlay`), shipped in item 9 rounds 2–3, passed re-review.
 4. ~~Item-10 headed-browser confirmation~~ — confirmed: `playwright.config.ts` sets `headless: false` (not the rAF-dead CDP tab).
-5. **New:** resolve Item 14 (above) — review it or exclude it — before calling the worktree clean for merge.
+5. ~~Item 14~~ — reviewed, PASS, committed and pushed.
+6. **New, from item-14's review:** re-run the full suite hermetically (no other agent editing the shared worktree) for a certified clean-room number before merge — item 14's own numbers were taken while item 8 was concurrently landing files.
 
 **Overlay vocabulary (settled in the item-9 review — bind on every future surface):** spec E's *Drawers* are the in-stratum, co-interactive surfaces (node library, Takes, asset strip). None are built. They live at `--z-drawer` (10), never block, and correctly sit beneath the lineage thread. Everything transient, single-active and dismiss-me — command palette, export sheet, settings sheet, status drawers — is an *Overlay*: `aria-modal="true"`, focus-trapped, `--z-overlay` (50), Escape owned by the surface with topmost-first ordering by DOM position. **Trap and ARIA declaration must always agree**, and an `aria-modal` surface must never be painted over by the decorative thread. J.7's "nothing blocks" governs the export *process*, not the ARIA attribute.
 
