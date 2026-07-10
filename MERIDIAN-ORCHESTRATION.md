@@ -54,7 +54,9 @@ spec section → [Fable 5] decompose into item + AC refs + complexity (C-1/C-2/C
 
 Reviewed by Opus per item; assembled and gated by Fable 5 per phase.
 
-**Status (2026-07-10):** items 1, 2, 3, 4, 5, 6, 9, 10, 12, 13 = PASS + pushed. Remaining: 7 (density — now unblocked, `--meridian-stage-h` and `--meridian-statusbar-h` are ready to retarget), 8 (empty/error copy), 11 (lineage hardening).
+**Status (2026-07-10):** items 1–7, 9, 10, 12, 13 = PASS + pushed. Remaining: **8** (empty/error copy pass), **11** (lineage hardening).
+
+**Follow-ups opened by the item-7 review (not blocking, no item number yet):** widen the font-invariance e2e guard to a menu/palette row and a JobChip; stamp `data-density` on detached preview/timeline/inspector window roots so they honour the user's preference instead of falling back to comfortable; `ExportSheet`'s inner content spacing does not follow density (only its shell/edge inset does).
 
 **Overlay vocabulary (settled in the item-9 review — bind on every future surface):** spec E's *Drawers* are the in-stratum, co-interactive surfaces (node library, Takes, asset strip). None are built. They live at `--z-drawer` (10), never block, and correctly sit beneath the lineage thread. Everything transient, single-active and dismiss-me — command palette, export sheet, settings sheet, status drawers — is an *Overlay*: `aria-modal="true"`, focus-trapped, `--z-overlay` (50), Escape owned by the surface with topmost-first ordering by DOM position. **Trap and ARIA declaration must always agree**, and an `aria-modal` surface must never be painted over by the decorative thread. J.7's "nothing blocks" governs the export *process*, not the ARIA attribute.
 
