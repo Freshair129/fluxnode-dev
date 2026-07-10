@@ -54,6 +54,11 @@ export type ShortcutCommand =
   | 'selection.delete'
   | 'selection.duplicate'
   | 'lineage.followThread'
+  | 'global.openCommandPalette'
+  | 'workspace.focusHorizonSplitter'
+  | 'workspace.focusSky'
+  | 'workspace.focusStage'
+  | 'workspace.focusGround'
 
 export interface ShortcutDefinition {
   command: ShortcutCommand
@@ -115,6 +120,16 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   { command: 'selection.delete', label: 'Delete Current Selection', when: 'global' },
   { command: 'selection.duplicate', label: 'Duplicate Current Selection', when: 'global' },
   { command: 'lineage.followThread', label: 'Follow Lineage Thread', when: 'global' },
+  { command: 'global.openCommandPalette', label: 'Open Command Palette', when: 'global' },
+  // MERIDIAN item 6, carried note from item 4 (re-deferred from item 4 since no palette existed
+  // yet): K.1's "palette verbs are the keyboard alternative" for a keyboard-only user who can't
+  // enter the tab ring while focus rests on body (Tab there flips the horizon instead — see
+  // StrataShell's isTabFlipRestingTarget). These four give an explicit, discoverable way to jump
+  // focus onto the splitter or into a stratum without ever touching Tab.
+  { command: 'workspace.focusHorizonSplitter', label: 'Focus Horizon Splitter', when: 'global' },
+  { command: 'workspace.focusSky', label: 'Focus Sky (Graph)', when: 'global' },
+  { command: 'workspace.focusStage', label: 'Focus Stage Row', when: 'global' },
+  { command: 'workspace.focusGround', label: 'Focus Ground (Timeline)', when: 'global' },
 ]
 
 export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
@@ -185,6 +200,14 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   // of which stratum has DOM focus; gating it by stratumScope would block the exact cross-strata
   // jumps that make it useful.
   { command: 'lineage.followThread', key: 'f', modifiers: [], when: 'global' },
+  // Spec H "Global: Ctrl+K palette". MERIDIAN item 6.
+  { command: 'global.openCommandPalette', key: 'k', modifiers: ['Ctrl'], when: 'global' },
+  // MERIDIAN item 6 carried note (K.1): 'workspace.focusHorizonSplitter' / 'focusSky' /
+  // 'focusStage' / 'focusGround' deliberately ship with NO default key binding, mirroring
+  // 'global.toggleView' above. They are the palette-only (Ctrl+K) keyboard alternative for
+  // entering the tab ring when focus rests on body — giving them their own bare-key bindings
+  // would just add four more entries competing for scarce single-key slots. Still remappable
+  // from Settings like every other command.
 ]
 
 export function normalizeBindingKey(value: string) {

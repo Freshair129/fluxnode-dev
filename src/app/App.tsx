@@ -43,6 +43,9 @@ const WorkspaceSharingModal = lazy(() =>
 const ShortcutsCheatSheet = lazy(() =>
   import('../features/shortcuts/ShortcutsCheatSheet').then((module) => ({ default: module.ShortcutsCheatSheet })),
 )
+const CommandPalette = lazy(() =>
+  import('../features/commands/CommandPalette').then((module) => ({ default: module.CommandPalette })),
+)
 
 export default function App() {
   const detachedPanel = useMemo(() => getDetachedPanelFromLocation(), [])
@@ -88,8 +91,12 @@ export default function App() {
   const lastAppliedPanelTransactionRef = useRef<string | null>(null)
   const previousActiveViewRef = useRef(activeView)
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false)
+  const [showCommandPalette, setShowCommandPalette] = useState(false)
 
-  useKeyboardShortcuts({ onOpenShortcutsHelp: () => setShowShortcutsHelp((current) => !current) })
+  useKeyboardShortcuts({
+    onOpenShortcutsHelp: () => setShowShortcutsHelp((current) => !current),
+    onOpenCommandPalette: () => setShowCommandPalette(true),
+  })
 
   // Map timeline clips with an audio stream onto the decoupled audio-engine
   // input shape, then drive Web Audio playback in sync with the playhead.
@@ -584,6 +591,16 @@ export default function App() {
           <ErrorBoundary label="Shortcuts overlay" compact>
             <Suspense fallback={<ModalFallback label="Loading shortcuts overlay" />}>
               <ShortcutsCheatSheet open={showShortcutsHelp} onClose={() => setShowShortcutsHelp(false)} />
+            </Suspense>
+          </ErrorBoundary>
+        ) : null}
+        {showCommandPalette ? (
+          <ErrorBoundary label="Command palette" compact>
+            <Suspense fallback={<ModalFallback label="Loading command palette" />}>
+              <CommandPalette
+                onClose={() => setShowCommandPalette(false)}
+                onOpenShortcutsHelp={() => setShowShortcutsHelp((current) => !current)}
+              />
             </Suspense>
           </ErrorBoundary>
         ) : null}

@@ -26,6 +26,7 @@ import { PromptDialog } from '../../components/PromptDialog'
 import { Button } from '../../components/Button'
 import { Badge as SharedBadge } from '../../components/Badge'
 import { ContextMenu, ContextMenuItem, ContextMenuDivider } from '../../components/ContextMenu'
+import { CommandMenuItem } from '../commands/CommandMenuItem'
 
 export function TimelineView() {
   const timeline = useProjectStore((state) => state.project.timeline)
@@ -864,9 +865,14 @@ export function TimelineView() {
         >
           {contextMenu.type === 'clip' ? (
             <div className="space-y-1">
-              <ContextAction label="Split at Playhead" onClick={runContextAction(splitSelectedClip)} />
-              <ContextAction label="Delete Clip" onClick={runContextAction(deleteSelected)} tone="danger" />
-              <ContextAction label="Duplicate Clip" onClick={runContextAction(duplicateSelected)} />
+              {/* MERIDIAN item 6: these three rows are registry-backed (spec H "Context menu …
+                  generated from the command registry, shortcut shown on every row") — title,
+                  disabled state, and the inline Kbd hint all come from COMMAND_REGISTRY instead
+                  of being hand-typed here, so they can't drift out of sync with the palette or
+                  the keyboard binding. */}
+              <CommandMenuItem commandId="timeline.split" onActivated={() => setContextMenu(null)} />
+              <CommandMenuItem commandId="selection.delete" tone="danger" onActivated={() => setContextMenu(null)} />
+              <CommandMenuItem commandId="selection.duplicate" onActivated={() => setContextMenu(null)} />
               <ContextDivider />
               {[0.25, 0.5, 1, 2, 4].map((speed) => (
                 <ContextAction

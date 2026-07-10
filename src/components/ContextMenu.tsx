@@ -33,7 +33,8 @@ export function ContextMenuItem({
   tone = 'default',
   disabled = false,
 }: {
-  label: string
+  /** Usually plain text; `services/commands`' `CommandMenuItem` passes a title+`Kbd` fragment instead so every registry-backed row can show its shortcut inline (spec H). */
+  label: ReactNode
   onClick: () => void
   tone?: 'default' | 'danger'
   disabled?: boolean
