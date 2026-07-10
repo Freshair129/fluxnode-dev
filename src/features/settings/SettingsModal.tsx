@@ -26,6 +26,7 @@ export function SettingsModal() {
   const exportDefaults = useProjectStore((state) => state.project.output.exportDefaults)
   const runtimeHealth = useProjectStore((state) => state.runtimeHealth)
   const setDefaultProjectDirectory = useProjectStore((state) => state.setDefaultProjectDirectory)
+  const setDensityMode = useProjectStore((state) => state.setDensityMode)
   const setUpdateChannel = useProjectStore((state) => state.setUpdateChannel)
   const setUpdateManifestUrl = useProjectStore((state) => state.setUpdateManifestUrl)
   const setExportOutputDirectory = useProjectStore((state) => state.setExportOutputDirectory)
@@ -120,15 +121,21 @@ export function SettingsModal() {
     return () => window.removeEventListener('keydown', handleCapture)
   }, [editingCommand, preferences.keybindings, setKeybinding])
 
+  // Item 7 (found while adding the Density control below, which pushed this modal's content past
+  // the viewport height): same latent defect e2e/README.md documents for WelcomeModal ("bug A")
+  // — `items-center` on a taller-than-viewport backdrop clips overflow from BOTH ends, so content
+  // past the fold becomes genuinely unreachable, not just scrolled off. Mirrors that
+  // already-reviewed fix exactly: the backdrop scrolls (`overflow-y-auto`) and the card centers
+  // with `my-auto h-fit` instead of `items-center`.
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm">
+    <div className="absolute inset-0 z-30 flex justify-center overflow-y-auto bg-black/65 p-4 backdrop-blur-sm">
       <section
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-modal-title"
         tabIndex={-1}
-        className="w-full max-w-6xl rounded-[2rem] border border-white/10 bg-[#101112] p-6 shadow-[0_30px_120px_rgba(0,0,0,0.55)] outline-none"
+        className="my-auto h-fit w-full max-w-6xl rounded-[2rem] border border-white/10 bg-[#101112] p-6 shadow-[0_30px_120px_rgba(0,0,0,0.55)] outline-none"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -179,6 +186,43 @@ export function SettingsModal() {
                     className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white"
                   >
                     Clear
+                  </button>
+                </div>
+              </div>
+              {/* MERIDIAN item 7 (spec G/L.7): density is an app-level preference (decision B —
+                  follows the user across projects, persisted the same way as keybindings), so it
+                  lives in this Workspace section alongside the other app-level preferences, not
+                  per-project settings. Also reachable from the command palette (Ctrl+K "Toggle
+                  Density") — see `global.toggleDensity` in `services/commands/command-registry.ts`. */}
+              <div className="mt-4 rounded-[1.25rem] border border-white/8 bg-[#111214] p-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-[#7f8691]">Density</p>
+                <p className="mt-3 text-sm leading-6 text-[#9ca3af]">
+                  Compact tightens row heights, gutters, and the stage row. Font sizes never change.
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="UI density">
+                  <button
+                    type="button"
+                    onClick={() => void setDensityMode('comfortable')}
+                    aria-pressed={preferences.density === 'comfortable'}
+                    className={`rounded-full px-4 py-2 text-sm ${
+                      preferences.density === 'comfortable'
+                        ? 'bg-[#e0ff00] font-semibold text-black'
+                        : 'border border-white/10 bg-white/5 text-white'
+                    }`}
+                  >
+                    Comfortable
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void setDensityMode('compact')}
+                    aria-pressed={preferences.density === 'compact'}
+                    className={`rounded-full px-4 py-2 text-sm ${
+                      preferences.density === 'compact'
+                        ? 'bg-[#e0ff00] font-semibold text-black'
+                        : 'border border-white/10 bg-white/5 text-white'
+                    }`}
+                  >
+                    Compact
                   </button>
                 </div>
               </div>

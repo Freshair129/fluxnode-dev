@@ -184,6 +184,38 @@ select:focus-visible,
   animation: fluxnode-invalid-port-shake 320ms ease-out;
 }
 
+/*
+ * MERIDIAN item 7 (density modes — spec G, L.7). `--meridian-*` spacing custom properties,
+ * switched by the `data-density` attribute App.tsx stamps on the app shell root
+ * (`[data-meridian-app-shell]`) and StrataShell mirrors on `[data-meridian-shell]` (see those
+ * files' comments for why both). Comfortable is the UNSCOPED default (plain `:root`) so anything
+ * outside a `[data-density]` ancestor — a detached preview/timeline/inspector window, which never
+ * mounts the app shell root — still resolves sane values instead of an unset custom property.
+ *
+ * Per the item-7 brief's scope limit: this block ONLY adds density-related custom properties and
+ * `[data-density="…"]` rules. No existing `--color-*`/`--radius-*`/`--dur-*`/`--z-*`/etc. token
+ * above is modified, renamed, or removed. Nothing here ever touches font-size or line-height —
+ * spec G is explicit: "Font sizes never change with density." That invariant is enforced by the
+ * font-invariance test in e2e/07-density.spec.ts, which compares real computed font sizes across
+ * both modes while independently proving the density switch actually took effect.
+ */
+:root {
+  /* Spec G: "rows 28->24px". Status bar height, ledger/inspector header rows, and (by way of
+     --meridian-gutter below) menu/palette row padding. */
+  --meridian-row-h: 28px;
+  /* Spec G: "spacing gutters 8->6px". Panel gutters, JobChip padding, menu/palette row padding,
+     drawer edge inset. */
+  --meridian-gutter: 8px;
+  /* Spec G: "timeline track height 56->44px". */
+  --meridian-track-h: 56px;
+}
+
+[data-density='compact'] {
+  --meridian-row-h: 24px;
+  --meridian-gutter: 6px;
+  --meridian-track-h: 44px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

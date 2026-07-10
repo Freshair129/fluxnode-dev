@@ -47,8 +47,10 @@ describe('COMMAND_REGISTRY: shape and coverage', () => {
 
     // MERIDIAN item 9 added five new commands, all reach 'direct' (each has a status bar segment as
     // its direct-manipulation equivalent): global.openExportSheet + the four status.open*Drawer
-    // verbs (round-2 advisory 5).
-    expect(counts).toEqual({ direct: 44, menu: 9, accelerator: 10 })
+    // verbs (round-2 advisory 5). MERIDIAN item 7 added one more 'direct' command:
+    // global.toggleDensity (Settings > Workspace "Density" buttons are its direct-manipulation
+    // equivalent).
+    expect(counts).toEqual({ direct: 45, menu: 9, accelerator: 10 })
     expect(counts.direct + counts.menu + counts.accelerator).toBe(COMMAND_REGISTRY.length)
   })
 

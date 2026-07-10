@@ -18,6 +18,19 @@ const TONE_CLASS: Record<StatusBarTone, string> = {
  * "status bar 28px") rather than a hardcoded Tailwind height, per the item-9 brief ("use a CSS var
  * for its height, like `--meridian-stage-h`") so item 7 (density modes) can retarget it later
  * without touching this component's markup.
+ *
+ * Item 7: that retarget is `--meridian-statusbar-h: var(--meridian-row-h)` — spec G's row height
+ * (28px comfortable / 24px compact) IS the status bar height, so this component no longer hardcodes
+ * a literal at all; it just aliases onto the shared density-driven row-height variable set in
+ * `src/styles/index.css`'s `[data-density]` rules.
+ *
+ * Item 7 K.5 fix: the hairline used to be a real `border`, which is INCLUDED in the border-box
+ * height and ate 2px (1px top + 1px bottom) off the segments' available height via `items-stretch`
+ * — invisible at 28px (26px remaining, still >=24) but pushed segments to 22px at the 24px compact
+ * row height, under spec K.5's 24x24 floor (caught by this item's own hit-target e2e guard). Fixed
+ * by painting the hairline as an inset box-shadow instead of a `border` — visually identical, but
+ * a shadow is purely decorative and never subtracts from the layout box, so segments now stretch
+ * to the FULL --meridian-statusbar-h in both densities.
  */
 export function StatusBar({ onActivate, className = '' }: { onActivate: (action: StatusBarAction) => void; className?: string }) {
   const computeMode = useProjectStore((state) => state.project.workflow.computeMode)
@@ -52,8 +65,8 @@ export function StatusBar({ onActivate, className = '' }: { onActivate: (action:
     <footer
       aria-label="Status bar"
       data-meridian-statusbar
-      style={{ '--meridian-statusbar-h': '28px', height: 'var(--meridian-statusbar-h)' } as React.CSSProperties}
-      className={`flex items-stretch gap-px overflow-hidden rounded-full border border-hairline bg-surface-2 px-1 ${className}`}
+      style={{ '--meridian-statusbar-h': 'var(--meridian-row-h)', height: 'var(--meridian-statusbar-h)' } as React.CSSProperties}
+      className={`flex items-stretch gap-px overflow-hidden rounded-full bg-surface-2 px-1 shadow-[inset_0_0_0_1px_var(--color-hairline)] ${className}`}
     >
       {segments.map((segment) => (
         <button

@@ -34,6 +34,7 @@ import { quitApplication, toggleAppFullscreen } from '../ipc/app-shell'
 import { useProjectStore } from '../../store/project-store'
 import { followLineageThread } from '../../features/workspace/followLineageThread'
 import { focusShellRegion, resolveShellFocusTargets } from '../../features/workspace/shellFocusTargets'
+import { toggleDensityMode } from '../../domain/project/density'
 
 type StoreState = ReturnType<typeof useProjectStore.getState>
 
@@ -421,6 +422,11 @@ const COMMAND_BEHAVIORS: Record<ShortcutCommand, CommandBehavior> = {
     reach: 'direct',
     reachNote: 'Clicking any control inside the ground stratum focuses it the same way this verb does.',
     run: () => focusShellRegion(resolveShellFocusTargets().ground),
+  },
+  'global.toggleDensity': {
+    reach: 'direct',
+    reachNote: 'Settings > Workspace "Density" Comfortable/Compact buttons set the same preference directly.',
+    run: (ctx) => void ctx.store.setDensityMode(toggleDensityMode(ctx.store.preferences.density)),
   },
 }
 

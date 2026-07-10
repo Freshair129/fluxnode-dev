@@ -13,6 +13,7 @@ import {
   HORIZON_ANIMATION_MS,
   HORIZON_NUDGE_STEP,
 } from '../../domain/project/horizon'
+import { resolveStageRowHeightPx } from '../../domain/project/density'
 import { useProjectStore } from '../../store/project-store'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { PanelFallback } from '../../app/App'
@@ -33,19 +34,24 @@ const TimelineView = lazy(() =>
 const COMPACT_HEIGHT_BREAKPOINT = 720
 const COMPACT_PEEK_STRIP_PX = 32
 
-/** Spec F.1: stage row height is fixed per density mode (comfortable 248px). Exposed as a CSS
- * var (`--meridian-stage-h`) rather than a bare literal so item 7 (density modes) has one place
- * to retarget it instead of hunting through the grid template string. */
-const STAGE_ROW_HEIGHT_PX = 248
 /**
  * Judgment call (item 3 brief: "in compact mode the stage row may shrink to transport-only
  * height — your judgment, note it"). Below COMPACT_HEIGHT_BREAKPOINT the stage row shrinks to
- * this much shorter band instead of staying at STAGE_ROW_HEIGHT_PX. There isn't a dedicated
+ * this much shorter band instead of staying at its density-mode height. There isn't a dedicated
  * "transport-only" sub-layout to switch to yet — PreviewPanel's actual transport controls
  * (play/pause/JKL) live in TimelineView's toolbar, not in PreviewPanel itself (see item-3
  * report) — so this just tightens the row and leans on the embedded PreviewPanel's own internal
  * scroll (`PreviewPanelProps.embedded`) to keep everything reachable. A real transport-only
  * compact layout is a reasonable follow-up once a standalone TransportBar exists.
+ *
+ * Item 7 (density modes): this RESPONSIVE height wins over the density-mode stage row height
+ * (248/204px — `domain/project/density.ts`'s `DENSITY_STAGE_ROW_HEIGHT_PX`) whenever the window
+ * is short, regardless of the user's comfortable/compact preference — see
+ * `resolveStageRowHeightPx`'s doc comment for why the two are orthogonal and how they combine.
+ * `isCompactHeight` below is that RESPONSIVE condition (window-height-driven); it is UNRELATED to
+ * `preferences.density` (the user's comfortable/compact spacing preference). Naming keeps them
+ * apart on purpose: `COMPACT_HEIGHT_*` for this file's pre-existing responsive mode, `DENSITY_*`
+ * for the new user preference — never conflated.
  */
 const COMPACT_HEIGHT_STAGE_ROW_PX = 96
 
@@ -126,6 +132,9 @@ interface StrataShellProps {
 export function StrataShell({ className }: StrataShellProps) {
   const skyRatio = useProjectStore((state) => state.project.meta.horizonRatio)
   const setHorizonRatio = useProjectStore((state) => state.setHorizonRatio)
+  // Item 7: comfortable/compact UI density, an app-level preference (not project state — see
+  // AppPreferences.density's doc comment). Orthogonal to isCompactHeight below.
+  const densityMode = useProjectStore((state) => state.preferences.density)
 
   const shellRef = useRef<HTMLDivElement | null>(null)
   const splitterRef = useRef<HTMLDivElement | null>(null)
@@ -470,7 +479,7 @@ export function StrataShell({ className }: StrataShellProps) {
     // fr units, NOT percentages — same contract as applyHorizonRatioToDom (review BLOCKING-2).
     '--meridian-sky': horizonTrackSize(skyRatio),
     '--meridian-ground': horizonTrackSize(1 - skyRatio),
-    '--meridian-stage-h': `${isCompactHeight ? COMPACT_HEIGHT_STAGE_ROW_PX : STAGE_ROW_HEIGHT_PX}px`,
+    '--meridian-stage-h': `${resolveStageRowHeightPx(densityMode, isCompactHeight, COMPACT_HEIGHT_STAGE_ROW_PX)}px`,
   } as CSSProperties
 
   const skyCollapsed = isCompactHeight && compactEmphasis === 'timeline'
@@ -480,6 +489,13 @@ export function StrataShell({ className }: StrataShellProps) {
     <div
       ref={shellRef}
       data-meridian-shell
+      // Spec L.7: "data-density attribute on the shell". Also set higher up, on the app shell
+      // root in App.tsx (`data-meridian-app-shell`) — see that file's comment for why: several
+      // decision-D surfaces (drawers, export sheet, command palette) render as SIBLINGS of this
+      // div, not descendants of it, so a `[data-density]`-scoped CSS custom property set only
+      // here would never cascade to them. Setting it in both places satisfies L.7's literal text
+      // AND decision D's requirement that those surfaces respond too.
+      data-density={densityMode}
       className={`grid ${className ?? ''}`}
       style={shellStyle}
     >
@@ -504,7 +520,15 @@ export function StrataShell({ className }: StrataShellProps) {
         aria-valuemin={Math.round(HORIZON_RATIO_MIN * 100)}
         aria-valuemax={Math.round(HORIZON_RATIO_MAX * 100)}
         tabIndex={0}
-        className={`group relative z-[var(--z-sticky)] flex h-2 shrink-0 items-center justify-center ${
+        // Item 7 (spec K.5, "min hit target 24x24 even compact"): this focusable role="separator"
+        // was previously only h-2 (8px) tall — a pre-existing K.5 gap in BOTH densities (found
+        // while writing item 7's hit-target e2e guard, which explicitly checks the splitter).
+        // Bumped to a fixed 24px (MIN_HIT_TARGET_PX) — NOT density-scaled, since K.5's floor is
+        // constant across comfortable/compact, unlike spec G's row-height/gutter/track-height
+        // table. The visible hairline child stays a static 1px, centered inside this taller box,
+        // so nothing about the drag/keyboard mechanics or the visual line changes — only the
+        // hit/hover area grows.
+        className={`group relative z-[var(--z-sticky)] flex h-6 shrink-0 items-center justify-center ${
           isCompactHeight ? 'cursor-not-allowed' : 'cursor-row-resize'
         }`}
         onPointerDown={handlePointerDown}

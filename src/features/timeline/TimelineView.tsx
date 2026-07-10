@@ -1134,7 +1134,13 @@ function Filmstrip({
         <span>Filmstrip</span>
         <span>{clipDuration.toFixed(1)}s</span>
       </div>
-      <div className="flex h-14 gap-1 overflow-hidden rounded-xl border border-white/8 bg-[#0f1012]">
+      {/* Item 7 (density modes, spec G "timeline track 56->44px"): this filmstrip strip is the
+          per-clip "track" content this codebase actually renders at a fixed height (TimelineView
+          is a stacked-card layout, not literal horizontal lanes — see the item-7 report's note on
+          why `track.height` (60/84/112, the pre-existing per-track USER setting cycled by
+          "Height"/context-menu actions) is a different, untouched concept). h-14 was already
+          exactly 56px, so this is a zero-visual-diff swap to the density var in comfortable. */}
+      <div className="flex h-[var(--meridian-track-h)] gap-1 overflow-hidden rounded-xl border border-white/8 bg-[#0f1012]">
         {thumbnailPath
           ? Array.from({ length: cellCount }, (_, index) => (
               <div key={index} className="h-full flex-1 overflow-hidden">

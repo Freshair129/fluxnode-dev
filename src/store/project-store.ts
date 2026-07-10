@@ -27,6 +27,7 @@ import {
 import { nextId } from '../domain/id'
 import { createDefaultProject, createTemplateProject, type ProjectTemplateId } from '../domain/project/defaults'
 import { activeViewForRatio, clampHorizonRatio, DEFAULT_HORIZON_RATIO, defaultRatioForView } from '../domain/project/horizon'
+import { DEFAULT_DENSITY_MODE, normalizeDensityMode, type DensityMode } from '../domain/project/density'
 import { validateProject, type ProjectValidationIssue } from '../domain/project/validators'
 import type {
   AppPreferences,
@@ -152,6 +153,9 @@ interface ProjectStoreState {
   setDefaultProjectDirectory: (path: string | null) => Promise<void>
   setUpdateChannel: (channel: string) => Promise<void>
   setUpdateManifestUrl: (url: string | null) => Promise<void>
+  /** MERIDIAN item 7: comfortable/compact UI density, an app-level preference persisted the same
+   *  way as `keybindings` (see `services/persistence/app-preferences.ts`), not a project field. */
+  setDensityMode: (mode: DensityMode) => Promise<void>
   enableWorkspaceSharing: () => void
   disableWorkspaceSharing: () => void
   setWorkspaceAccessLevel: (accessLevel: WorkspaceSharingState['accessLevel']) => void
@@ -2547,6 +2551,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     updateChannel: 'stable',
     updateManifestUrl: null,
     keybindings: DEFAULT_KEYBINDINGS,
+    density: DEFAULT_DENSITY_MODE,
   },
   history: createHistoryState(),
   recentProjects: [],
@@ -2938,6 +2943,20 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       ui: {
         ...state.ui,
         statusMessage: nextPreferences.updateManifestUrl ? 'Update manifest URL updated' : 'Update manifest URL cleared',
+      },
+    }))
+  },
+  setDensityMode: async (mode) => {
+    const nextPreferences = {
+      ...get().preferences,
+      density: normalizeDensityMode(mode),
+    }
+    await saveAppPreferences(nextPreferences)
+    set((state) => ({
+      preferences: nextPreferences,
+      ui: {
+        ...state.ui,
+        statusMessage: `Density set to ${nextPreferences.density}`,
       },
     }))
   },

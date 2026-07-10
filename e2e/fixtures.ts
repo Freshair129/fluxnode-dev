@@ -149,6 +149,37 @@ export function statusBarLocator(page: Page) {
   return page.locator('[data-meridian-statusbar]')
 }
 
+/** The job ledger stage-row rail (MERIDIAN item 3/4), expanded by default. */
+export function jobLedgerLocator(page: Page) {
+  return page.locator('[data-meridian-ledger]')
+}
+
+/** The context inspector stage-row rail (MERIDIAN item 3), expanded by default. */
+export function inspectorLocator(page: Page) {
+  return page.locator('[data-meridian-inspector]')
+}
+
+/**
+ * MERIDIAN item 7 (density modes): sets `preferences.density` via the real Settings UI (Header's
+ * "Open settings" icon button -> Workspace section's "UI density" button group), then closes
+ * Settings again with Escape, mirroring how a real user would toggle it (decision C: reachable
+ * from Settings AND the command palette — Ctrl+K can't be driven in headed Chrome, see
+ * e2e/README.md, so this suite exercises the Settings path).
+ */
+export async function setDensityMode(page: Page, mode: 'comfortable' | 'compact'): Promise<void> {
+  await page.getByRole('button', { name: 'Open settings' }).click()
+  const dialog = page.getByRole('dialog', { name: /App preferences/i })
+  await expect(dialog).toBeVisible()
+
+  const group = page.getByRole('group', { name: 'UI density' })
+  const label = mode === 'comfortable' ? 'Comfortable' : 'Compact'
+  await group.getByRole('button', { name: label }).click()
+  await expect(group.getByRole('button', { name: label })).toHaveAttribute('aria-pressed', 'true')
+
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+}
+
 /**
  * Opens the `Ctrl+E` export sheet (item 9's relocation of `SystemPanels.tsx`'s "Export queue" +
  * "Export preset" sections) via the status bar's "jobs" segment — its real, always-visible

@@ -52,7 +52,9 @@ export function StageInspector() {
       style={{ width: INSPECTOR_WIDTH_PX }}
       className="flex h-full shrink-0 flex-col border-l border-hairline bg-surface-2"
     >
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline px-3 py-2">
+      {/* Item 7: header row's vertical padding follows --meridian-gutter (spec G 8px/6px), same
+          treatment as JobLedger's header, so both stage-row rails tighten together in compact. */}
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline px-3 py-[var(--meridian-gutter)]">
         <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">Inspector</p>
         <IconButton
           label="Collapse inspector"

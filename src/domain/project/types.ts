@@ -1,4 +1,5 @@
 import type { Patch } from 'immer'
+import type { DensityMode } from './density'
 
 export interface FluxNodeProject {
   version: string
@@ -761,6 +762,10 @@ export interface AppPreferences {
   updateChannel: string
   updateManifestUrl: string | null
   keybindings: KeyBinding[]
+  /** MERIDIAN item 7 (spec G/L.7): comfortable/compact UI density. An app-level preference (like
+   *  `keybindings` above), not a project property — it follows the user across projects rather
+   *  than living in `project.meta` alongside `horizonRatio`/`stageRowCollapse`. */
+  density: DensityMode
 }
 
 export type ShortcutScope = 'global' | 'timeline' | 'workflow'

@@ -30,7 +30,11 @@ export interface JobChipProps {
   canReveal: boolean
 }
 
-const CHIP_BASE_CLASS = 'rounded-md border p-2.5 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out-quart)]'
+// Item 7 (density modes): padding reads the shared --meridian-gutter var (spec G: 8px comfortable
+// / 6px compact) instead of a fixed Tailwind p-2.5 (10px), so the whole job ledger tightens in
+// compact density without a conditional class here — spec L.7 "spacing via CSS variables, not
+// conditional classes".
+const CHIP_BASE_CLASS = 'rounded-md border p-[var(--meridian-gutter)] transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out-quart)]'
 
 const TONE_CHIP_CLASS: Record<'neutral' | 'accent' | 'danger' | 'success', string> = {
   neutral: 'border-white/8 bg-black/20',

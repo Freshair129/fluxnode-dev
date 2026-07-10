@@ -39,7 +39,9 @@ export function PaletteResultRow({ id, result, active, onSelect, onPointerMove }
           onSelect()
         }
       }}
-      className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm transition ${
+      // Item 7 (density modes): row vertical padding follows --meridian-gutter (spec G 8px/6px),
+      // same treatment as ContextMenuItem, so the palette's result list tightens in compact.
+      className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl px-3 py-[var(--meridian-gutter)] text-sm transition ${
         result.disabled ? 'cursor-not-allowed opacity-45' : ''
       } ${active && !result.disabled ? 'bg-accent/10 text-accent-soft' : 'text-white'}`}
     >

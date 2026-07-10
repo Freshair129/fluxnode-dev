@@ -64,6 +64,7 @@ export type ShortcutCommand =
   | 'workspace.focusSky'
   | 'workspace.focusStage'
   | 'workspace.focusGround'
+  | 'global.toggleDensity'
 
 export interface ShortcutDefinition {
   command: ShortcutCommand
@@ -144,6 +145,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   { command: 'workspace.focusSky', label: 'Focus Sky (Graph)', when: 'global' },
   { command: 'workspace.focusStage', label: 'Focus Stage Row', when: 'global' },
   { command: 'workspace.focusGround', label: 'Focus Ground (Timeline)', when: 'global' },
+  // MERIDIAN item 7 (spec G/L.7): comfortable/compact UI density, reachable from Settings AND the
+  // palette (decision C). No default key binding — like `global.toggleView` and the
+  // `workspace.focus*` verbs above, it ships palette/Settings-only to avoid competing for scarce
+  // single-key slots; still remappable from Settings.
+  { command: 'global.toggleDensity', label: 'Toggle Density (Comfortable / Compact)', when: 'global' },
 ]
 
 export const DEFAULT_KEYBINDINGS: KeyBinding[] = [

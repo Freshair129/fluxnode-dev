@@ -145,7 +145,9 @@ export function JobLedger() {
       style={{ width: LEDGER_WIDTH_PX }}
       className="flex h-full shrink-0 flex-col border-r border-hairline bg-surface-2"
     >
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline px-3 py-2">
+      {/* Item 7: header row's vertical padding follows --meridian-gutter (spec G 8px/6px) so the
+          ledger header tightens in compact density like the rest of the stage row. */}
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline px-3 py-[var(--meridian-gutter)]">
         <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">Job Ledger</p>
         <IconButton
           label="Collapse job ledger"
@@ -161,7 +163,7 @@ export function JobLedger() {
         {visibleJobs.length === 0 ? (
           <p className="text-xs leading-5 text-text-secondary">No jobs. G regenerates the selected node.</p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-[var(--meridian-gutter)]">
             {visibleJobs.map((job) => (
               <JobChip
                 key={job.id}

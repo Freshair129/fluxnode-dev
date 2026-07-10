@@ -94,7 +94,12 @@ export function DrawerShell({
           these surfaces never process-block; the suppression tests literally click the sky while a
           sheet is open). Dismissal is via Escape / the close button, not a backdrop click. */}
       <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-[var(--z-overlay-backdrop)] bg-black/40" />
-      <div className="fixed inset-y-0 right-0 z-[var(--z-overlay)] flex justify-end p-3" data-meridian-drawer-root>
+      {/* Item 7 (density modes): edge inset from the viewport follows --meridian-gutter (spec G
+          8px/6px) instead of a fixed p-3 (12px), so the export sheet/drawers sit closer to the
+          edge in compact — same var every other decision-D surface reads, cascading down from
+          the `[data-density]` attribute on the app shell root (App.tsx) since this overlay
+          renders as a SIBLING of StrataShell, not a descendant of it. */}
+      <div className="fixed inset-y-0 right-0 z-[var(--z-overlay)] flex justify-end p-[var(--meridian-gutter)]" data-meridian-drawer-root>
         <div
           ref={containerRef}
           role="dialog"
