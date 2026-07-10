@@ -1622,10 +1622,21 @@ export function SystemPanels() {
       setRenderProofRunning(false)
     }
   }
+  // `activeInspectorJobId` is the inspector's only open signal. It must not fall back to "the last
+  // job with an errorCategory": this panel is `aria-modal`, and spec J.7 keeps exports out of modal
+  // locks — a fallback would both pop it open on every failure and make its own Close button a
+  // no-op, since setting the id back to null would re-derive the same job on the next render.
   const inspectorJob =
-    queue.find((job) => job.id === activeInspectorJobId) ??
-    [...queue].reverse().find((job) => job.errorCategory !== null) ??
-    null
+    activeInspectorJobId === null
+      ? null
+      : (queue.find((job) => job.id === activeInspectorJobId) ?? null)
+
+  // Quota app-errors carry the failing job's id as `contextId` (project-store.ts), so the same
+  // open signal addresses both halves of the dialog.
+  const inspectorQuotaError =
+    activeInspectorJobId === null
+      ? null
+      : (quotaErrors.find((error) => error.contextId === activeInspectorJobId) ?? null)
 
   return (
     <>
@@ -2514,10 +2525,10 @@ export function SystemPanels() {
         </button>
       </section>
       </aside>
-      {(quotaErrors.length > 0 || inspectorJob) ? (
+      {inspectorJob || inspectorQuotaError ? (
         <FailureInspectorModal
           job={inspectorJob}
-          quotaError={quotaErrors[quotaErrors.length - 1] ?? null}
+          quotaError={inspectorQuotaError}
           onClose={() => setActiveInspectorJobId(null)}
           onRetry={(jobId) => void retryFailedRender(jobId)}
           onResolveQuota={(errorId) => void performAppErrorAction(errorId)}
