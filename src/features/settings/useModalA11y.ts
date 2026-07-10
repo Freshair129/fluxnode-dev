@@ -57,17 +57,17 @@ export function useModalA11y<T extends HTMLElement>(active = true) {
 
       const first = focusable[0]
       const last = focusable[focusable.length - 1]
-      const active = document.activeElement as HTMLElement | null
+      const focused = document.activeElement as HTMLElement | null
 
       if (event.shiftKey) {
-        if (active === first || !container?.contains(active)) {
+        if (focused === first || !container?.contains(focused)) {
           event.preventDefault()
           last.focus()
         }
         return
       }
 
-      if (active === last || !container?.contains(active)) {
+      if (focused === last || !container?.contains(focused)) {
         event.preventDefault()
         first.focus()
       }

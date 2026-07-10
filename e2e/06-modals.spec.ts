@@ -130,4 +130,56 @@ test.describe('FailureInspectorModal open/close contract (bug B)', () => {
     await page.waitForTimeout(500)
     await expect(inspector).toHaveCount(0)
   })
+
+  // The inspector shared WelcomeModal's old backdrop shape (`items-center`, no scroll container),
+  // so it carried the same latent defect — though it strands a DIFFERENT element. Measured under
+  // the old markup at this viewport: the close button sits fine at y≈15 (unlike WelcomeModal's
+  // y≈-157, which came from the document focus-scroll that `preventScroll: true` now prevents).
+  // What breaks here is the other end: the card's card grows with the failure's error text and
+  // frame table, and once it outgrows the viewport its FOOTER actions ("Retry from failed frame")
+  // fall below the fold with nothing able to scroll to them. So the load-bearing assertion below
+  // is bottom-of-card reachability, not the header's y. A short viewport forces the overflow
+  // deterministically, without needing a pathologically long error string.
+  test('stays fully reachable at a viewport too short to hold its card', async ({ freshPage: page }) => {
+    await page.setViewportSize({ width: 1440, height: 420 })
+
+    await page.locator(`${EXPORT_QUEUE} button`, { hasText: 'Queue Render' }).click()
+    await page.locator(`${EXPORT_QUEUE} button`, { hasText: 'Simulate Failure' }).click()
+    await page.locator(`${EXPORT_QUEUE} button`, { hasText: 'Inspect Failure' }).click()
+
+    const inspector = page.getByRole('dialog', { name: /inspector/i })
+    await expect(inspector).toBeVisible()
+
+    // Precondition: the card really does overflow at this height, so this isn't a vacuous pass.
+    const backdrop = inspector.locator('xpath=..')
+    const { cardHeight, backdropHeight } = await inspector.evaluate((card) => ({
+      cardHeight: card.getBoundingClientRect().height,
+      backdropHeight: (card.parentElement as HTMLElement).clientHeight,
+    }))
+    expect(cardHeight, 'this test is meaningless unless the card overflows').toBeGreaterThan(backdropHeight)
+
+    // THE regression assertion: the footer action below the fold must be reachable, and reaching it
+    // must scroll the BACKDROP — the modal's own scroll container. Under the old `items-center`
+    // markup the backdrop's scrollTop stays pinned at 0 (verified: it's what fails first there),
+    // because an overflowing `align-items: center` item spills outside the scroll range entirely.
+    // Anything that appears to "reach" the footer then does so by scrolling the document out from
+    // under a `fixed` modal — the same class of pathology as bug A, not a working scroll.
+    const retryButton = page.getByRole('button', { name: /Retry from failed frame/i })
+    await retryButton.scrollIntoViewIfNeeded()
+    await expect(retryButton).toBeInViewport()
+    expect(
+      await backdrop.evaluate((el) => el.scrollTop),
+      'the backdrop, not the document, is the scroll container',
+    ).toBeGreaterThan(0)
+
+    // And the header end stays reachable after scrolling back down-to-up, so the card is navigable
+    // in both directions rather than trading one clipped end for the other.
+    const closeButton = page.getByRole('button', { name: 'Close failure inspector' })
+    await closeButton.scrollIntoViewIfNeeded()
+    await expect(closeButton).toBeInViewport()
+    expect((await closeButton.boundingBox())!.y).toBeGreaterThanOrEqual(0)
+
+    await closeButton.click()
+    await expect(inspector).toBeHidden()
+  })
 })

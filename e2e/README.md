@@ -178,6 +178,34 @@ is the regression guard for all three**.
    dialog and the quota-resolve action is still reachable from the "Inspect" button on a quota
    error row.
 
+### The `items-center` modal-overflow class of bug
+
+(1)'s second half was never specific to the welcome modal — every modal in this app centered its
+card with `items-center` inside a non-scrolling backdrop, so any card that outgrew the viewport
+became partly unreachable. The whole class is now fixed the same way (`overflow-y-auto` on the
+backdrop, `my-auto h-fit` on the card): `WelcomeModal`, `SettingsModal`, `FailureInspectorModal`,
+`WorkspaceSharingModal`, `ConfirmDialog`, and `PromptDialog`. `ShortcutsCheatSheet`,
+`CommandPalette`, and `DrawerShell` were already safe — they cap the card with `max-h` and scroll
+an inner region. The pattern is behavior-identical when the card fits, so it's safe to apply
+uniformly.
+
+Note the class has **two distinct symptoms**, and which one a given modal shows depends on its
+ancestors — worth knowing before writing a guard for one:
+- *header stranded above y=0* (WelcomeModal): needs a scrollable document plus the default
+  focus-scroll to drag it. That half is what `preventScroll: true` addresses.
+- *footer below the fold, nothing scrolls* (FailureInspectorModal): the backdrop's `scrollTop` is
+  pinned at 0 because an overflowing `align-items: center` item spills outside the scroll range
+  entirely. `06-modals.spec.ts` asserts this one on `scrollTop`, not on the header's `y`, since
+  measured at a 420px viewport the inspector's close button sits harmlessly at y≈15.
+
+**Still open — not this class, don't "fix" it with the same patch:** `WorkflowView`'s node picker
+(`workflow-node-picker-title`) has a backdrop of `absolute inset-0` scoped to the *workflow
+stratum*, so it dims only the graph area. Measured at 1440x900: a 548px card in a 295px backdrop,
+spilling outside the dimmed region rather than being clipped (the backdrop is `overflow: visible`).
+Making that backdrop a scroll container would confine the card to 295px and make it visibly worse.
+The real fix is to decide whether that picker should cover the viewport (`fixed inset-0`, like the
+inspector) — a stacking/visual-design call, not a mechanical one.
+
 ## Flakiness notes
 
 - **This suite must not be run while other agents are actively editing files in the same shared

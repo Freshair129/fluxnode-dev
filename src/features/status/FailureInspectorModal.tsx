@@ -56,14 +56,14 @@ export function FailureInspectorModal({
   // paints it over the sheet. Was a verbatim `absolute inset-0 z-40` (fine in round 2 when drawers
   // were `--z-drawer` 10; below the sheet after the round-3 move).
   return (
-    <div className="fixed inset-0 z-[var(--z-overlay)] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[var(--z-overlay)] flex justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
       <section
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="failure-inspector-title"
         tabIndex={-1}
-        className="w-full max-w-2xl rounded-[1.75rem] border border-white/10 bg-[#111214] p-5 shadow-[0_30px_120px_rgba(0,0,0,0.55)] outline-none"
+        className="my-auto h-fit w-full max-w-2xl rounded-[1.75rem] border border-white/10 bg-[#111214] p-5 shadow-[0_30px_120px_rgba(0,0,0,0.55)] outline-none"
       >
         <div className="flex items-start justify-between gap-4">
           <div>

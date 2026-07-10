@@ -57,14 +57,14 @@ export function WorkspaceSharingModal() {
   }
 
   return (
-    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+    <div className="absolute inset-0 z-40 flex justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm">
       <section
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="workspace-sharing-title"
         tabIndex={-1}
-        className="w-full max-w-5xl rounded-[2rem] border border-white/10 bg-[#101112] p-6 shadow-[0_30px_120px_rgba(0,0,0,0.55)] outline-none"
+        className="my-auto h-fit w-full max-w-5xl rounded-[2rem] border border-white/10 bg-[#101112] p-6 shadow-[0_30px_120px_rgba(0,0,0,0.55)] outline-none"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
