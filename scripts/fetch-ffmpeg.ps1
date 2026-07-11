@@ -34,8 +34,12 @@ $binDir = Join-Path $root 'src-tauri/binaries'
 $tripleIsWindows = $Triple -like '*windows*'
 $exeSuffix = if ($tripleIsWindows) { '.exe' } else { '' }
 $archiveExt = if ($Url -match '\.tar\.[a-z0-9]+$') { $Matches[0] } else { [IO.Path]::GetExtension($Url) }
-$tmpArchive = Join-Path $env:TEMP "fluxnode-ffmpeg-lgpl$archiveExt"
-$tmpDir = Join-Path $env:TEMP 'fluxnode-ffmpeg-extract'
+# $env:TEMP is Windows-only; on the Linux/macOS pwsh runners it's unset, so Join-Path would
+# throw on a null path. [IO.Path]::GetTempPath() is cross-platform: %TEMP% on Windows,
+# $TMPDIR (or /tmp) elsewhere.
+$tmpRoot = [System.IO.Path]::GetTempPath()
+$tmpArchive = Join-Path $tmpRoot "fluxnode-ffmpeg-lgpl$archiveExt"
+$tmpDir = Join-Path $tmpRoot 'fluxnode-ffmpeg-extract'
 
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 
