@@ -11,7 +11,13 @@
   The binaries are NOT committed (see .gitignore: src-tauri/binaries/). Run this
   script after cloning, and in CI before `tauri build`.
 
-  Source: https://github.com/BtbN/FFmpeg-Builds (win64-lgpl, "latest").
+  Cross-platform: pass -Triple/-Url for the target you need. Archive format is
+  inferred from the URL (.zip via Expand-Archive, anything else via `tar`, which
+  is present on both GitHub-hosted Linux runners and Windows 10+/PowerShell 7).
+  The .exe suffix on staged binaries is added only for windows-* triples,
+  matching Tauri's own sidecar naming convention.
+
+  Source: https://github.com/BtbN/FFmpeg-Builds ("latest").
 #>
 param(
   [string]$Triple = 'x86_64-pc-windows-msvc',
@@ -21,28 +27,41 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $binDir = Join-Path $root 'src-tauri/binaries'
-$tmpZip = Join-Path $env:TEMP 'fluxnode-ffmpeg-lgpl.zip'
+$isWindows = $Triple -like '*windows*'
+$exeSuffix = if ($isWindows) { '.exe' } else { '' }
+$archiveExt = if ($Url -match '\.tar\.[a-z0-9]+$') { $Matches[0] } else { [IO.Path]::GetExtension($Url) }
+$tmpArchive = Join-Path $env:TEMP "fluxnode-ffmpeg-lgpl$archiveExt"
 $tmpDir = Join-Path $env:TEMP 'fluxnode-ffmpeg-extract'
 
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 
-Write-Host "Downloading LGPL FFmpeg build..." -ForegroundColor Cyan
-Invoke-WebRequest -Uri $Url -OutFile $tmpZip
+Write-Host "Downloading LGPL FFmpeg build for $Triple..." -ForegroundColor Cyan
+Invoke-WebRequest -Uri $Url -OutFile $tmpArchive
 
 Write-Host "Extracting..." -ForegroundColor Cyan
 if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
-Expand-Archive -Path $tmpZip -DestinationPath $tmpDir -Force
+New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+if ($archiveExt -eq '.zip') {
+  Expand-Archive -Path $tmpArchive -DestinationPath $tmpDir -Force
+} else {
+  # tar handles .tar.xz/.tar.gz alike; ships on GitHub-hosted ubuntu runners and
+  # Windows 10+ (bsdtar) / PowerShell 7 environments.
+  tar -xf $tmpArchive -C $tmpDir
+  if ($LASTEXITCODE -ne 0) { throw "tar extraction failed with exit code $LASTEXITCODE" }
+}
 
 foreach ($exe in @('ffmpeg', 'ffprobe')) {
-  $found = Get-ChildItem -Path $tmpDir -Recurse -Filter "$exe.exe" | Select-Object -First 1
-  if (-not $found) { throw "Could not find $exe.exe in the downloaded archive" }
-  $dest = Join-Path $binDir "$exe-$Triple.exe"
+  $found = Get-ChildItem -Path $tmpDir -Recurse -Filter "$exe$exeSuffix" |
+    Where-Object { -not $_.PSIsContainer } | Select-Object -First 1
+  if (-not $found) { throw "Could not find $exe$exeSuffix in the downloaded archive" }
+  $dest = Join-Path $binDir "$exe-$Triple$exeSuffix"
   Copy-Item -Path $found.FullName -Destination $dest -Force
+  if (-not $isWindows) { chmod +x $dest }
   Write-Host "  -> $dest" -ForegroundColor Green
 }
 
-Remove-Item -Force $tmpZip
+Remove-Item -Force $tmpArchive
 Remove-Item -Recurse -Force $tmpDir
 
 Write-Host "Done. Sidecars staged in src-tauri/binaries/" -ForegroundColor Cyan
-& (Join-Path $binDir "ffmpeg-$Triple.exe") -hide_banner -version | Select-Object -First 1
+& (Join-Path $binDir "ffmpeg-$Triple$exeSuffix") -hide_banner -version | Select-Object -First 1

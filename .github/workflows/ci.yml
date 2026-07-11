@@ -77,6 +77,18 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # tauri.conf.json's externalBin lists ffmpeg/ffprobe as required sidecar
+      # resources, so the build script hard-fails without them staged. They're
+      # gitignored (src-tauri/binaries/) and meant to be fetched, per
+      # scripts/fetch-ffmpeg.ps1's own docstring ("...and in CI before
+      # `tauri build`") — that step was never actually wired up here.
+      - name: Fetch ffmpeg/ffprobe sidecars
+        shell: pwsh
+        run: >-
+          ./scripts/fetch-ffmpeg.ps1
+          -Triple x86_64-unknown-linux-gnu
+          -Url https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-lgpl.tar.xz
+
       - name: cargo fmt --check
         working-directory: src-tauri
         run: cargo fmt --check
