@@ -12,7 +12,7 @@ use std::process::Command;
 
 use serde_json::Value;
 
-use crate::media::traits::{Transcript, Transcriber, TranscriptSegment};
+use crate::media::traits::{Transcriber, Transcript, TranscriptSegment};
 
 /// On Windows, prevent the spawned child from flashing a console window (which also steals focus
 /// from the foreground app). Mirrors the mandate to set `CREATE_NO_WINDOW` on every spawn.
@@ -62,13 +62,7 @@ impl Transcriber for WhisperBackend {
         // then read that file back. `-nt` (no-timestamps) is intentionally NOT set — we want the
         // per-segment start/end offsets that the JSON carries.
         let output = no_window(&mut Command::new(&self.bin))
-            .args([
-                "-m",
-                &self.model.to_string_lossy(),
-                "-f",
-                audio_path,
-                "-oj",
-            ])
+            .args(["-m", &self.model.to_string_lossy(), "-f", audio_path, "-oj"])
             .output()
             .map_err(|error| {
                 format!(

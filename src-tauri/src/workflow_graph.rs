@@ -149,11 +149,7 @@ fn video_predecessors(edges: &[Value], target: &str) -> Vec<String> {
 ///
 /// Implemented as a DFS-based topological sort over the reverse reachable set
 /// of `target`, with explicit cycle detection. Returns `Err` on a cycle.
-fn dependency_order(
-    nodes: &[Value],
-    edges: &[Value],
-    target: &str,
-) -> Result<Vec<String>, String> {
+fn dependency_order(nodes: &[Value], edges: &[Value], target: &str) -> Result<Vec<String>, String> {
     // 1. Collect the set of nodes that `target` depends on (reverse reachable).
     let mut needed: Vec<String> = Vec::new();
     let mut stack = vec![target.to_string()];
@@ -508,10 +504,7 @@ pub fn build_workflow_plan(
                     for layer in pred_labels.iter().skip(1) {
                         let out = format!("n{}", label_counter);
                         label_counter += 1;
-                        graph_parts.push(format!(
-                            "[{}][{}]overlay=x=0:y=0[{}]",
-                            accum, layer, out
-                        ));
+                        graph_parts.push(format!("[{}][{}]overlay=x=0:y=0[{}]", accum, layer, out));
                         accum = out;
                     }
                     node_label.insert(node_id.clone(), accum);
@@ -606,7 +599,9 @@ mod tests {
     use serde_json::json;
 
     fn arg_after<'a>(args: &'a [String], flag: &str) -> Option<&'a String> {
-        args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1))
+        args.iter()
+            .position(|a| a == flag)
+            .and_then(|i| args.get(i + 1))
     }
 
     fn count(args: &[String], target: &str) -> usize {
@@ -650,16 +645,25 @@ mod tests {
         let plan = build_workflow_plan(&linear_project(), "out", "out.mp4").unwrap();
         let g = filter_graph(&plan);
         assert_eq!(count(&plan.args, "-i"), 1);
-        assert_eq!(arg_after(&plan.args, "-i").map(|s| s.as_str()), Some("C:/m/a.mp4"));
+        assert_eq!(
+            arg_after(&plan.args, "-i").map(|s| s.as_str()),
+            Some("C:/m/a.mp4")
+        );
         // Transform scale 0.5 of 1920x1080 -> 960x540.
         assert!(g.contains("scale=960:540"), "scale present: {g}");
         // color_correct eq filter.
-        assert!(g.contains("eq=brightness=0.1:contrast=1.2:saturation=1.3:gamma=0.9"), "eq: {g}");
+        assert!(
+            g.contains("eq=brightness=0.1:contrast=1.2:saturation=1.3:gamma=0.9"),
+            "eq: {g}"
+        );
         // Final map.
         assert!(plan.args.iter().any(|a| a == "[vout]"), "vout map");
         assert_eq!(count(&plan.args, "-map"), 1);
         // Output node h264 -> nvenc.
-        assert_eq!(arg_after(&plan.args, "-c:v").map(|s| s.as_str()), Some("h264_nvenc"));
+        assert_eq!(
+            arg_after(&plan.args, "-c:v").map(|s| s.as_str()),
+            Some("h264_nvenc")
+        );
         // Output path is last.
         assert_eq!(plan.args.last().unwrap(), "out.mp4");
     }
@@ -672,7 +676,10 @@ mod tests {
         assert!(g.contains("scale=960:540"), "transform applied: {g}");
         assert!(!g.contains("eq="), "color_correct excluded: {g}");
         // Default encoder for a non-output preview target.
-        assert_eq!(arg_after(&plan.args, "-c:v").map(|s| s.as_str()), Some("mpeg4"));
+        assert_eq!(
+            arg_after(&plan.args, "-c:v").map(|s| s.as_str()),
+            Some("mpeg4")
+        );
     }
 
     #[test]
@@ -704,7 +711,10 @@ mod tests {
         assert_eq!(count(&plan.args, "-i"), 2);
         // Two layers -> one overlay onto base.
         assert_eq!(g.matches("overlay=").count(), 1, "one overlay: {g}");
-        assert_eq!(arg_after(&plan.args, "-c:v").map(|s| s.as_str()), Some("mpeg4"));
+        assert_eq!(
+            arg_after(&plan.args, "-c:v").map(|s| s.as_str()),
+            Some("mpeg4")
+        );
     }
 
     #[test]
@@ -754,7 +764,10 @@ mod tests {
         let plan = build_workflow_plan(&project, "cc", "out.mp4").unwrap();
         let g = filter_graph(&plan);
         // lift -> brightness, gain -> contrast, saturation default 1, gamma 1.08.
-        assert!(g.contains("eq=brightness=0.02:contrast=1.12:saturation=1:gamma=1.08"), "{g}");
+        assert!(
+            g.contains("eq=brightness=0.02:contrast=1.12:saturation=1:gamma=1.08"),
+            "{g}"
+        );
     }
 
     #[test]
@@ -810,7 +823,10 @@ mod tests {
         let plan = build_workflow_plan(&project, "xf", "out.mp4").unwrap();
         let g = filter_graph(&plan);
         assert_eq!(count(&plan.args, "-i"), 0);
-        assert!(g.contains("color=c=black:s=640x480:r=25"), "black source: {g}");
+        assert!(
+            g.contains("color=c=black:s=640x480:r=25"),
+            "black source: {g}"
+        );
         // Transform still applies (320x240).
         assert!(g.contains("scale=320:240"), "{g}");
     }
@@ -972,7 +988,10 @@ mod tests {
         let plan = build_workflow_plan(&project, "out", "out.mp4").unwrap();
         // Only the video source becomes an -i input; the audio source is ignored.
         assert_eq!(count(&plan.args, "-i"), 1);
-        assert_eq!(arg_after(&plan.args, "-i").map(|s| s.as_str()), Some("v.mp4"));
+        assert_eq!(
+            arg_after(&plan.args, "-i").map(|s| s.as_str()),
+            Some("v.mp4")
+        );
     }
 
     #[test]
@@ -989,13 +1008,34 @@ mod tests {
 
     #[test]
     fn encoder_selection_per_output_data() {
-        assert_eq!(select_video_encoder(&json!({ "videoCodec": "h264" })), "h264_nvenc");
-        assert_eq!(select_video_encoder(&json!({ "videoCodec": "hevc" })), "hevc_nvenc");
-        assert_eq!(select_video_encoder(&json!({ "videoCodec": "vp9" })), "libvpx-vp9");
-        assert_eq!(select_video_encoder(&json!({ "videoCodec": "prores" })), "prores_ks");
-        assert_eq!(select_video_encoder(&json!({ "videoCodec": "av1" })), "libaom-av1");
-        assert_eq!(select_video_encoder(&json!({ "format": "webm" })), "libvpx-vp9");
-        assert_eq!(select_video_encoder(&json!({ "format": "mov" })), "prores_ks");
+        assert_eq!(
+            select_video_encoder(&json!({ "videoCodec": "h264" })),
+            "h264_nvenc"
+        );
+        assert_eq!(
+            select_video_encoder(&json!({ "videoCodec": "hevc" })),
+            "hevc_nvenc"
+        );
+        assert_eq!(
+            select_video_encoder(&json!({ "videoCodec": "vp9" })),
+            "libvpx-vp9"
+        );
+        assert_eq!(
+            select_video_encoder(&json!({ "videoCodec": "prores" })),
+            "prores_ks"
+        );
+        assert_eq!(
+            select_video_encoder(&json!({ "videoCodec": "av1" })),
+            "libaom-av1"
+        );
+        assert_eq!(
+            select_video_encoder(&json!({ "format": "webm" })),
+            "libvpx-vp9"
+        );
+        assert_eq!(
+            select_video_encoder(&json!({ "format": "mov" })),
+            "prores_ks"
+        );
         assert_eq!(select_video_encoder(&json!({ "format": "mp4" })), "mpeg4");
     }
 

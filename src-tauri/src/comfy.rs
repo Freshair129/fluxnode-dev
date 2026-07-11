@@ -183,8 +183,7 @@ fn build_generate(data: &Value, input_image_name: Option<&str>) -> Result<Value,
 }
 
 fn build_upscale(data: &Value, input_image_name: Option<&str>) -> Result<Value, String> {
-    let image = input_image_name
-        .ok_or_else(|| "ai_upscale requires an input image".to_string())?;
+    let image = input_image_name.ok_or_else(|| "ai_upscale requires an input image".to_string())?;
     let model = read_str(data, "model", "");
     if model.is_empty() {
         return Err("ai_upscale requires a non-empty `model` (upscale model name)".to_string());
@@ -292,8 +291,9 @@ pub fn wait_for_output(
             .map_err(|e| format!("failed to poll history: {e}"))?;
 
         if resp.status().is_success() {
-            let body = crate::security::read_capped_bytes(resp, crate::security::MAX_JSON_RESPONSE_BYTES)
-                .map_err(|e| format!("failed to read history response: {e}"))?;
+            let body =
+                crate::security::read_capped_bytes(resp, crate::security::MAX_JSON_RESPONSE_BYTES)
+                    .map_err(|e| format!("failed to read history response: {e}"))?;
             let history: Value =
                 serde_json::from_slice(&body).map_err(|e| format!("invalid history JSON: {e}"))?;
             // History is keyed by prompt_id; the entry may not exist yet while
@@ -336,10 +336,7 @@ fn first_image_in_outputs(entry: &Value) -> Option<ComfyImageRef> {
         if let Some(images) = node_output.get("images").and_then(Value::as_array) {
             if let Some(img) = images.first() {
                 let filename = img.get("filename").and_then(Value::as_str)?;
-                let subfolder = img
-                    .get("subfolder")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
+                let subfolder = img.get("subfolder").and_then(Value::as_str).unwrap_or("");
                 let type_ = img.get("type").and_then(Value::as_str).unwrap_or("output");
                 return Some(ComfyImageRef {
                     filename: filename.to_string(),
@@ -492,8 +489,7 @@ mod tests {
 
     #[test]
     fn img2img_uses_loadimage_and_vaeencode() {
-        let graph =
-            build_comfy_prompt("ai_generate", &generate_data(), Some("seed.png")).unwrap();
+        let graph = build_comfy_prompt("ai_generate", &generate_data(), Some("seed.png")).unwrap();
         let load = node_of(&graph, "LoadImage");
         assert_eq!(load["inputs"]["image"], json!("seed.png"));
         let encode = node_of(&graph, "VAEEncode");
