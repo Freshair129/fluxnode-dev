@@ -27,8 +27,12 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $binDir = Join-Path $root 'src-tauri/binaries'
-$isWindows = $Triple -like '*windows*'
-$exeSuffix = if ($isWindows) { '.exe' } else { '' }
+# NOTE: do not name this `$isWindows` — in PowerShell 7 (pwsh, used by CI on Linux/macOS)
+# `$IsWindows` is a read-only automatic variable and assigning to it throws a WriteError.
+# Variable names are case-insensitive, so `$isWindows` collides with it. Windows PowerShell
+# 5.1 has no such automatic variable, which is why this only failed in CI.
+$tripleIsWindows = $Triple -like '*windows*'
+$exeSuffix = if ($tripleIsWindows) { '.exe' } else { '' }
 $archiveExt = if ($Url -match '\.tar\.[a-z0-9]+$') { $Matches[0] } else { [IO.Path]::GetExtension($Url) }
 $tmpArchive = Join-Path $env:TEMP "fluxnode-ffmpeg-lgpl$archiveExt"
 $tmpDir = Join-Path $env:TEMP 'fluxnode-ffmpeg-extract'
@@ -56,7 +60,7 @@ foreach ($exe in @('ffmpeg', 'ffprobe')) {
   if (-not $found) { throw "Could not find $exe$exeSuffix in the downloaded archive" }
   $dest = Join-Path $binDir "$exe-$Triple$exeSuffix"
   Copy-Item -Path $found.FullName -Destination $dest -Force
-  if (-not $isWindows) { chmod +x $dest }
+  if (-not $tripleIsWindows) { chmod +x $dest }
   Write-Host "  -> $dest" -ForegroundColor Green
 }
 
