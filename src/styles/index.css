@@ -24,6 +24,10 @@
   --color-accent-soft: #f5ffd5;
   --color-cloud: #3b82f6;
 
+  /* Phosphor (lineage) */
+  --color-phosphor: #aeca2a;
+  --color-phosphor-dim: #5a6a1c;
+
   /* Semantic */
   --color-success: #34d399;
   --color-warn: #fbbf24;
@@ -34,10 +38,43 @@
   /* Bumped from the previous #7f8691 — that shade fell at/below 4.5:1 AA
      contrast at the 10px uppercase label size it's used at everywhere. */
   --color-text-secondary: #a2abb6;
+  --color-text-data: #c8d1da;
 
   /* Borders */
   --color-border-subtle: rgba(255, 255, 255, 0.08);
   --color-border: rgba(255, 255, 255, 0.1);
+  --color-hairline: rgba(255, 255, 255, 0.14);
+
+  /* Motion */
+  --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-draw: 240ms;
+
+  /* Radii — sm/md/lg naming: `--radius-s`/`--radius-l` would be shadowed by
+     Tailwind's built-in `rounded-s` (start-side) / `rounded-l` (left-side)
+     utilities, per item-1 review. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* Elevation */
+  --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  /* Z scale.
+     `--z-drawer` is reserved for the in-stratum, co-interactive drawers of spec E — the node
+     library, the Takes drawer, the asset strip. None are built yet. They sit *inside* a stratum,
+     never block, and correctly live beneath the lineage thread. Transient focus-trapping surfaces
+     (command palette, export sheet, settings sheet, status drawers) are Overlays, not drawers:
+     they are `aria-modal`, they suppress the horizon keys, and they belong at `--z-overlay`.
+     An `aria-modal` surface must never be painted over by the decorative thread. */
+  --z-drawer: 10;
+  --z-thread: 20;
+  --z-sticky: 30;
+  --z-overlay-backdrop: 40;
+  --z-overlay: 50;
+  --z-toast: 60;
+  --z-tooltip: 70;
 }
 
 :root {
@@ -145,6 +182,38 @@ select:focus-visible,
 
 .fluxnode-invalid-port {
   animation: fluxnode-invalid-port-shake 320ms ease-out;
+}
+
+/*
+ * MERIDIAN item 7 (density modes — spec G, L.7). `--meridian-*` spacing custom properties,
+ * switched by the `data-density` attribute App.tsx stamps on the app shell root
+ * (`[data-meridian-app-shell]`) and StrataShell mirrors on `[data-meridian-shell]` (see those
+ * files' comments for why both). Comfortable is the UNSCOPED default (plain `:root`) so anything
+ * outside a `[data-density]` ancestor — a detached preview/timeline/inspector window, which never
+ * mounts the app shell root — still resolves sane values instead of an unset custom property.
+ *
+ * Per the item-7 brief's scope limit: this block ONLY adds density-related custom properties and
+ * `[data-density="…"]` rules. No existing `--color-*`/`--radius-*`/`--dur-*`/`--z-*`/etc. token
+ * above is modified, renamed, or removed. Nothing here ever touches font-size or line-height —
+ * spec G is explicit: "Font sizes never change with density." That invariant is enforced by the
+ * font-invariance test in e2e/07-density.spec.ts, which compares real computed font sizes across
+ * both modes while independently proving the density switch actually took effect.
+ */
+:root {
+  /* Spec G: "rows 28->24px". Status bar height, ledger/inspector header rows, and (by way of
+     --meridian-gutter below) menu/palette row padding. */
+  --meridian-row-h: 28px;
+  /* Spec G: "spacing gutters 8->6px". Panel gutters, JobChip padding, menu/palette row padding,
+     drawer edge inset. */
+  --meridian-gutter: 8px;
+  /* Spec G: "timeline track height 56->44px". */
+  --meridian-track-h: 56px;
+}
+
+[data-density='compact'] {
+  --meridian-row-h: 24px;
+  --meridian-gutter: 6px;
+  --meridian-track-h: 44px;
 }
 
 @media (prefers-reduced-motion: reduce) {

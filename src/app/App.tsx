@@ -18,15 +18,18 @@ import { checkNetworkConnectivity } from '../services/connectivity/check-network
 import { useTimelineAudio, type TimelineAudioClip } from '../services/audio'
 import { ErrorToasts } from '../features/notifications/ErrorToasts'
 import { useProjectStore } from '../store/project-store'
+import { focusShellRegion, resolveShellFocusTargets } from '../features/workspace/shellFocusTargets'
+import { StatusBar } from '../features/status/statusBar/StatusBar'
+import type { StatusBarAction, StatusDrawerId } from '../features/status/statusBar/segments'
 
 const TimelineView = lazy(() =>
   import('../features/timeline/TimelineView').then((module) => ({ default: module.TimelineView })),
 )
-const WorkflowView = lazy(() =>
-  import('../features/workflow/WorkflowView').then((module) => ({ default: module.WorkflowView })),
+const StrataShell = lazy(() =>
+  import('../features/workspace/StrataShell').then((module) => ({ default: module.StrataShell })),
 )
-const SystemPanels = lazy(() =>
-  import('../features/status/SystemPanels').then((module) => ({ default: module.SystemPanels })),
+const StatusOverlays = lazy(() =>
+  import('../features/status/StatusOverlays').then((module) => ({ default: module.StatusOverlays })),
 )
 const DetachedInspectorPanel = lazy(() =>
   import('../features/inspector/DetachedInspectorPanel').then((module) => ({ default: module.DetachedInspectorPanel })),
@@ -43,6 +46,9 @@ const WorkspaceSharingModal = lazy(() =>
 const ShortcutsCheatSheet = lazy(() =>
   import('../features/shortcuts/ShortcutsCheatSheet').then((module) => ({ default: module.ShortcutsCheatSheet })),
 )
+const CommandPalette = lazy(() =>
+  import('../features/commands/CommandPalette').then((module) => ({ default: module.CommandPalette })),
+)
 
 export default function App() {
   const detachedPanel = useMemo(() => getDetachedPanelFromLocation(), [])
@@ -51,6 +57,12 @@ export default function App() {
     [detachedPanel],
   )
   const activeView = useProjectStore((state) => state.ui.activeView)
+  // MERIDIAN item 7 (density modes, spec G/L.7): read once here and stamped onto the app shell
+  // root below so every surface in this tree — StrataShell (which also stamps it on
+  // `[data-meridian-shell]`, satisfying L.7's literal "on the shell"), the status bar, AND the
+  // overlays/drawers/palette that render as this div's SIBLINGS-of-StrataShell rather than its
+  // descendants — inherits the same `--meridian-*` CSS custom properties (decision D).
+  const densityMode = useProjectStore((state) => state.preferences.density)
   const showSettings = useProjectStore((state) => state.ui.showSettings)
   const showWorkspaceSharing = useProjectStore((state) => state.ui.showWorkspaceSharing)
   const showWelcome = useProjectStore((state) => state.ui.showWelcome)
@@ -88,8 +100,60 @@ export default function App() {
   const lastAppliedPanelTransactionRef = useRef<string | null>(null)
   const previousActiveViewRef = useRef(activeView)
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false)
+  const [showCommandPalette, setShowCommandPalette] = useState(false)
+  // MERIDIAN item 9: the status bar's secondary surfaces (export sheet + the four drawers) are
+  // UI-local state, same as showShortcutsHelp/showCommandPalette above — not store state, per the
+  // item-9 hard constraint ("do not change the store contract... adding UI-state fields... is
+  // fine" — this just doesn't need to be in the store at all). At most one is open at a time
+  // (single active secondary surface — see StatusOverlays' doc comment).
+  const [showExportSheet, setShowExportSheet] = useState(false)
+  const [openStatusDrawer, setOpenStatusDrawer] = useState<StatusDrawerId | null>(null)
+  const [inspectorJobId, setInspectorJobId] = useState<string | null>(null)
+  const saveProject = useProjectStore((state) => state.saveProject)
 
-  useKeyboardShortcuts({ onOpenShortcutsHelp: () => setShowShortcutsHelp((current) => !current) })
+  // Opening any status drawer closes the export sheet (single active secondary surface — see
+  // StatusOverlays' doc comment); passed to both the palette (Ctrl+K "Open … drawer" verbs) and
+  // the status bar segments so both entry points share one exclusivity rule.
+  function openStatusDrawerExclusive(drawer: StatusDrawerId) {
+    setShowExportSheet(false)
+    setOpenStatusDrawer((current) => (current === drawer ? null : drawer))
+  }
+
+  useKeyboardShortcuts({
+    onOpenShortcutsHelp: () => setShowShortcutsHelp((current) => !current),
+    onOpenCommandPalette: () => setShowCommandPalette(true),
+    onOpenExportSheet: () => {
+      setOpenStatusDrawer(null)
+      setShowExportSheet((current) => !current)
+    },
+    onOpenStatusDrawer: openStatusDrawerExclusive,
+  })
+
+  function handleStatusBarActivate(action: StatusBarAction) {
+    if (action.kind === 'openDrawer') {
+      openStatusDrawerExclusive(action.drawer)
+      return
+    }
+
+    if (action.kind === 'openExportSheet') {
+      setOpenStatusDrawer(null)
+      setShowExportSheet((current) => !current)
+      return
+    }
+
+    if (action.kind === 'save') {
+      void saveProject()
+      return
+    }
+
+    focusShellRegion(resolveShellFocusTargets().ground)
+  }
+
+  // MERIDIAN item 9 (round-2 fix): Escape for the export sheet + drawers is owned by `DrawerShell`
+  // itself now, not here. Those surfaces became `aria-modal="true"` (trap and declaration must
+  // agree — spec J.7 clarification), so an `isOverlayOpen()`-gated handler here would bail on them.
+  // DrawerShell's own topmost-only Escape handler preserves the "closes topmost overlay only"
+  // ordering against a stacked FailureInspectorModal — see its doc comment.
 
   // Map timeline clips with an audio stream onto the decoupled audio-engine
   // input shape, then drive Web Audio playback in sync with the playhead.
@@ -514,7 +578,11 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(224,255,0,0.08),_transparent_28%),linear-gradient(180deg,_#0d0d0d_0%,_#090909_100%)] text-white">
+    <div
+      data-meridian-app-shell
+      data-density={densityMode}
+      className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(224,255,0,0.08),_transparent_28%),linear-gradient(180deg,_#0d0d0d_0%,_#090909_100%)] text-white"
+    >
       <div className="relative min-h-screen overflow-hidden">
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:80px_80px] opacity-20" />
         <ErrorBoundary label="Header" compact>
@@ -525,19 +593,30 @@ export default function App() {
           className="relative z-10 h-[calc(100vh-4.5rem)] overflow-hidden p-4 md:p-5"
         >
           <ErrorBoundary label="Workspace">
-            <div className="flex h-full flex-col gap-4 overflow-auto">
-              <ErrorBoundary label="Preview monitor">
-                <PreviewPanel />
-              </ErrorBoundary>
-              <ErrorBoundary label={activeView === 'timeline' ? 'Timeline' : 'Workflow'}>
-                <Suspense fallback={<PanelFallback label={activeView === 'timeline' ? 'Loading timeline workspace' : 'Loading workflow workspace'} />}>
-                  {activeView === 'timeline' ? <TimelineView /> : <WorkflowView />}
+            {/* MERIDIAN item 9: dissolved SystemPanels' thousands-of-pixels-tall content into the
+                28px status bar + drawers/export sheet (docs/design/MERIDIAN-UI-SPEC.md section F's
+                wireframe). This column now holds exactly the shell and the status bar (item-9
+                destination map D) — the item-3 "SystemPanels capped to its own scrolling box"
+                stopgap is gone; StrataShell's `flex-1` gets the full remaining height honestly.
+                The drawers/export sheet/failure inspector are fixed-position overlays, not part of
+                this flex column — see the `StatusOverlays` mount near the other modals below. */}
+            <div className="flex h-full flex-col gap-2 overflow-hidden">
+              {/* MERIDIAN strata shell (item 2) + stage row (item 3): sky (WorkflowView) and
+                  ground (TimelineView) render simultaneously, separated by the horizon
+                  splitter, with the preview stage/job ledger/inspector folded onto the horizon
+                  itself as StrataShell's fixed-height stage row — see
+                  docs/design/MERIDIAN-UI-SPEC.md sections D, F, H, J.2, J.4. PreviewPanel used
+                  to render as its own row above the shell (item-2 review carried this forward
+                  as a blocking note for item 3: "must fold PreviewPanel onto the horizon").
+                  `flex-1 min-h-0` is the minimum needed so the shell's CSS grid rows have real
+                  height to split. */}
+              <ErrorBoundary label="Strata shell">
+                <Suspense fallback={<PanelFallback label="Loading workspace" />}>
+                  <StrataShell className="min-h-0 flex-1" />
                 </Suspense>
               </ErrorBoundary>
-              <ErrorBoundary label="System panels" compact>
-                <Suspense fallback={<PanelFallback label="Loading system panels" compact />}>
-                  <SystemPanels />
-                </Suspense>
+              <ErrorBoundary label="Status bar" compact>
+                <StatusBar className="shrink-0" onActivate={handleStatusBarActivate} />
               </ErrorBoundary>
             </div>
           </ErrorBoundary>
@@ -570,6 +649,34 @@ export default function App() {
             </Suspense>
           </ErrorBoundary>
         ) : null}
+        {showCommandPalette ? (
+          <ErrorBoundary label="Command palette" compact>
+            <Suspense fallback={<ModalFallback label="Loading command palette" />}>
+              <CommandPalette
+                onClose={() => setShowCommandPalette(false)}
+                onOpenShortcutsHelp={() => setShowShortcutsHelp((current) => !current)}
+                onOpenExportSheet={() => {
+                  setOpenStatusDrawer(null)
+                  setShowExportSheet((current) => !current)
+                }}
+                onOpenStatusDrawer={openStatusDrawerExclusive}
+              />
+            </Suspense>
+          </ErrorBoundary>
+        ) : null}
+        <ErrorBoundary label="Status overlays" compact>
+          <Suspense fallback={null}>
+            <StatusOverlays
+              openDrawer={openStatusDrawer}
+              onCloseDrawer={() => setOpenStatusDrawer(null)}
+              showExportSheet={showExportSheet}
+              onCloseExportSheet={() => setShowExportSheet(false)}
+              inspectorJobId={inspectorJobId}
+              onInspect={(jobId) => setInspectorJobId(jobId)}
+              onCloseInspector={() => setInspectorJobId(null)}
+            />
+          </Suspense>
+        </ErrorBoundary>
         <ErrorBoundary label="Notifications" compact>
           <ErrorToasts />
         </ErrorBoundary>
@@ -578,7 +685,7 @@ export default function App() {
   )
 }
 
-function PanelFallback({ label, compact = false }: { label: string; compact?: boolean }) {
+export function PanelFallback({ label, compact = false }: { label: string; compact?: boolean }) {
   return (
     <section
       aria-label={label}

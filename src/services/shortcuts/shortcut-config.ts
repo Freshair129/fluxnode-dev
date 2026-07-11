@@ -53,6 +53,18 @@ export type ShortcutCommand =
   | 'workflow.quickAddOutput'
   | 'selection.delete'
   | 'selection.duplicate'
+  | 'lineage.followThread'
+  | 'global.openCommandPalette'
+  | 'global.openExportSheet'
+  | 'status.openConnectivityDrawer'
+  | 'status.openAppUpdatesDrawer'
+  | 'status.openWorkspaceDrawer'
+  | 'status.openAudioDrawer'
+  | 'workspace.focusHorizonSplitter'
+  | 'workspace.focusSky'
+  | 'workspace.focusStage'
+  | 'workspace.focusGround'
+  | 'global.toggleDensity'
 
 export interface ShortcutDefinition {
   command: ShortcutCommand
@@ -113,6 +125,31 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   { command: 'workflow.quickAddOutput', label: 'Quick Add Output Node', when: 'workflow' },
   { command: 'selection.delete', label: 'Delete Current Selection', when: 'global' },
   { command: 'selection.duplicate', label: 'Duplicate Current Selection', when: 'global' },
+  { command: 'lineage.followThread', label: 'Follow Lineage Thread', when: 'global' },
+  { command: 'global.openCommandPalette', label: 'Open Command Palette', when: 'global' },
+  // MERIDIAN item 9 (spec H global keys: "Ctrl+E export"). Opens the export sheet — Export queue +
+  // Export preset, dissolved off the main surface out of SystemPanels.
+  { command: 'global.openExportSheet', label: 'Open Export Sheet', when: 'global' },
+  // MERIDIAN item 9 (round-2 advisory 5): the four status drawers are directly openable from the
+  // status bar's segments; these give them the same Ctrl+K discoverability the export sheet has.
+  { command: 'status.openConnectivityDrawer', label: 'Open Connectivity Drawer', when: 'global' },
+  { command: 'status.openAppUpdatesDrawer', label: 'Open App Updates Drawer', when: 'global' },
+  { command: 'status.openWorkspaceDrawer', label: 'Open Workspace Drawer', when: 'global' },
+  { command: 'status.openAudioDrawer', label: 'Open Audio and Runtime Drawer', when: 'global' },
+  // MERIDIAN item 6, carried note from item 4 (re-deferred from item 4 since no palette existed
+  // yet): K.1's "palette verbs are the keyboard alternative" for a keyboard-only user who can't
+  // enter the tab ring while focus rests on body (Tab there flips the horizon instead — see
+  // StrataShell's isTabFlipRestingTarget). These four give an explicit, discoverable way to jump
+  // focus onto the splitter or into a stratum without ever touching Tab.
+  { command: 'workspace.focusHorizonSplitter', label: 'Focus Horizon Splitter', when: 'global' },
+  { command: 'workspace.focusSky', label: 'Focus Sky (Graph)', when: 'global' },
+  { command: 'workspace.focusStage', label: 'Focus Stage Row', when: 'global' },
+  { command: 'workspace.focusGround', label: 'Focus Ground (Timeline)', when: 'global' },
+  // MERIDIAN item 7 (spec G/L.7): comfortable/compact UI density, reachable from Settings AND the
+  // palette (decision C). No default key binding — like `global.toggleView` and the
+  // `workspace.focus*` verbs above, it ships palette/Settings-only to avoid competing for scarce
+  // single-key slots; still remappable from Settings.
+  { command: 'global.toggleDensity', label: 'Toggle Density (Comfortable / Compact)', when: 'global' },
 ]
 
 export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
@@ -127,7 +164,11 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { command: 'global.undo', key: 'z', modifiers: ['Ctrl'], when: 'global' },
   { command: 'global.redo', key: 'z', modifiers: ['Ctrl', 'Shift'], when: 'global' },
   { command: 'global.redoAlt', key: 'y', modifiers: ['Ctrl'], when: 'global' },
-  { command: 'global.toggleView', key: '`', modifiers: [], when: 'global' },
+  // No default binding: MERIDIAN's strata shell (features/workspace/StrataShell) claims bare
+  // backtick globally for the horizon "peek" hold (spec H) and Tab for the horizon flip, so
+  // the old hard view-toggle default would double-fire alongside the peek. The command stays
+  // defined (see SHORTCUT_DEFINITIONS) so it remains remappable from Settings; it just has no
+  // out-of-the-box key.
   // '?' is Shift+/ on standard keyboards — the browser reports event.shiftKey
   // for it, so the modifier must be declared to match keybindingMatchesEvent.
   { command: 'global.openShortcutsHelp', key: '?', modifiers: ['Shift'], when: 'global' },
@@ -158,7 +199,11 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { command: 'workflow.paste', key: 'v', modifiers: ['Ctrl'], when: 'workflow' },
   { command: 'workflow.groupSelection', key: 'g', modifiers: ['Ctrl'], when: 'workflow' },
   { command: 'workflow.openNodePicker', key: 'n', modifiers: [], when: 'workflow' },
-  { command: 'workflow.fitView', key: 'f', modifiers: [], when: 'workflow' },
+  // MERIDIAN item 5: spec H claims bare `f` globally for "follow lineage thread" — the
+  // interface's signature interaction — so this legacy binding moves to Ctrl+0, mirroring
+  // `timeline.fitView`'s own key (same pattern already used for copy/paste/selectAll: same key,
+  // different `when` scope). Still remappable from Settings.
+  { command: 'workflow.fitView', key: '0', modifiers: ['Ctrl'], when: 'workflow' },
   { command: 'workflow.quickAddMedia', key: '1', modifiers: [], when: 'workflow' },
   { command: 'workflow.quickAddCamera', key: '2', modifiers: [], when: 'workflow' },
   { command: 'workflow.quickAddShader', key: '3', modifiers: [], when: 'workflow' },
@@ -170,6 +215,24 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { command: 'workflow.quickAddOutput', key: '9', modifiers: [], when: 'workflow' },
   { command: 'selection.delete', key: 'Delete', modifiers: [], when: 'global' },
   { command: 'selection.duplicate', key: 'd', modifiers: ['Ctrl'], when: 'global' },
+  // Spec H "Lineage: F follow thread from selection". Global (not stratum-scoped) by design —
+  // like selection.delete/duplicate above, it acts on whatever's currently selected regardless
+  // of which stratum has DOM focus; gating it by stratumScope would block the exact cross-strata
+  // jumps that make it useful.
+  { command: 'lineage.followThread', key: 'f', modifiers: [], when: 'global' },
+  // Spec H "Global: Ctrl+K palette". MERIDIAN item 6.
+  { command: 'global.openCommandPalette', key: 'k', modifiers: ['Ctrl'], when: 'global' },
+  // Spec H "Global: Ctrl+E export". MERIDIAN item 9.
+  { command: 'global.openExportSheet', key: 'e', modifiers: ['Ctrl'], when: 'global' },
+  // MERIDIAN item 9 (round-2 advisory 5): the four status drawers ship with NO default key —
+  // like the workspace.focus* verbs below, they are palette-only (Ctrl+K) entries whose direct
+  // manipulation is the status bar segment. Still remappable from Settings.
+  // MERIDIAN item 6 carried note (K.1): 'workspace.focusHorizonSplitter' / 'focusSky' /
+  // 'focusStage' / 'focusGround' deliberately ship with NO default key binding, mirroring
+  // 'global.toggleView' above. They are the palette-only (Ctrl+K) keyboard alternative for
+  // entering the tab ring when focus rests on body — giving them their own bare-key bindings
+  // would just add four more entries competing for scarce single-key slots. Still remappable
+  // from Settings like every other command.
 ]
 
 export function normalizeBindingKey(value: string) {

@@ -1,3 +1,4 @@
+import { DEFAULT_DENSITY_MODE, normalizeDensityMode } from '../../domain/project/density'
 import type { AppPreferences, KeyBinding } from '../../domain/project/types'
 import { invokeCommand } from '../ipc/tauri-commands'
 import { isTauriRuntime } from '../ipc/tauri-runtime'
@@ -12,6 +13,7 @@ const DEFAULT_APP_PREFERENCES: AppPreferences = {
   updateChannel: 'stable',
   updateManifestUrl: null,
   keybindings: DEFAULT_KEYBINDINGS,
+  density: DEFAULT_DENSITY_MODE,
 }
 
 export async function loadAppPreferences(): Promise<AppPreferences> {
@@ -101,6 +103,7 @@ function normalizeAppPreferences(preferences: Partial<AppPreferences>): AppPrefe
         ? preferences.updateManifestUrl.trim()
         : null,
     keybindings: normalizeKeybindings(preferences.keybindings),
+    density: normalizeDensityMode(preferences.density),
   }
 }
 

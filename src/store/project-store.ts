@@ -26,6 +26,8 @@ import {
 } from '../domain/history/history-manager'
 import { nextId } from '../domain/id'
 import { createDefaultProject, createTemplateProject, type ProjectTemplateId } from '../domain/project/defaults'
+import { activeViewForRatio, clampHorizonRatio, DEFAULT_HORIZON_RATIO, defaultRatioForView } from '../domain/project/horizon'
+import { DEFAULT_DENSITY_MODE, normalizeDensityMode, type DensityMode } from '../domain/project/density'
 import { validateProject, type ProjectValidationIssue } from '../domain/project/validators'
 import type {
   AppPreferences,
@@ -54,6 +56,7 @@ import type {
   Section11CapturePacketRecord,
   Section11ProofRecord,
   Section11TargetProfile,
+  StageRowSide,
   ThumbnailResult,
   Track,
   UserInterfaceState,
@@ -129,6 +132,8 @@ interface ProjectStoreState {
   projectValidationIssues: ProjectValidationIssue[]
   workflowExecutionOrder: string[]
   setActiveView: (view: UserInterfaceState['activeView']) => void
+  setHorizonRatio: (ratio: number) => void
+  toggleStageRowCollapse: (side: StageRowSide) => void
   toggleComputeMode: () => void
   toggleProxyMode: () => void
   dismissWelcome: () => void
@@ -148,6 +153,9 @@ interface ProjectStoreState {
   setDefaultProjectDirectory: (path: string | null) => Promise<void>
   setUpdateChannel: (channel: string) => Promise<void>
   setUpdateManifestUrl: (url: string | null) => Promise<void>
+  /** MERIDIAN item 7: comfortable/compact UI density, an app-level preference persisted the same
+   *  way as `keybindings` (see `services/persistence/app-preferences.ts`), not a project field. */
+  setDensityMode: (mode: DensityMode) => Promise<void>
   enableWorkspaceSharing: () => void
   disableWorkspaceSharing: () => void
   setWorkspaceAccessLevel: (accessLevel: WorkspaceSharingState['accessLevel']) => void
@@ -456,6 +464,30 @@ function createIdleWorkflowConnectionFeedback(): WorkflowConnectionFeedback {
   }
 }
 
+/**
+ * UI side effects of an EXPLICIT view switch (`setActiveView`: Header mode buttons, the
+ * legacy `global.toggleView` shortcut, and store actions like showSelectedClipInWorkflow).
+ * Deliberately NOT applied by `setHorizonRatio`'s emphasis sync — ratio-driven flips (Tab,
+ * peek, nudge, drag across the midpoint) keep both strata visible, so clearing the other
+ * stratum's selection there would be silent data-loss of the user's selection (review
+ * round-1 blocking item 1). Kept as a pure patch-builder for testability.
+ */
+function computeActiveViewUiPatch(
+  ui: UserInterfaceState,
+  view: UserInterfaceState['activeView'],
+): Partial<UserInterfaceState> {
+  return {
+    activeView: view,
+    selectedClipId: view === 'workflow' ? null : ui.selectedClipId,
+    selectedClipIds: view === 'workflow' ? [] : ui.selectedClipIds,
+    selectedTrackId: view === 'workflow' ? null : ui.selectedTrackId,
+    selectedNodeId: view === 'timeline' ? null : ui.selectedNodeId,
+    selectedNodeIds: view === 'timeline' ? [] : ui.selectedNodeIds,
+    showNodePicker: view === 'timeline' ? false : ui.showNodePicker,
+    statusMessage: `Switched to ${view} view`,
+  }
+}
+
 function createInitialAppUpdateState(): AppUpdateState {
   return {
     status: 'idle',
@@ -730,6 +762,17 @@ function setNestedNodeDataValue(target: Record<string, unknown>, path: string, v
   cursor[lastSegment] = value
 }
 
+function normalizeHorizonRatio(project: FluxNodeProject) {
+  const current = project.meta.horizonRatio
+  const normalized = clampHorizonRatio(typeof current === 'number' ? current : DEFAULT_HORIZON_RATIO)
+
+  // Guard against unconditional writes to a value that's already correct — getValidationState
+  // sometimes runs against objects immer has frozen (see migrate-project.ts's analogous note).
+  if (current !== normalized) {
+    project.meta.horizonRatio = normalized
+  }
+}
+
 function getValidationState(project: FluxNodeProject) {
   normalizeWorkflowGroups(project)
   normalizeWorkspaceSharing(project)
@@ -737,6 +780,7 @@ function getValidationState(project: FluxNodeProject) {
   normalizeSection11CoverageMapHistory(project)
   normalizeSection11CapturePacketHistory(project)
   normalizeSection11TargetProfileOverride(project)
+  normalizeHorizonRatio(project)
   normalizeRenderQueue(project)
   const workflowReport = validateWorkflowGraph(project.workflow)
   return {
@@ -2507,6 +2551,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     updateChannel: 'stable',
     updateManifestUrl: null,
     keybindings: DEFAULT_KEYBINDINGS,
+    density: DEFAULT_DENSITY_MODE,
   },
   history: createHistoryState(),
   recentProjects: [],
@@ -2581,16 +2626,60 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   },
   setActiveView: (view) =>
     set((state) => ({
-      ui: {
-        ...state.ui,
-        activeView: view,
-        selectedClipId: view === 'workflow' ? null : state.ui.selectedClipId,
-        selectedClipIds: view === 'workflow' ? [] : state.ui.selectedClipIds,
-        selectedTrackId: view === 'workflow' ? null : state.ui.selectedTrackId,
-        selectedNodeId: view === 'timeline' ? null : state.ui.selectedNodeId,
-        selectedNodeIds: view === 'timeline' ? [] : state.ui.selectedNodeIds,
-        showNodePicker: view === 'timeline' ? false : state.ui.showNodePicker,
-        statusMessage: `Switched to ${view} view`,
+      ui: { ...state.ui, ...computeActiveViewUiPatch(state.ui, view) },
+      // MERIDIAN strata shell: both strata always render, so "switching views" now means
+      // sliding the horizon to that view's default detent (spec F.2) rather than mounting a
+      // different component. This keeps every existing caller (Header's mode buttons, the
+      // `global.toggleView` shortcut) working unchanged while driving the new splitter.
+      project: {
+        ...state.project,
+        meta: {
+          ...state.project.meta,
+          horizonRatio: defaultRatioForView(view),
+        },
+      },
+    })),
+  setHorizonRatio: (ratio) =>
+    set((state) => {
+      const clamped = clampHorizonRatio(ratio)
+      const nextProject = {
+        ...state.project,
+        meta: { ...state.project.meta, horizonRatio: clamped },
+      }
+
+      const nextView = activeViewForRatio(clamped)
+
+      if (nextView === state.ui.activeView) {
+        return { project: nextProject }
+      }
+
+      // The splitter crossed the midpoint: keep `ui.activeView` (and everything gated on it —
+      // keyboard shortcut scope, the preview title, PreviewPanel's inspector target) in sync
+      // with whichever stratum now has more room. Unlike `setActiveView`, this deliberately
+      // does NOT clear selection or emit a "Switched to..." status toast: in the strata shell
+      // both strata stay visible across a ratio flip, so the user's selection on either side
+      // is still on screen and must survive (review round-1 blocking item 1).
+      return {
+        project: nextProject,
+        ui: { ...state.ui, activeView: nextView },
+      }
+    }),
+  // MERIDIAN stage row (item 3): mirrors `setHorizonRatio`'s pattern — a direct `set` on
+  // `project.meta`, not routed through `applyMutation`/undo history. Rail collapse is layout
+  // state (like the horizon ratio and detached-panel geometry), not project *content*, so it
+  // shouldn't show up in the undo stack or dirty the "unsaved changes" story any differently
+  // than dragging the horizon does.
+  toggleStageRowCollapse: (side) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        meta: {
+          ...state.project.meta,
+          stageRowCollapse: {
+            ...state.project.meta.stageRowCollapse,
+            [side]: !state.project.meta.stageRowCollapse[side],
+          },
+        },
       },
     })),
   recordViewSwitchMetric: (metric) =>
@@ -2854,6 +2943,20 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       ui: {
         ...state.ui,
         statusMessage: nextPreferences.updateManifestUrl ? 'Update manifest URL updated' : 'Update manifest URL cleared',
+      },
+    }))
+  },
+  setDensityMode: async (mode) => {
+    const nextPreferences = {
+      ...get().preferences,
+      density: normalizeDensityMode(mode),
+    }
+    await saveAppPreferences(nextPreferences)
+    set((state) => ({
+      preferences: nextPreferences,
+      ui: {
+        ...state.ui,
+        statusMessage: `Density set to ${nextPreferences.density}`,
       },
     }))
   },

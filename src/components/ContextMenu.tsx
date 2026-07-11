@@ -33,7 +33,8 @@ export function ContextMenuItem({
   tone = 'default',
   disabled = false,
 }: {
-  label: string
+  /** Usually plain text; `services/commands`' `CommandMenuItem` passes a title+`Kbd` fragment instead so every registry-backed row can show its shortcut inline (spec H). */
+  label: ReactNode
   onClick: () => void
   tone?: 'default' | 'danger'
   disabled?: boolean
@@ -44,7 +45,10 @@ export function ContextMenuItem({
       role="menuitem"
       onClick={onClick}
       disabled={disabled}
-      className={`block w-full rounded-xl px-3 py-2 text-left text-sm ${
+      // Item 7 (density modes): row vertical padding follows --meridian-gutter (spec G 8px/6px)
+      // so every registry-backed context menu tightens in compact — spec L.7 "spacing via CSS
+      // variables, not conditional classes".
+      className={`block w-full rounded-xl px-3 py-[var(--meridian-gutter)] text-left text-sm ${
         tone === 'danger' ? 'bg-red-500/10 text-red-100 hover:bg-red-500/15' : 'text-white hover:bg-white/5'
       } ${disabled ? 'cursor-not-allowed opacity-45 hover:bg-transparent' : ''}`}
     >

@@ -1018,6 +1018,7 @@ export function WorkflowView() {
                   return (
                     <article
                       key={node.id}
+                      data-meridian-node-id={node.id}
                       ref={(element) => {
                         if (element) {
                           nodeElementRefs.current.set(node.id, element)
@@ -1521,7 +1522,9 @@ function WorkflowNodePicker({
           ))}
         </div>
         {filteredNodeTypes.length === 0 ? (
-          <p className="mt-4 text-sm text-[#9ca3af]">No node types matched this search.</p>
+          <p className="mt-4 text-sm text-[#9ca3af]">
+            No node types matched &ldquo;{nodeSearch}&rdquo;. Clear the search to see every node type again.
+          </p>
         ) : null}
       </section>
     </div>

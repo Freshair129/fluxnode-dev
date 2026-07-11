@@ -59,15 +59,20 @@ export function WelcomeModal() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [dismissWelcome])
 
+  // The backdrop scrolls, and the card centers with `my-auto` rather than `items-center`:
+  // align-items centering pushes overflow out of BOTH ends of the scroll container, so a card
+  // taller than the viewport (this one, at most heights) leaves its header unreachable above the
+  // scroll origin. Auto margins collapse to 0 once the card overflows, keeping every part of it
+  // scrollable into view.
   return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+    <div className="absolute inset-0 z-20 flex justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
       <section
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="welcome-modal-title"
         tabIndex={-1}
-        className="w-full max-w-4xl rounded-[2rem] border border-white/10 bg-[#101112] p-6 shadow-[0_30px_120px_rgba(0,0,0,0.5)] outline-none"
+        className="my-auto h-fit w-full max-w-4xl rounded-[2rem] border border-white/10 bg-[#101112] p-6 shadow-[0_30px_120px_rgba(0,0,0,0.5)] outline-none"
       >
         <div className="flex items-start justify-between gap-4">
           <div>

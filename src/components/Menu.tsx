@@ -86,7 +86,9 @@ export function MenuItem({
       role="menuitemcheckbox"
       aria-checked={pressed}
       onClick={onClick}
-      className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition ${
+      // Item 7 (density modes): row vertical padding follows --meridian-gutter (spec G 8px/6px),
+      // same treatment as ContextMenuItem/PaletteResultRow.
+      className={`flex w-full items-center justify-between rounded-xl px-3 py-[var(--meridian-gutter)] text-left text-sm transition ${
         pressed ? 'bg-accent/10 text-accent-soft' : 'text-white hover:bg-white/5'
       }`}
     >

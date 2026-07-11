@@ -50,7 +50,7 @@ export function ConfirmDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
       <section
         ref={dialogRef}
         role="alertdialog"
@@ -58,7 +58,7 @@ export function ConfirmDialog({
         aria-labelledby="confirm-dialog-title"
         aria-describedby={description ? 'confirm-dialog-description' : undefined}
         tabIndex={-1}
-        className="w-full max-w-md rounded-[1.5rem] border border-white/10 bg-[#141416] p-6 shadow-[0_30px_120px_rgba(0,0,0,0.55)] outline-none"
+        className="my-auto h-fit w-full max-w-md rounded-[1.5rem] border border-white/10 bg-[#141416] p-6 shadow-[0_30px_120px_rgba(0,0,0,0.55)] outline-none"
       >
         <div className="flex items-start gap-3">
           {tone === 'danger' ? (

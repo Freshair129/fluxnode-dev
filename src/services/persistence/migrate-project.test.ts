@@ -32,4 +32,26 @@ describe('migrateProject', () => {
     expect(migrated.meta.section11CapturePacketHistory).toEqual([])
     expect(migrated.meta.section11TargetProfileOverride).toBeNull()
   })
+
+  it('fills in a missing/malformed stageRowCollapse field (MERIDIAN item 3) without touching an already-valid one', () => {
+    const legacyProject = createDefaultProject()
+    // @ts-expect-error simulating a save written before the stage row collapse rails existed
+    delete legacyProject.meta.stageRowCollapse
+
+    const migratedLegacy = migrateProject(legacyProject)
+    expect(migratedLegacy.meta.stageRowCollapse).toEqual({ ledger: false, inspector: false })
+
+    const malformedProject = createDefaultProject()
+    malformedProject.meta.stageRowCollapse = { ledger: true } as unknown as typeof malformedProject.meta.stageRowCollapse
+
+    const migratedMalformed = migrateProject(malformedProject)
+    expect(migratedMalformed.meta.stageRowCollapse).toEqual({ ledger: false, inspector: false })
+
+    const currentProject = createDefaultProject()
+    currentProject.meta.stageRowCollapse = { ledger: true, inspector: true }
+    const before = JSON.stringify(currentProject)
+
+    const migratedCurrent = migrateProject(currentProject)
+    expect(JSON.stringify(migratedCurrent)).toBe(before)
+  })
 })

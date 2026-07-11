@@ -30,10 +30,16 @@ export function useModalA11y<T extends HTMLElement>(active = true) {
 
     // Move initial focus into the dialog without stealing it from an element
     // the user may have already focused (e.g. an autoFocus input).
+    //
+    // `preventScroll` matters here: a dialog card taller than the viewport overflows its centered
+    // backdrop, so the default focus-scroll would drag the document to chase the first focusable
+    // element and strand the dialog's own header (and close button) above y=0, with nothing to
+    // scroll it back. The Tab-trap below deliberately keeps the default scrolling behavior, since
+    // there the scroll is following a keypress the user just made.
     if (!container.contains(document.activeElement)) {
       const focusable = getFocusable()
       const initialTarget = focusable[0] ?? container
-      initialTarget.focus()
+      initialTarget.focus({ preventScroll: true })
     }
 
     function handleKeyDown(event: KeyboardEvent) {

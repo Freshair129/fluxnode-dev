@@ -1,3 +1,4 @@
+import { clampHorizonRatio, DEFAULT_HORIZON_RATIO } from '../../domain/project/horizon'
 import type { FluxNodeProject } from '../../domain/project/types'
 
 /**
@@ -58,16 +59,54 @@ function migrateSection11Fields(project: FluxNodeProject) {
 }
 
 /**
+ * MERIDIAN strata shell (item 2): saves written before the horizon splitter existed lack this
+ * field. Only writes when the value actually needs correcting (missing/garbage) — some load
+ * paths (e.g. WAL reconstruction via immer's `applyPatches`) hand back a frozen object, and an
+ * unconditional reassignment would throw even when the value is already valid.
+ */
+function migrateHorizonRatio(project: FluxNodeProject) {
+  const current = project.meta.horizonRatio
+  const normalized = typeof current === 'number' ? clampHorizonRatio(current) : DEFAULT_HORIZON_RATIO
+
+  if (current !== normalized) {
+    project.meta.horizonRatio = normalized
+  }
+}
+
+/**
+ * MERIDIAN stage row (item 3): saves written before the job ledger/inspector collapse rails
+ * existed lack this field. Same conditional-write guard as `migrateHorizonRatio` — only writes
+ * when the value is actually missing/malformed, so already-valid (possibly frozen) objects are
+ * left untouched.
+ */
+function migrateStageRowCollapse(project: FluxNodeProject) {
+  const current = project.meta.stageRowCollapse
+
+  if (
+    current === null ||
+    typeof current !== 'object' ||
+    typeof current.ledger !== 'boolean' ||
+    typeof current.inspector !== 'boolean'
+  ) {
+    project.meta.stageRowCollapse = { ledger: false, inspector: false }
+  }
+}
+
+/**
  * Applies migrations in place and returns the (now current-version) project.
  * Safe to call on already-current projects — every step is idempotent.
  */
 export function migrateProject(raw: FluxNodeProject): FluxNodeProject {
   if (isOlderThan(raw, CURRENT_PROJECT_VERSION)) {
     migrateSection11Fields(raw)
+    migrateHorizonRatio(raw)
+    migrateStageRowCollapse(raw)
     raw.version = CURRENT_PROJECT_VERSION
   } else {
     // Still guard against partially-written saves even at the current version.
     migrateSection11Fields(raw)
+    migrateHorizonRatio(raw)
+    migrateStageRowCollapse(raw)
   }
 
   return raw

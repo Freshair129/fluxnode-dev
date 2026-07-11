@@ -1,4 +1,5 @@
 import type { Patch } from 'immer'
+import type { DensityMode } from './density'
 
 export interface FluxNodeProject {
   version: string
@@ -23,6 +24,25 @@ export interface ProjectMeta {
   section11ProofHistory: Section11ProofRecord[]
   section11CoverageMapHistory: Section11CoverageMapRecord[]
   section11CapturePacketHistory: Section11CapturePacketRecord[]
+  /**
+   * MERIDIAN strata shell: sky (workflow) fraction of the horizon splitter,
+   * in [HORIZON_RATIO_MIN, HORIZON_RATIO_MAX]. Persisted per-project (spec
+   * J.3). See `domain/project/horizon.ts` for the shared ratio math.
+   */
+  horizonRatio: number
+  /**
+   * MERIDIAN stage row (item 3): the job ledger (left) and context inspector
+   * (right) organs individually collapse to a 40px rail (spec F.3). Persisted
+   * per-project like `panelLayouts`/`horizonRatio`.
+   */
+  stageRowCollapse: StageRowCollapseState
+}
+
+export type StageRowSide = 'ledger' | 'inspector'
+
+export interface StageRowCollapseState {
+  ledger: boolean
+  inspector: boolean
 }
 
 export type DetachedPanelKind = 'preview' | 'timeline' | 'inspector'
@@ -742,6 +762,10 @@ export interface AppPreferences {
   updateChannel: string
   updateManifestUrl: string | null
   keybindings: KeyBinding[]
+  /** MERIDIAN item 7 (spec G/L.7): comfortable/compact UI density. An app-level preference (like
+   *  `keybindings` above), not a project property — it follows the user across projects rather
+   *  than living in `project.meta` alongside `horizonRatio`/`stageRowCollapse`. */
+  density: DensityMode
 }
 
 export type ShortcutScope = 'global' | 'timeline' | 'workflow'

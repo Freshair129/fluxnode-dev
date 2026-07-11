@@ -26,6 +26,7 @@ import { PromptDialog } from '../../components/PromptDialog'
 import { Button } from '../../components/Button'
 import { Badge as SharedBadge } from '../../components/Badge'
 import { ContextMenu, ContextMenuItem, ContextMenuDivider } from '../../components/ContextMenu'
+import { CommandMenuItem } from '../commands/CommandMenuItem'
 
 export function TimelineView() {
   const timeline = useProjectStore((state) => state.project.timeline)
@@ -760,6 +761,7 @@ export function TimelineView() {
                       return (
                         <article
                           key={clip.id}
+                          data-meridian-clip-id={clip.id}
                           ref={(element) => {
                             if (element) {
                               clipNodeRefs.current.set(clip.id, element)
@@ -863,9 +865,14 @@ export function TimelineView() {
         >
           {contextMenu.type === 'clip' ? (
             <div className="space-y-1">
-              <ContextAction label="Split at Playhead" onClick={runContextAction(splitSelectedClip)} />
-              <ContextAction label="Delete Clip" onClick={runContextAction(deleteSelected)} tone="danger" />
-              <ContextAction label="Duplicate Clip" onClick={runContextAction(duplicateSelected)} />
+              {/* MERIDIAN item 6: these three rows are registry-backed (spec H "Context menu …
+                  generated from the command registry, shortcut shown on every row") — title,
+                  disabled state, and the inline Kbd hint all come from COMMAND_REGISTRY instead
+                  of being hand-typed here, so they can't drift out of sync with the palette or
+                  the keyboard binding. */}
+              <CommandMenuItem commandId="timeline.split" onActivated={() => setContextMenu(null)} />
+              <CommandMenuItem commandId="selection.delete" tone="danger" onActivated={() => setContextMenu(null)} />
+              <CommandMenuItem commandId="selection.duplicate" onActivated={() => setContextMenu(null)} />
               <ContextDivider />
               {[0.25, 0.5, 1, 2, 4].map((speed) => (
                 <ContextAction
@@ -1127,7 +1134,13 @@ function Filmstrip({
         <span>Filmstrip</span>
         <span>{clipDuration.toFixed(1)}s</span>
       </div>
-      <div className="flex h-14 gap-1 overflow-hidden rounded-xl border border-white/8 bg-[#0f1012]">
+      {/* Item 7 (density modes, spec G "timeline track 56->44px"): this filmstrip strip is the
+          per-clip "track" content this codebase actually renders at a fixed height (TimelineView
+          is a stacked-card layout, not literal horizontal lanes — see the item-7 report's note on
+          why `track.height` (60/84/112, the pre-existing per-track USER setting cycled by
+          "Height"/context-menu actions) is a different, untouched concept). h-14 was already
+          exactly 56px, so this is a zero-visual-diff swap to the density var in comfortable. */}
+      <div className="flex h-[var(--meridian-track-h)] gap-1 overflow-hidden rounded-xl border border-white/8 bg-[#0f1012]">
         {thumbnailPath
           ? Array.from({ length: cellCount }, (_, index) => (
               <div key={index} className="h-full flex-1 overflow-hidden">

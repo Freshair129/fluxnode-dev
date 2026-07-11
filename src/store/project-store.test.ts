@@ -144,6 +144,96 @@ describe('project-store: undo/redo round trip via patches', () => {
   })
 })
 
+describe('project-store: horizon ratio (MERIDIAN strata shell)', () => {
+  let useProjectStore: typeof UseProjectStoreType
+
+  beforeEach(async () => {
+    useProjectStore = await loadStore()
+  })
+
+  it('a ratio-driven emphasis flip preserves timeline selection (review round-1 regression: select c14 → Tab must not deselect)', () => {
+    // Default project ships with clip-video-01 on track-video-01.
+    useProjectStore.getState().selectClip('clip-video-01')
+    const before = useProjectStore.getState().ui
+    expect(before.selectedClipId).toBe('clip-video-01')
+
+    // Simulate a Tab flip: workflow default (0.62) → timeline default (0.38), crossing 0.5.
+    useProjectStore.getState().setHorizonRatio(0.38)
+
+    const after = useProjectStore.getState().ui
+    expect(after.activeView).toBe('timeline')
+    expect(after.selectedClipId).toBe('clip-video-01')
+    expect(after.selectedClipIds).toEqual(before.selectedClipIds)
+    expect(after.selectedTrackId).toBe(before.selectedTrackId)
+    // No "Switched to ... view" toast on a ratio-driven flip.
+    expect(after.statusMessage).toBe(before.statusMessage)
+
+    // Flip back: still selected.
+    useProjectStore.getState().setHorizonRatio(0.62)
+    expect(useProjectStore.getState().ui.activeView).toBe('workflow')
+    expect(useProjectStore.getState().ui.selectedClipId).toBe('clip-video-01')
+  })
+
+  it('a ratio-driven emphasis flip preserves workflow selection and node-picker state', () => {
+    const nodeId = useProjectStore.getState().project.workflow.nodes[0]!.id
+    useProjectStore.getState().selectNode(nodeId)
+    useProjectStore.getState().openNodePicker()
+    expect(useProjectStore.getState().ui.selectedNodeId).toBe(nodeId)
+
+    // Flip emphasis to the timeline stratum (which used to force-close the picker and clear nodes).
+    useProjectStore.getState().setHorizonRatio(0.38)
+
+    const after = useProjectStore.getState().ui
+    expect(after.activeView).toBe('timeline')
+    expect(after.selectedNodeId).toBe(nodeId)
+    expect(after.selectedNodeIds).toEqual([nodeId])
+    expect(after.showNodePicker).toBe(true)
+  })
+
+  it('setHorizonRatio clamps and persists the ratio in project.meta without touching history', () => {
+    useProjectStore.getState().setHorizonRatio(0.95)
+    expect(useProjectStore.getState().project.meta.horizonRatio).toBe(0.8)
+
+    useProjectStore.getState().setHorizonRatio(0.05)
+    expect(useProjectStore.getState().project.meta.horizonRatio).toBe(0.2)
+
+    expect(useProjectStore.getState().history.undoStack).toHaveLength(0)
+  })
+
+  it('a ratio change that stays on the same side of the midpoint leaves ui untouched', () => {
+    const uiBefore = useProjectStore.getState().ui
+    useProjectStore.getState().setHorizonRatio(0.7)
+
+    expect(useProjectStore.getState().project.meta.horizonRatio).toBe(0.7)
+    expect(useProjectStore.getState().ui).toBe(uiBefore)
+  })
+
+  it('explicit setActiveView still snaps the horizon to the view default detent', () => {
+    useProjectStore.getState().setActiveView('timeline')
+    expect(useProjectStore.getState().project.meta.horizonRatio).toBe(0.38)
+    expect(useProjectStore.getState().ui.activeView).toBe('timeline')
+
+    useProjectStore.getState().setActiveView('workflow')
+    expect(useProjectStore.getState().project.meta.horizonRatio).toBe(0.62)
+    expect(useProjectStore.getState().ui.activeView).toBe('workflow')
+  })
+
+  it('toggleStageRowCollapse flips only the targeted rail and persists without touching history', () => {
+    expect(useProjectStore.getState().project.meta.stageRowCollapse).toEqual({ ledger: false, inspector: false })
+
+    useProjectStore.getState().toggleStageRowCollapse('ledger')
+    expect(useProjectStore.getState().project.meta.stageRowCollapse).toEqual({ ledger: true, inspector: false })
+
+    useProjectStore.getState().toggleStageRowCollapse('inspector')
+    expect(useProjectStore.getState().project.meta.stageRowCollapse).toEqual({ ledger: true, inspector: true })
+
+    useProjectStore.getState().toggleStageRowCollapse('ledger')
+    expect(useProjectStore.getState().project.meta.stageRowCollapse).toEqual({ ledger: false, inspector: true })
+
+    expect(useProjectStore.getState().history.undoStack).toHaveLength(0)
+  })
+})
+
 describe('project-store: split-clip id uniqueness', () => {
   let useProjectStore: typeof UseProjectStoreType
 
