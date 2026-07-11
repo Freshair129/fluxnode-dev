@@ -1,0 +1,126 @@
+{
+  "id": "roadmap-fluxnode-mvp",
+  "type": "roadmap",
+  "title": "FluxNode Beat-Palmier MVP",
+  "status": "active",
+  "version": 1,
+  "created_at": "2026-07-11T13:25:00+07:00",
+  "updated_at": "2026-07-11T13:25:00+07:00",
+  "source_doc": "docs/MASTER_PLAN.md",
+  "master_plan_approved": "2026-07-11",
+  "program_start": "2026-07-11",
+  "mission": "Ship the fastest MVP that competes with Palmier Pro only at a better level: categorical wins on axes Palmier structurally cannot follow, parity on table stakes.",
+  "killer_features": [
+    {
+      "id": "KF-1",
+      "name": "Zero-Credit Studio",
+      "summary": "Local on-GPU generation: image (sd.cpp fast path + ComfyUI power path), TTS (piper), STT (whisper); GpuArbiter VRAM eviction; unlimited regenerate, offline, $0/clip.",
+      "moat": "Palmier's revenue IS metered cloud credits; no local backend layer exists in their architecture.",
+      "waves": ["W0", "W2"],
+      "status": "planned"
+    },
+    {
+      "id": "KF-2",
+      "name": "Built-in Offline Copilot",
+      "summary": "In-app chat panel driving the 30-action registry via local Ollama (default qwen3.5:4b), tool-activity feed, propose-confirm write flow; MCP still exposed for external agents.",
+      "moat": "Palmier ships no brain of its own; it requires the user's paid Claude/Codex/Cursor.",
+      "waves": ["W1"],
+      "status": "planned"
+    },
+    {
+      "id": "KF-3",
+      "name": "Regeneration-Safe Pipeline",
+      "summary": "Prompt/model/seed pinned to clips as node data; regenerate-in-place with duration-lock policy; NLE XML export + generation-metadata sidecar with lossless re-import.",
+      "moat": "Attacks Palmier's two documented weaknesses: metadata loss on export and regen duration drift; requires clips-as-nodes semantics.",
+      "waves": ["W4"],
+      "status": "planned"
+    }
+  ],
+  "phases": [
+    { "id": "P0", "name": "Discovery", "status": "in_progress", "docs_total": 6, "docs_done": 1 },
+    { "id": "P1", "name": "System Architecture", "status": "not_started", "docs_total": 7, "docs_done": 0 },
+    { "id": "P2", "name": "Contracts", "status": "not_started", "docs_total": 6, "docs_done": 0 },
+    { "id": "P3", "name": "Multi-Agent Architecture", "status": "not_started", "docs_total": 7, "docs_done": 0 },
+    { "id": "P4", "name": "Implementation Specification", "status": "not_started", "docs_total": 5, "docs_done": 0 },
+    { "id": "P5", "name": "Quality Assurance", "status": "not_started", "docs_total": 5, "docs_done": 0 },
+    { "id": "P6", "name": "Handoff & Task Decomposition", "status": "not_started", "docs_total": 8, "docs_done": 0 },
+    { "id": "P7", "name": "Implementation (Waves)", "status": "not_started", "docs_total": 0, "docs_done": 0 }
+  ],
+  "waves": [
+    {
+      "id": "W0",
+      "name": "Sidecar Foundation",
+      "ships": "whisper/piper/sd.cpp fetch scripts per-OS, flag verification against real binaries, model downloader with checksums, CI proof on 3 OS; llama.cpp stub removed from scope.",
+      "feeds": ["KF-1", "table-stakes"],
+      "complexity": "M",
+      "depends_on": [],
+      "status": "planned"
+    },
+    {
+      "id": "W1",
+      "name": "Copilot Surface",
+      "ships": "Chat panel (src/features/copilot/) on agent_chat, tool-activity feed, propose-confirm flow for Mutating/LongJob, model picker + Ollama health check, --mcp runtime-verified.",
+      "feeds": ["KF-2"],
+      "complexity": "M",
+      "depends_on": [],
+      "status": "planned"
+    },
+    {
+      "id": "W2",
+      "name": "Zero-Credit Studio",
+      "ships": "Generate-image node E2E via sd.cpp + ComfyUI, TTS/STT surfaced in UI, timeline insert of generated assets, GpuArbiter eviction verified under real VRAM pressure.",
+      "feeds": ["KF-1"],
+      "complexity": "L",
+      "depends_on": ["W0", "W1"],
+      "status": "planned"
+    },
+    {
+      "id": "W3",
+      "name": "Transcribe & Find",
+      "ships": "Whisper transcription job + UI, transcript store, transcript search across project media, 16kHz ffmpeg pre-convert.",
+      "feeds": ["table-stakes"],
+      "complexity": "S-M",
+      "depends_on": ["W0"],
+      "status": "planned"
+    },
+    {
+      "id": "W4",
+      "name": "Regen-Safe Pipeline",
+      "ships": "Regen metadata on clips/nodes, regenerate-in-place with duration-lock, NLE XML (FCP7) export + generation-metadata sidecar + lossless re-import.",
+      "feeds": ["KF-3"],
+      "complexity": "M",
+      "depends_on": ["W2", "W3"],
+      "status": "planned"
+    },
+    {
+      "id": "W5",
+      "name": "Beta Hardening",
+      "ships": "Cross-OS release proof (macOS/Linux bundle targets + fetch scripts), perf pass vs hardware tiers, killer-feature onboarding, beta packaging + docs.",
+      "feeds": ["ship"],
+      "complexity": "M",
+      "depends_on": ["W1", "W2", "W3", "W4"],
+      "status": "planned"
+    }
+  ],
+  "milestones": [
+    { "id": "M0", "name": "Docs frozen (Phases 0-6 approved)", "proof": "All RWANG docs approved; queue dispatchable", "target_week": 1, "status": "in_progress" },
+    { "id": "M1", "name": "Copilot in-app", "proof": "Chat panel executes a read action and a confirmed write action E2E on 3 OS dev builds", "target_week": 2, "status": "planned" },
+    { "id": "M2", "name": "First local generation", "proof": "Prompt to sd.cpp image on timeline, zero network, Windows + one other OS; VRAM eviction observed", "target_week": 4, "status": "planned" },
+    { "id": "M3", "name": "Table stakes closed", "proof": "Spoken phrase found via transcript search; XML export opens in Resolve", "target_week": 5, "status": "planned" },
+    { "id": "M4", "name": "Beat-Palmier scorecard green", "proof": "Duration-locked regen with intact cuts; export/re-import round-trip preserves regen; >=2 axes Strong-vs-Absent in our favor, 0 against on table stakes", "target_week": 6, "status": "planned" },
+    { "id": "M5", "name": "Public beta", "proof": "Release-workflow builds for Win/macOS/Linux", "target_week": 8, "status": "planned" }
+  ],
+  "out_of_scope": [
+    "In-process llama.cpp (Ollama suffices for MVP)",
+    "Cloud generation / credit resale (post-MVP BYO-key only)",
+    "Embedding-based semantic search (transcript search covers MVP)",
+    "Local video-model generation (video via ComfyUI power path only)",
+    "Mobile"
+  ],
+  "backlog_policy": {
+    "task_size": ["XS", "S"],
+    "acceptance": "deterministic only (compiler/tests/schema/snapshot; never LLM-judged)",
+    "local_safe_target_ratio": 0.7,
+    "projected_task_count": [120, 180]
+  }
+}

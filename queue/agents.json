@@ -1,0 +1,93 @@
+{
+  "id": "agent-pool-fluxnode",
+  "type": "agent_pool",
+  "title": "FluxNode implementation account pool",
+  "status": "active",
+  "version": 1,
+  "created_at": "2026-07-11T13:28:00+07:00",
+  "updated_at": "2026-07-11T13:28:00+07:00",
+  "routing_policy": {
+    "order": ["required_capability", "candidate_agents", "capability_score", "availability", "cost", "latency", "historical_pass_rate"],
+    "rules": [
+      "LOCAL_SAFE tasks route to the highest-scoring available local agent first; cloud agents take LOCAL_SAFE work only when local agents are saturated or fail verification twice.",
+      "CLOUD_REQUIRED tasks route only to agents with architecture/review capability >= 80.",
+      "Verifier role is deterministic tooling (compiler/tests/lint), never an LLM; agents listed here never self-verify.",
+      "Router uses capability scores only, never model names (RWANG section 6.3)."
+    ]
+  },
+  "agents": [
+    {
+      "id": "claude-code-fable5",
+      "version": "2026-07",
+      "backend": "anthropic/claude-code (cloud)",
+      "account": "suanranger129@gmail.com",
+      "roles": ["Planner", "Architect", "Reviewer", "Merger-support"],
+      "capabilities": { "architecture": 95, "planning": 95, "implementation": 90, "testing": 85, "review": 92, "math": 90, "parser": 90, "ui": 88, "security": 88, "performance": 85, "documentation": 92, "benchmark": 80 },
+      "supported_languages": ["rust", "typescript", "powershell", "bash", "json", "markdown"],
+      "max_context": 200000,
+      "max_output": 64000,
+      "reasoning_support": true,
+      "tool_support": true,
+      "vision_support": true,
+      "json_support": true,
+      "streaming_support": true,
+      "deterministic_mode": false,
+      "confidence_reporting": true,
+      "local_eligibility": "CLOUD",
+      "cost_tier": "high",
+      "availability": "session-based",
+      "verified": { "status": "verified", "evidence": "This program's Phase 0 + CI fixes + PR #2/#3 landed 2026-07-11", "last_seen": "2026-07-11" }
+    },
+    {
+      "id": "ollama-qwen3.5-4b",
+      "version": "qwen3.5:4b",
+      "backend": "ollama (local, http://127.0.0.1:11434)",
+      "account": "local — no account, no API key",
+      "roles": ["Executor (LOCAL_SAFE)", "Runtime copilot brain (KF-2)"],
+      "capabilities": { "architecture": 15, "planning": 30, "implementation": 55, "testing": 50, "review": 35, "math": 45, "parser": 60, "ui": 30, "security": 20, "performance": 30, "documentation": 60, "benchmark": 40 },
+      "supported_languages": ["rust", "typescript", "json", "markdown"],
+      "max_context": 32768,
+      "max_output": 8192,
+      "reasoning_support": true,
+      "tool_support": true,
+      "vision_support": false,
+      "json_support": true,
+      "streaming_support": true,
+      "deterministic_mode": true,
+      "confidence_reporting": false,
+      "local_eligibility": "LOCAL",
+      "cost_tier": "zero",
+      "availability": "always (when Ollama running)",
+      "verified": { "status": "verified", "evidence": "E2E agent -> asset_probe -> ffprobe -> answer (bench/wave3, HANDOFF 2026-07-06); tool-calling against registry schema confirmed", "last_seen": "2026-07-06" }
+    },
+    {
+      "id": "codex-cli",
+      "version": "unknown",
+      "backend": "openai/codex-cli (cloud)",
+      "account": "owner's existing account",
+      "roles": ["Executor (LOCAL_SAFE overflow)", "Benchmark counterpart"],
+      "capabilities": { "architecture": 60, "planning": 60, "implementation": 80, "testing": 70, "review": 60, "math": 70, "parser": 75, "ui": 65, "security": 55, "performance": 60, "documentation": 70, "benchmark": 60 },
+      "supported_languages": ["rust", "typescript", "json", "markdown"],
+      "max_context": 128000,
+      "max_output": 32000,
+      "reasoning_support": true,
+      "tool_support": true,
+      "vision_support": false,
+      "json_support": true,
+      "streaming_support": true,
+      "deterministic_mode": false,
+      "confidence_reporting": false,
+      "local_eligibility": "CLOUD",
+      "cost_tier": "medium",
+      "availability": "on-demand",
+      "verified": { "status": "unverified", "evidence": "Codegen benchmark vs Ollama exists (bench/wave1a, run.sh + LOG.md) but capability scores are provisional estimates, not measured this program", "last_seen": "2026-07-06" }
+    }
+  ],
+  "expansion": {
+    "how_to_add": "Append an agent object honoring the section 6.2 contract; scores are provisional until a wave-1a-style benchmark records historical pass rate.",
+    "planned_candidates": [
+      "Larger local coder model via Ollama (e.g. 14B-32B class) once W0 confirms VRAM headroom alongside sd.cpp",
+      "Second Claude Code session as parallel Executor during Phase 7 waves"
+    ]
+  }
+}
