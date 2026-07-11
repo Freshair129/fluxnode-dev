@@ -1,0 +1,325 @@
+<title>FluxNode Mission Control</title>
+<style>
+  :root {
+    --bg: #0d0d0d; --surface: #1c1c1e; --surface-2: #232326; --line: #2e2e33; --line-soft: #26262a;
+    --ink: #f2f2ee; --ink-dim: #a3a39b; --ink-faint: #6c6c66;
+    --neon: #e0ff00; --neon-soft: rgba(224,255,0,0.12);
+    --blue: #3b82f6; --blue-soft: rgba(59,130,246,0.14);
+    --ok: #6fe07a; --warn: #e0a542; --bad: #f0603e;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: radial-gradient(1100px 500px at 85% -8%, rgba(224,255,0,0.05), transparent 60%), radial-gradient(800px 480px at -5% 108%, rgba(59,130,246,0.07), transparent 55%), var(--bg); color: var(--ink); font-family: var(--sans); line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 26px 26px 80px; }
+  .eyebrow { font-family: var(--mono); font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; color: var(--ink-faint); }
+
+  /* top strip */
+  .strip { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(165deg, var(--surface), var(--surface-2)); padding: 18px 22px; }
+  .strip .brand { display: flex; flex-direction: column; gap: 3px; margin-right: auto; }
+  .strip h1 { margin: 0; font-size: 22px; letter-spacing: -.02em; font-weight: 800; }
+  .strip h1 em { color: var(--neon); font-style: normal; }
+  .kpi { border-left: 1px solid var(--line); padding-left: 18px; min-width: 118px; }
+  .kpi .k { font-family: var(--mono); font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); }
+  .kpi .v { font-size: 19px; font-weight: 700; letter-spacing: -.02em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .kpi .v.neon { color: var(--neon); } .kpi .v.blue { color: var(--blue); } .kpi .v.ok { color: var(--ok); }
+  .live-badge { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; padding: 4px 10px; border-radius: 20px; border: 1px solid var(--line); color: var(--ink-faint); }
+  .live-badge.live { color: var(--ok); border-color: var(--ok); }
+
+  h2 { font-size: 12.5px; font-family: var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); margin: 34px 0 14px; font-weight: 600; display: flex; align-items: center; gap: 12px; }
+  h2::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
+  h2 .cnt { color: var(--neon); }
+
+  /* milestones timeline */
+  .timeline { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 22px 22px 16px; }
+  .track { position: relative; height: 4px; background: var(--line); border-radius: 2px; margin: 30px 8px 44px; }
+  .track .fill { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, var(--blue), var(--neon)); border-radius: 2px; }
+  .ms { position: absolute; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; cursor: default; }
+  .ms .pt { width: 14px; height: 14px; border-radius: 50%; background: var(--surface-2); border: 2px solid var(--ink-faint); }
+  .ms.done .pt { background: var(--ok); border-color: var(--ok); }
+  .ms.now .pt { background: var(--neon); border-color: var(--neon); box-shadow: 0 0 14px rgba(224,255,0,.5); }
+  .ms .lbl { position: absolute; top: -26px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); white-space: nowrap; }
+  .ms.now .lbl { color: var(--neon); font-weight: 700; }
+  .ms .wk { position: absolute; top: 16px; font-family: var(--mono); font-size: 9.5px; color: var(--ink-faint); white-space: nowrap; }
+  .ms-detail { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .ms-card { border: 1px solid var(--line-soft); border-radius: 9px; padding: 11px 13px; background: var(--surface-2); }
+  .ms-card .h { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--mono); font-size: 11px; }
+  .ms-card .h b { color: var(--ink); }
+  .ms-card .h span { color: var(--ink-faint); }
+  .ms-card p { margin: 6px 0 0; font-size: 12px; color: var(--ink-dim); }
+
+  /* killer features */
+  .kfs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .kf { border: 1px solid var(--line); border-top: 3px solid var(--neon); border-radius: 12px; background: var(--surface); padding: 18px; }
+  .kf .idrow { display: flex; justify-content: space-between; align-items: center; }
+  .kf .kfid { font-family: var(--mono); font-size: 11px; color: var(--neon); letter-spacing: .12em; }
+  .kf h3 { margin: 8px 0 6px; font-size: 17px; letter-spacing: -.01em; }
+  .kf p { margin: 0; font-size: 13px; color: var(--ink-dim); }
+  .kf .moat { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 12px; color: var(--ink-dim); }
+  .kf .moat b { color: var(--blue); font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; display: block; margin-bottom: 4px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; padding: 3px 9px; border-radius: 20px; border: 1px solid var(--line); color: var(--ink-dim); }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-faint); }
+  .pill.planned::before { background: var(--ink-faint); }
+  .pill.in_progress { color: var(--neon); border-color: rgba(224,255,0,.4); } .pill.in_progress::before { background: var(--neon); }
+  .pill.done, .pill.completed, .pill.verified { color: var(--ok); border-color: rgba(111,224,122,.4); } .pill.done::before, .pill.completed::before, .pill.verified::before { background: var(--ok); }
+  .pill.unverified { color: var(--warn); border-color: rgba(224,165,66,.4); } .pill.unverified::before { background: var(--warn); }
+
+  /* waves + phases */
+  .grid2 { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; align-items: start; }
+  .waves { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .wave { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 13px 15px; }
+  .wave .h { display: flex; align-items: center; gap: 9px; }
+  .wave .wid { font-family: var(--mono); font-size: 12px; color: var(--blue); font-weight: 700; }
+  .wave .nm { font-weight: 650; font-size: 13.5px; }
+  .wave .cx { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--ink-faint); border: 1px solid var(--line-soft); border-radius: 4px; padding: 1px 6px; }
+  .wave p { margin: 7px 0 0; font-size: 11.5px; color: var(--ink-dim); }
+  .wave .dep { margin-top: 7px; font-family: var(--mono); font-size: 10px; color: var(--ink-faint); }
+  .wave .dep b { color: var(--ink-dim); }
+  .phases { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 16px 18px; }
+  .ph { display: grid; grid-template-columns: 30px 1fr 64px; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line-soft); }
+  .ph:first-child { border-top: none; }
+  .ph .pid { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
+  .ph .bar { height: 6px; border-radius: 3px; background: var(--line-soft); overflow: hidden; position: relative; }
+  .ph .bar i { position: absolute; inset: 0 auto 0 0; background: var(--blue); border-radius: 3px; }
+  .ph.cur .bar i { background: var(--neon); }
+  .ph .nm { font-size: 12px; color: var(--ink-dim); margin-bottom: 3px; }
+  .ph.cur .nm { color: var(--ink); font-weight: 600; }
+  .ph .st { font-family: var(--mono); font-size: 9.5px; color: var(--ink-faint); text-align: right; }
+
+  /* agents */
+  .agents { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .agent { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 16px 18px; }
+  .agent .top { display: flex; align-items: center; gap: 10px; }
+  .agent .dotic { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; font-size: 16px; background: var(--surface-2); border: 1px solid var(--line); }
+  .agent.local .dotic { background: var(--neon-soft); border-color: rgba(224,255,0,.35); }
+  .agent.cloud .dotic { background: var(--blue-soft); border-color: rgba(59,130,246,.4); }
+  .agent h3 { margin: 0; font-size: 14px; font-family: var(--mono); letter-spacing: -.01em; }
+  .agent .sub { font-size: 11px; color: var(--ink-faint); font-family: var(--mono); margin-top: 1px; }
+  .agent .roles { margin: 10px 0 2px; display: flex; flex-wrap: wrap; gap: 5px; }
+  .role { font-size: 10px; font-family: var(--mono); color: var(--ink-dim); border: 1px solid var(--line-soft); border-radius: 4px; padding: 2px 7px; }
+  .caps { margin-top: 10px; display: grid; gap: 5px; }
+  .cap { display: grid; grid-template-columns: 92px 1fr 26px; align-items: center; gap: 8px; font-family: var(--mono); font-size: 10px; color: var(--ink-faint); }
+  .cap .cb { height: 5px; border-radius: 3px; background: var(--line-soft); position: relative; overflow: hidden; }
+  .cap .cb i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--blue); }
+  .agent.local .cap .cb i { background: var(--neon); }
+  .cap .cv { text-align: right; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .agent .meta { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .agent .cost { font-family: var(--mono); font-size: 10px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .08em; }
+  .agent .cost b { color: var(--ink-dim); }
+
+  /* events */
+  .events { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+  .ev { display: grid; grid-template-columns: 148px 110px 1fr; gap: 14px; padding: 12px 18px; border-top: 1px solid var(--line-soft); font-size: 12.5px; }
+  .ev:first-child { border-top: none; }
+  .ev .t { font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+  .ev .ty { font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+  .ev .ty.approval { color: var(--ok); } .ev .ty.gate { color: var(--warn); } .ev .ty.deliverable { color: var(--blue); } .ev .ty.bootstrap { color: var(--neon); }
+  .ev .d { color: var(--ink-dim); }
+  .ev .d b { color: var(--ink); font-weight: 600; }
+
+  footer { margin-top: 30px; font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); letter-spacing: .04em; line-height: 1.7; }
+  footer code { color: var(--ink-dim); }
+
+  @media (max-width: 900px) {
+    .kfs, .agents, .ms-detail { grid-template-columns: 1fr; }
+    .grid2 { grid-template-columns: 1fr; }
+    .waves { grid-template-columns: 1fr; }
+    .ev { grid-template-columns: 1fr; gap: 3px; }
+    .strip .kpi { border-left: none; padding-left: 0; }
+  }
+</style>
+
+<div class="wrap">
+  <div class="strip">
+    <div class="brand">
+      <span class="eyebrow">RWANG:MasterPlan · Mission Control</span>
+      <h1>FluxNode <em>Beat-Palmier MVP</em></h1>
+    </div>
+    <div class="kpi"><div class="k">Phase</div><div class="v neon" id="k-phase">—</div></div>
+    <div class="kpi"><div class="k">Program week</div><div class="v" id="k-week">—</div></div>
+    <div class="kpi"><div class="k">Next milestone</div><div class="v blue" id="k-next">—</div></div>
+    <div class="kpi"><div class="k">Beta target</div><div class="v ok" id="k-beta">—</div></div>
+    <span class="live-badge" id="live-badge">SNAPSHOT</span>
+  </div>
+
+  <h2>Milestones — 8-week track</h2>
+  <div class="timeline">
+    <div class="track" id="track"><div class="fill" id="track-fill"></div></div>
+    <div class="ms-detail" id="ms-detail"></div>
+  </div>
+
+  <h2>Killer features <span class="cnt" id="kf-cnt"></span></h2>
+  <div class="kfs" id="kfs"></div>
+
+  <h2>Implementation waves × RWANG phases</h2>
+  <div class="grid2">
+    <div class="waves" id="waves"></div>
+    <div class="phases" id="phases"></div>
+  </div>
+
+  <h2>Account pool <span class="cnt" id="ag-cnt"></span></h2>
+  <div class="agents" id="agents"></div>
+
+  <h2>Event log</h2>
+  <div class="events" id="events"></div>
+
+  <footer>
+    Renders Layer 2 + Layer 3 only (RWANG §8): <code>queue/ROADMAP.json</code> · <code>queue/agents.json</code> · <code>state/PROJECT_STATE.json</code> · <code>state/events.jsonl</code>.<br>
+    Served over HTTP → fetches live files; opened as file/artifact → embedded snapshot (stamped <span id="snap-date"></span>). Human narrative: <code>docs/MASTER_PLAN.md</code>.
+  </footer>
+</div>
+
+<script id="snapshot" type="application/json">
+{
+  "stamped": "2026-07-11T13:30:00+07:00",
+  "project_state": { "project": "FluxNode — Beat-Palmier MVP", "current_phase": 0, "phase_status": "in_progress", "approved_phases": [], "master_plan_approved": "2026-07-11" },
+  "roadmap": {
+    "program_start": "2026-07-11",
+    "killer_features": [
+      { "id": "KF-1", "name": "Zero-Credit Studio", "summary": "Local on-GPU generation: image (sd.cpp fast + ComfyUI power), TTS (piper), STT (whisper); GpuArbiter VRAM eviction; unlimited regenerate, offline, $0/clip.", "moat": "Palmier's revenue IS metered cloud credits; no local backend layer exists in their architecture.", "waves": ["W0","W2"], "status": "planned" },
+      { "id": "KF-2", "name": "Built-in Offline Copilot", "summary": "In-app chat panel driving the 30-action registry via local Ollama (qwen3.5:4b), tool-activity feed, propose-confirm write flow; MCP still exposed.", "moat": "Palmier ships no brain of its own; it requires the user's paid Claude/Codex/Cursor.", "waves": ["W1"], "status": "planned" },
+      { "id": "KF-3", "name": "Regeneration-Safe Pipeline", "summary": "Prompt/model/seed pinned to clips as node data; duration-locked regenerate-in-place; NLE XML export + metadata sidecar, lossless re-import.", "moat": "Attacks Palmier's two documented weaknesses: metadata loss on export and regen duration drift.", "waves": ["W4"], "status": "planned" }
+    ],
+    "phases": [
+      { "id": "P0", "name": "Discovery", "status": "in_progress", "docs_total": 6, "docs_done": 1 },
+      { "id": "P1", "name": "System Architecture", "status": "not_started", "docs_total": 7, "docs_done": 0 },
+      { "id": "P2", "name": "Contracts", "status": "not_started", "docs_total": 6, "docs_done": 0 },
+      { "id": "P3", "name": "Multi-Agent Architecture", "status": "not_started", "docs_total": 7, "docs_done": 0 },
+      { "id": "P4", "name": "Implementation Spec", "status": "not_started", "docs_total": 5, "docs_done": 0 },
+      { "id": "P5", "name": "Quality Assurance", "status": "not_started", "docs_total": 5, "docs_done": 0 },
+      { "id": "P6", "name": "Handoff & Decomposition", "status": "not_started", "docs_total": 8, "docs_done": 0 },
+      { "id": "P7", "name": "Implementation (Waves)", "status": "not_started", "docs_total": 0, "docs_done": 0 }
+    ],
+    "waves": [
+      { "id": "W0", "name": "Sidecar Foundation", "ships": "whisper/piper/sd.cpp fetch scripts per-OS, flag verification vs real binaries, model downloader w/ checksums, CI proof on 3 OS.", "complexity": "M", "depends_on": [], "status": "planned" },
+      { "id": "W1", "name": "Copilot Surface", "ships": "Chat panel on agent_chat, tool-activity feed, propose-confirm for writes, model picker + Ollama health, --mcp runtime-verified.", "complexity": "M", "depends_on": [], "status": "planned" },
+      { "id": "W2", "name": "Zero-Credit Studio", "ships": "Generate-image node E2E (sd.cpp + ComfyUI), TTS/STT in UI, timeline insert, GpuArbiter eviction under real VRAM pressure.", "complexity": "L", "depends_on": ["W0","W1"], "status": "planned" },
+      { "id": "W3", "name": "Transcribe & Find", "ships": "Whisper transcription job + UI, transcript store + search, 16kHz ffmpeg pre-convert.", "complexity": "S-M", "depends_on": ["W0"], "status": "planned" },
+      { "id": "W4", "name": "Regen-Safe Pipeline", "ships": "Regen metadata, duration-locked regenerate-in-place, FCP7 XML + generation sidecar + lossless re-import.", "complexity": "M", "depends_on": ["W2","W3"], "status": "planned" },
+      { "id": "W5", "name": "Beta Hardening", "ships": "Cross-OS release proof, perf pass vs hardware tiers, KF onboarding, beta packaging.", "complexity": "M", "depends_on": ["W1","W2","W3","W4"], "status": "planned" }
+    ],
+    "milestones": [
+      { "id": "M0", "name": "Docs frozen", "proof": "Phases 0–6 approved; queue dispatchable", "target_week": 1, "status": "in_progress" },
+      { "id": "M1", "name": "Copilot in-app", "proof": "Read + confirmed-write action E2E on 3 OS", "target_week": 2, "status": "planned" },
+      { "id": "M2", "name": "First local generation", "proof": "Prompt → sd.cpp image on timeline, zero network; VRAM eviction observed", "target_week": 4, "status": "planned" },
+      { "id": "M3", "name": "Table stakes closed", "proof": "Transcript search hit; XML opens in Resolve", "target_week": 5, "status": "planned" },
+      { "id": "M4", "name": "Scorecard green", "proof": "Duration-locked regen; round-trip preserves regen; ≥2 axes Strong-vs-Absent for us", "target_week": 6, "status": "planned" },
+      { "id": "M5", "name": "Public beta", "proof": "Win/macOS/Linux builds from release workflow", "target_week": 8, "status": "planned" }
+    ]
+  },
+  "agents": [
+    { "id": "claude-code-fable5", "backend": "anthropic/claude-code (cloud)", "roles": ["Planner","Architect","Reviewer"], "local_eligibility": "CLOUD", "cost_tier": "high", "verified": { "status": "verified", "last_seen": "2026-07-11" }, "capabilities": { "architecture": 95, "implementation": 90, "review": 92, "documentation": 92 } },
+    { "id": "ollama-qwen3.5-4b", "backend": "ollama (local :11434)", "roles": ["Executor LOCAL_SAFE","Copilot brain (KF-2)"], "local_eligibility": "LOCAL", "cost_tier": "zero", "verified": { "status": "verified", "last_seen": "2026-07-06" }, "capabilities": { "architecture": 15, "implementation": 55, "parser": 60, "documentation": 60 } },
+    { "id": "codex-cli", "backend": "openai/codex-cli (cloud)", "roles": ["Executor overflow","Benchmark counterpart"], "local_eligibility": "CLOUD", "cost_tier": "medium", "verified": { "status": "unverified", "last_seen": "2026-07-06" }, "capabilities": { "architecture": 60, "implementation": 80, "parser": 75, "documentation": 70 } }
+  ],
+  "events": [
+    { "created_at": "2026-07-11T13:21:00+07:00", "type": "deliverable", "title": "Layer-2 machine files + mission-control dashboard", "detail": "queue/ROADMAP.json + queue/agents.json added; dashboard renders Layer 2 + Layer 3 only." },
+    { "created_at": "2026-07-11T13:20:00+07:00", "type": "approval", "title": "Owner approved Master Plan", "detail": "KF-1/2/3 frozen; out-of-scope frozen; 8-week M5 target accepted. Phase 0 resumes." },
+    { "created_at": "2026-07-11T12:52:30+07:00", "type": "gate", "title": "Master-Plan gate (§10)", "detail": "Stopped for owner approval before generating remaining Phase 0 docs." },
+    { "created_at": "2026-07-11T12:52:00+07:00", "type": "deliverable", "title": "docs/MASTER_PLAN.md produced", "detail": "3 killer features, waves W0–W5, milestones M0–M5 (+8wk beta), ≥70% LOCAL_SAFE backlog policy." },
+    { "created_at": "2026-07-11T12:45:00+07:00", "type": "bootstrap", "title": "RWANG bootstrap in FluxNode repo", "detail": "Owner materials read; entered Phase 0." }
+  ]
+}
+</script>
+
+<script>
+(function () {
+  const snap = JSON.parse(document.getElementById('snapshot').textContent);
+  document.getElementById('snap-date').textContent = snap.stamped.slice(0, 10);
+
+  function render(data, live) {
+    const st = data.project_state, rm = data.roadmap;
+    const badge = document.getElementById('live-badge');
+    badge.textContent = live ? 'LIVE' : 'SNAPSHOT';
+    badge.classList.toggle('live', live);
+
+    // top KPIs
+    document.getElementById('k-phase').textContent = 'P' + st.current_phase + ' · ' + (st.phase_status || '').replace('_', ' ');
+    const start = new Date(rm.program_start + 'T00:00:00+07:00');
+    const week = Math.max(1, Math.ceil(((Date.now() - start) / 86400000 + 1) / 7));
+    document.getElementById('k-week').textContent = 'W' + week + ' / 8';
+    const next = rm.milestones.find(m => m.status !== 'done' && m.status !== 'completed');
+    document.getElementById('k-next').textContent = next ? next.id + ' · wk' + next.target_week : '—';
+    const beta = new Date(start.getTime() + 8 * 7 * 86400000);
+    document.getElementById('k-beta').textContent = beta.toISOString().slice(5, 10).replace('-', '/');
+
+    // timeline
+    const maxW = 8, track = document.getElementById('track');
+    track.querySelectorAll('.ms').forEach(n => n.remove());
+    const elapsed = Math.min(1, Math.max(0, (Date.now() - start) / (maxW * 7 * 86400000)));
+    document.getElementById('track-fill').style.width = (elapsed * 100) + '%';
+    rm.milestones.forEach(m => {
+      const el = document.createElement('div');
+      const done = m.status === 'done' || m.status === 'completed';
+      el.className = 'ms' + (done ? ' done' : (m.status === 'in_progress' ? ' now' : ''));
+      el.style.left = (m.target_week / maxW * 100) + '%';
+      el.innerHTML = '<span class="lbl">' + m.id + '</span><span class="pt"></span><span class="wk">wk ' + m.target_week + '</span>';
+      el.title = m.name + ' — ' + m.proof;
+      track.appendChild(el);
+    });
+    document.getElementById('ms-detail').innerHTML = rm.milestones.map(m =>
+      '<div class="ms-card"><div class="h"><b>' + m.id + ' · ' + m.name + '</b><span>wk ' + m.target_week + '</span></div><p>' + m.proof + '</p></div>'
+    ).join('');
+
+    // killer features
+    document.getElementById('kf-cnt').textContent = '× ' + rm.killer_features.length;
+    document.getElementById('kfs').innerHTML = rm.killer_features.map(kf =>
+      '<div class="kf"><div class="idrow"><span class="kfid">' + kf.id + ' · ' + (kf.waves || []).join('+') + '</span><span class="pill ' + kf.status + '">' + kf.status.replace('_', ' ') + '</span></div>' +
+      '<h3>' + kf.name + '</h3><p>' + kf.summary + '</p>' +
+      '<div class="moat"><b>Why Palmier can\'t follow</b>' + kf.moat + '</div></div>'
+    ).join('');
+
+    // waves
+    document.getElementById('waves').innerHTML = rm.waves.map(w =>
+      '<div class="wave"><div class="h"><span class="wid">' + w.id + '</span><span class="nm">' + w.name + '</span><span class="cx">' + w.complexity + '</span><span class="pill ' + w.status + '">' + w.status.replace('_', ' ') + '</span></div>' +
+      '<p>' + w.ships + '</p>' +
+      '<div class="dep">deps: <b>' + (w.depends_on.length ? w.depends_on.join(', ') : 'none — can start now') + '</b></div></div>'
+    ).join('');
+
+    // phases
+    document.getElementById('phases').innerHTML = rm.phases.map(p => {
+      const pct = p.docs_total ? Math.round(p.docs_done / p.docs_total * 100) : (p.status === 'not_started' ? 0 : 0);
+      const cur = p.status === 'in_progress';
+      return '<div class="ph' + (cur ? ' cur' : '') + '"><span class="pid">' + p.id + '</span>' +
+        '<div><div class="nm">' + p.name + '</div><div class="bar"><i style="width:' + pct + '%"></i></div></div>' +
+        '<span class="st">' + (p.docs_total ? p.docs_done + '/' + p.docs_total : '—') + '<br>' + p.status.replace('_', ' ') + '</span></div>';
+    }).join('');
+
+    // agents
+    document.getElementById('ag-cnt').textContent = '× ' + data.agents.length;
+    document.getElementById('agents').innerHTML = data.agents.map(a => {
+      const local = a.local_eligibility === 'LOCAL';
+      const caps = Object.entries(a.capabilities || {}).slice(0, 4);
+      return '<div class="agent ' + (local ? 'local' : 'cloud') + '">' +
+        '<div class="top"><div class="dotic">' + (local ? '⚡' : '☁️') + '</div><div><h3>' + a.id + '</h3><div class="sub">' + a.backend + '</div></div></div>' +
+        '<div class="roles">' + a.roles.map(r => '<span class="role">' + r + '</span>').join('') + '</div>' +
+        '<div class="caps">' + caps.map(([k, v]) => '<div class="cap"><span>' + k + '</span><span class="cb"><i style="width:' + v + '%"></i></span><span class="cv">' + v + '</span></div>').join('') + '</div>' +
+        '<div class="meta"><span class="cost">cost <b>' + a.cost_tier + '</b> · ' + a.local_eligibility + '</span>' +
+        '<span class="pill ' + a.verified.status + '">' + a.verified.status + ' · ' + a.verified.last_seen + '</span></div></div>';
+    }).join('');
+
+    // events (newest first)
+    const evs = [...data.events].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    document.getElementById('events').innerHTML = evs.map(e =>
+      '<div class="ev"><span class="t">' + e.created_at.slice(0, 16).replace('T', ' ') + '</span>' +
+      '<span class="ty ' + e.type + '">' + e.type + '</span>' +
+      '<span class="d"><b>' + e.title + '</b> — ' + e.detail + '</span></div>'
+    ).join('');
+  }
+
+  render(snap, false);
+
+  // Progressive enhancement: served over http(s) → hydrate from the real Layer 2/3 files.
+  if (location.protocol.startsWith('http')) {
+    Promise.all([
+      fetch('../state/PROJECT_STATE.json').then(r => r.json()),
+      fetch('../queue/ROADMAP.json').then(r => r.json()),
+      fetch('../queue/agents.json').then(r => r.json()),
+      fetch('../state/events.jsonl').then(r => r.text())
+    ]).then(([ps, rmFile, ag, evTxt]) => {
+      const events = evTxt.trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
+      render({ project_state: ps, roadmap: rmFile, agents: ag.agents, events }, true);
+    }).catch(() => { /* keep snapshot */ });
+  }
+})();
+</script>

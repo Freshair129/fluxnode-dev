@@ -5858,9 +5858,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         },
       )
 
-      const targetNode = draft.workflow.nodes.find((node) => node.id === targetNodeId)
-      if (targetNode?.type === 'audio_mix') {
-        const mixData = targetNode.data as AudioMixData
+      const draftTargetNode = draft.workflow.nodes.find((node) => node.id === targetNodeId)
+      if (draftTargetNode?.type === 'audio_mix') {
+        const mixData = draftTargetNode.data as AudioMixData
         const existingInput = mixData.inputs.find((input) => input.sourceNodeId === sourceNodeId)
         if (!existingInput) {
           mixData.inputs.push({

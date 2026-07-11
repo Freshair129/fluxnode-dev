@@ -66,18 +66,21 @@ pub fn media_broker() -> &'static MediaBroker {
         broker.add_image(Arc::new(ComfyBackend::local()));
 
         // Native fast path — opt-in until the sd binary/model are bundled.
-        if let (Some(bin), Some(model)) = (env_path("FLUXNODE_SD_BIN"), env_path("FLUXNODE_SD_MODEL"))
+        if let (Some(bin), Some(model)) =
+            (env_path("FLUXNODE_SD_BIN"), env_path("FLUXNODE_SD_MODEL"))
         {
             broker.add_image(Arc::new(SdCppBackend::new(bin, model, out_dir.clone())));
         }
-        if let (Some(bin), Some(model)) =
-            (env_path("FLUXNODE_WHISPER_BIN"), env_path("FLUXNODE_WHISPER_MODEL"))
-        {
+        if let (Some(bin), Some(model)) = (
+            env_path("FLUXNODE_WHISPER_BIN"),
+            env_path("FLUXNODE_WHISPER_MODEL"),
+        ) {
             broker.set_stt(Arc::new(WhisperBackend::new(bin, model)));
         }
-        if let (Some(bin), Some(voice)) =
-            (env_path("FLUXNODE_PIPER_BIN"), env_path("FLUXNODE_PIPER_VOICE"))
-        {
+        if let (Some(bin), Some(voice)) = (
+            env_path("FLUXNODE_PIPER_BIN"),
+            env_path("FLUXNODE_PIPER_VOICE"),
+        ) {
             broker.set_tts(Arc::new(PiperBackend::new(bin, voice, out_dir)));
         }
 

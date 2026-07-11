@@ -206,7 +206,10 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// rejection), then bounds the actual read regardless of what the header claims — a
 /// malicious/broken server can lie about `Content-Length` or stream indefinitely, and this is
 /// what actually prevents an unbounded-memory OOM.
-pub fn read_capped_bytes(response: reqwest::blocking::Response, limit: u64) -> Result<Vec<u8>, String> {
+pub fn read_capped_bytes(
+    response: reqwest::blocking::Response,
+    limit: u64,
+) -> Result<Vec<u8>, String> {
     if let Some(len) = response.content_length() {
         if len > limit {
             return Err(format!(
@@ -290,7 +293,8 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// e.g. a cloud metadata service (`169.254.169.254`) or an internal-only service — turning the
 /// "ping/generate against my local ComfyUI" feature into a generic SSRF primitive.
 pub fn ensure_safe_comfy_endpoint(endpoint: &str, allow_remote: bool) -> Result<(), String> {
-    let url = reqwest::Url::parse(endpoint).map_err(|error| format!("Invalid ComfyUI endpoint URL: {error}"))?;
+    let url = reqwest::Url::parse(endpoint)
+        .map_err(|error| format!("Invalid ComfyUI endpoint URL: {error}"))?;
     if url.scheme() != "http" && url.scheme() != "https" {
         return Err("ComfyUI endpoint must be http:// or https://".to_string());
     }
@@ -343,7 +347,10 @@ mod tests {
             sanitize_download_filename("https://example.com/dl/fluxnode-1.2.3.exe", "fallback.bin"),
             "fluxnode-1.2.3.exe"
         );
-        assert_eq!(sanitize_download_filename("https://example.com/", "fallback.bin"), "fallback.bin");
+        assert_eq!(
+            sanitize_download_filename("https://example.com/", "fallback.bin"),
+            "fallback.bin"
+        );
     }
 
     #[test]
@@ -351,7 +358,10 @@ mod tests {
         // '%'-encoded slashes are not real path separators, so they land in the "last segment"
         // as literal characters — the charset whitelist then strips them.
         assert_eq!(
-            sanitize_download_filename("https://example.com/dl/..%2f..%2fetc%2fpasswd", "fallback.bin"),
+            sanitize_download_filename(
+                "https://example.com/dl/..%2f..%2fetc%2fpasswd",
+                "fallback.bin"
+            ),
             "2f..2fetc2fpasswd"
         );
     }
