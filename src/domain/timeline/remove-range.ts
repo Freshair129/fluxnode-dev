@@ -22,9 +22,12 @@ export interface RemoveRangeOp {
 /** Factory for fresh, unique ids — injected so the op stays pure and deterministic under test. */
 export type MakeId = (prefix: 'clip' | 'keyframe') => string
 
-const r2 = (n: number): number => Number(n.toFixed(2))
+/** Round to 2 decimals — the timeline's working precision (matches the store's clip mutations). */
+export const r2 = (n: number): number => Number(n.toFixed(2))
 
-function retimeKeyframes(
+/** Keep the keyframes whose time falls in [keepFrom, keepTo], shifted by `shift`; `fresh` mints
+ *  new ids (for a split-off fragment). Shared by every timeline op so retiming can't drift. */
+export function retimeKeyframes(
   keyframes: Keyframe[],
   makeId: MakeId,
   { keepFrom, keepTo, shift, fresh }: { keepFrom: number; keepTo: number; shift: number; fresh: boolean },

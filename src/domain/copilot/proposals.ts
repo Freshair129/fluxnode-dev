@@ -1,5 +1,7 @@
-import type { FluxNodeProject } from '../project/types'
+import type { FluxNodeProject, Track } from '../project/types'
 import { removeRangeFromTracks, type MakeId, type RemoveRangeOp } from '../timeline/remove-range'
+import { splitClipInTracks, type SplitClipOp } from '../timeline/split-clip'
+import { trimClipInTracks, type TrimClipOp } from '../timeline/trim-clip'
 
 /**
  * A copilot proposal — the structured, gated action the agent wants to run, returned by the Rust
@@ -15,11 +17,9 @@ export interface Proposal {
 }
 
 export function isRemoveRangeArgs(args: unknown): args is RemoveRangeOp {
-  if (typeof args !== 'object' || args === null) {
-    return false
-  }
-  const a = args as Record<string, unknown>
+  const a = asObject(args)
   return (
+    a !== null &&
     typeof a.trackId === 'string' &&
     typeof a.start === 'number' &&
     typeof a.end === 'number' &&
@@ -27,9 +27,59 @@ export function isRemoveRangeArgs(args: unknown): args is RemoveRangeOp {
   )
 }
 
+export function isSplitClipArgs(args: unknown): args is SplitClipOp {
+  const a = asObject(args)
+  return a !== null && typeof a.clipId === 'string' && typeof a.time === 'number'
+}
+
+export function isTrimClipArgs(args: unknown): args is TrimClipOp {
+  const a = asObject(args)
+  return (
+    a !== null &&
+    typeof a.clipId === 'string' &&
+    (a.edge === 'start' || a.edge === 'end') &&
+    typeof a.delta === 'number'
+  )
+}
+
+function asObject(args: unknown): Record<string, unknown> | null {
+  return typeof args === 'object' && args !== null ? (args as Record<string, unknown>) : null
+}
+
+/**
+ * Dispatch one proposal onto a track list — the SINGLE place that maps a proposal to its pure op,
+ * shared by the ghost preview (`applyProposalsToProject`) and the store executor
+ * (`applyCopilotProposals`) so the two can never diverge. Returns the input unchanged for
+ * unsupported or malformed proposals.
+ */
+export function applyProposalToTracks(tracks: Track[], p: Proposal, makeId: MakeId): Track[] {
+  switch (p.action) {
+    case 'timeline_remove_range':
+      return isRemoveRangeArgs(p.args) ? removeRangeFromTracks(tracks, p.args, makeId) : tracks
+    case 'timeline_split_clip':
+      return isSplitClipArgs(p.args) ? splitClipInTracks(tracks, p.args, makeId) : tracks
+    case 'timeline_trim_clip':
+      return isTrimClipArgs(p.args) ? trimClipInTracks(tracks, p.args, makeId) : tracks
+    default:
+      return tracks
+  }
+}
+
 /** A frontend proposal this build knows how to preview and execute. */
 export function isSupportedFrontendProposal(p: Proposal): boolean {
-  return p.site === 'frontend' && p.action === 'timeline_remove_range' && isRemoveRangeArgs(p.args)
+  if (p.site !== 'frontend') {
+    return false
+  }
+  switch (p.action) {
+    case 'timeline_remove_range':
+      return isRemoveRangeArgs(p.args)
+    case 'timeline_split_clip':
+      return isSplitClipArgs(p.args)
+    case 'timeline_trim_clip':
+      return isTrimClipArgs(p.args)
+    default:
+      return false
+  }
 }
 
 /** Human-readable one-liner, richer than the Rust-side summary (has project context). */
@@ -40,13 +90,19 @@ export function summarizeProposal(p: Proposal, project: FluxNodeProject): string
     const ripple = p.args.ripple ? ', ripple later clips left' : ', leave a gap'
     return `Remove ${p.args.start}s–${p.args.end}s on ${where}${ripple}`
   }
+  if (p.action === 'timeline_split_clip' && isSplitClipArgs(p.args)) {
+    return `Split clip ${p.args.clipId} at ${p.args.time}s`
+  }
+  if (p.action === 'timeline_trim_clip' && isTrimClipArgs(p.args)) {
+    const verb = p.args.delta < 0 && p.args.edge === 'end' ? 'shorten' : p.args.delta > 0 && p.args.edge === 'start' ? 'trim' : 'extend'
+    return `${verb[0].toUpperCase()}${verb.slice(1)} clip ${p.args.clipId} ${p.args.edge} by ${Math.abs(p.args.delta)}s`
+  }
   return p.summary || p.action
 }
 
 /**
  * Apply the supported frontend proposals to a project, returning a new project — pure, for the
- * ghost preview. Uses the SAME op logic as the store executor so preview and result cannot drift.
- * Unsupported proposals are skipped (they are executed elsewhere or not yet materializable here).
+ * ghost preview. Uses the SAME dispatch as the store executor so preview and result cannot drift.
  */
 export function applyProposalsToProject(
   project: FluxNodeProject,
@@ -55,9 +111,7 @@ export function applyProposalsToProject(
 ): FluxNodeProject {
   let tracks = project.timeline.tracks
   for (const p of proposals) {
-    if (p.action === 'timeline_remove_range' && isRemoveRangeArgs(p.args)) {
-      tracks = removeRangeFromTracks(tracks, p.args, makeId)
-    }
+    tracks = applyProposalToTracks(tracks, p, makeId)
   }
   if (tracks === project.timeline.tracks) {
     return project

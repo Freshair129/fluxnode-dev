@@ -83,11 +83,15 @@ weaker at big nested JSON — so decompose, don't hand it one mega-plan tool). G
 `Clip` / `Track` shape (`src/domain/project/types.ts`): a clip is
 `{ id, assetId, trackId, startTime, duration, inPoint, outPoint, speed, volume, opacity, workflowNodeId, … }`.
 
-**P0 — the money ops (unlock the rough-cut concierge demo):**
-- `timeline_split_clip(clipId, time)` — razor at an absolute timeline time.
+**P0 — the money ops (unlock the rough-cut concierge demo): — ALL BUILT 2026-07-17.**
 - `timeline_remove_range(trackId, start, end, ripple)` — delete a span; `ripple` shifts later clips
-  left to close the gap. This + transcribe is "cut the silences."
-- `timeline_trim_clip(clipId, edge, delta)` — adjust head/tail (`inPoint`/`outPoint` + `startTime`/`duration`).
+  left to close the gap. This + transcribe is "cut the silences." (Slice 1)
+- `timeline_split_clip(clipId, time)` — razor at an absolute timeline time. (Slice 2)
+- `timeline_trim_clip(clipId, edge, delta)` — move head/tail by a signed delta. (Slice 2)
+
+All three: pure op + vitest, Rust FrontendEdit action, one shared `applyProposalToTracks` dispatcher
+(store + ghost preview), CLI-verified the model proposes them from NL. The CopilotPanel is generic
+over supported proposals, so P1 ops slot in with no UI change.
 
 **P1 — round out basic editing:**
 - `timeline_move_clip(clipId, trackId, newStartTime)`

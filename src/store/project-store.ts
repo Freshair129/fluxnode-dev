@@ -29,8 +29,7 @@ import { createDefaultProject, createTemplateProject, type ProjectTemplateId } f
 import { activeViewForRatio, clampHorizonRatio, DEFAULT_HORIZON_RATIO, defaultRatioForView } from '../domain/project/horizon'
 import { DEFAULT_DENSITY_MODE, normalizeDensityMode, type DensityMode } from '../domain/project/density'
 import { validateProject, type ProjectValidationIssue } from '../domain/project/validators'
-import { removeRangeFromTracks } from '../domain/timeline/remove-range'
-import { isRemoveRangeArgs, isSupportedFrontendProposal, type Proposal } from '../domain/copilot/proposals'
+import { applyProposalToTracks, isSupportedFrontendProposal, type Proposal } from '../domain/copilot/proposals'
 import type {
   AppPreferences,
   AppError,
@@ -5749,11 +5748,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     // (the same hazard splitSelectedClip documents). The precomputed plain tracks are then handed
     // to applyMutation, which diffs them for patches/WAL/validation like any other mutation.
     const current = get().project
+    const makeId = (prefix: 'clip' | 'keyframe') => nextId(prefix)
     let tracks = current.timeline.tracks
     for (const proposal of proposals) {
-      if (proposal.action === 'timeline_remove_range' && isRemoveRangeArgs(proposal.args)) {
-        tracks = removeRangeFromTracks(tracks, proposal.args, (prefix) => nextId(prefix))
-      }
+      tracks = applyProposalToTracks(tracks, proposal, makeId)
     }
     if (tracks === current.timeline.tracks) {
       return

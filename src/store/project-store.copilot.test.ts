@@ -38,6 +38,20 @@ const removeRange = (trackId: string, start: number, end: number, ripple = true)
   summary: 'test',
 })
 
+const splitClip = (clipId: string, time: number): Proposal => ({
+  action: 'timeline_split_clip',
+  args: { clipId, time },
+  site: 'frontend',
+  summary: 'test',
+})
+
+const trimClip = (clipId: string, edge: 'start' | 'end', delta: number): Proposal => ({
+  action: 'timeline_trim_clip',
+  args: { clipId, edge, delta },
+  site: 'frontend',
+  summary: 'test',
+})
+
 describe('project-store: applyCopilotProposals', () => {
   let useProjectStore: typeof UseProjectStoreType
 
@@ -89,5 +103,36 @@ describe('project-store: applyCopilotProposals', () => {
     const undoBefore = useProjectStore.getState().history.undoStack.length
     useProjectStore.getState().applyCopilotProposals([removeRange('no-such-track', 1, 2)])
     expect(useProjectStore.getState().history.undoStack.length).toBe(undoBefore)
+  })
+
+  it('applies an approved split as one undoable edit, and undo restores it', () => {
+    useProjectStore.getState().addDemoClip()
+    const track = trackWithClips()
+    const clip0 = track.clips[0]
+    const beforeCount = track.clips.length
+    const undoBefore = useProjectStore.getState().history.undoStack.length
+
+    useProjectStore.getState().applyCopilotProposals([splitClip(clip0.id, Number((clip0.startTime + 2).toFixed(2)))])
+
+    expect(trackWithClips().clips).toHaveLength(beforeCount + 1)
+    expect(useProjectStore.getState().history.undoStack.length).toBe(undoBefore + 1)
+    useProjectStore.getState().undo()
+    expect(trackWithClips().clips).toHaveLength(beforeCount)
+  })
+
+  it('applies an approved trim, changing the clip duration as one undoable edit', () => {
+    useProjectStore.getState().addDemoClip()
+    const track = trackWithClips()
+    const clip0 = track.clips[0]
+    const beforeDuration = clip0.duration
+    const undoBefore = useProjectStore.getState().history.undoStack.length
+
+    useProjectStore.getState().applyCopilotProposals([trimClip(clip0.id, 'end', -1)])
+
+    const after = trackWithClips().clips.find((c) => c.id === clip0.id)!
+    expect(after.duration).toBeCloseTo(beforeDuration - 1, 5)
+    expect(useProjectStore.getState().history.undoStack.length).toBe(undoBefore + 1)
+    useProjectStore.getState().undo()
+    expect(trackWithClips().clips.find((c) => c.id === clip0.id)!.duration).toBeCloseTo(beforeDuration, 5)
   })
 })
