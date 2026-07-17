@@ -132,6 +132,9 @@ interface ProjectStoreState {
   workflowValidationIssues: WorkflowValidationIssue[]
   projectValidationIssues: ProjectValidationIssue[]
   workflowExecutionOrder: string[]
+  /** Pending copilot proposals awaiting approval — read by the timeline to render ghost edits. */
+  copilotProposals: Proposal[]
+  setCopilotProposals: (proposals: Proposal[]) => void
   setActiveView: (view: UserInterfaceState['activeView']) => void
   setHorizonRatio: (ratio: number) => void
   toggleStageRowCollapse: (side: StageRowSide) => void
@@ -2599,6 +2602,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   aiNodeGenerationInFlight: {},
   comfyConnected: null,
   assetThumbnails: {},
+  copilotProposals: [],
   ...getValidationState(createDefaultProject()),
   ui: {
     activeView: 'workflow',
@@ -2626,6 +2630,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     timelineClipboard: [],
     workflowClipboard: createEmptyWorkflowClipboard(),
   },
+  setCopilotProposals: (proposals) => set({ copilotProposals: proposals }),
   setActiveView: (view) =>
     set((state) => ({
       ui: { ...state.ui, ...computeActiveViewUiPatch(state.ui, view) },

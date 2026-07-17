@@ -27,9 +27,12 @@ import { Button } from '../../components/Button'
 import { Badge as SharedBadge } from '../../components/Badge'
 import { ContextMenu, ContextMenuItem, ContextMenuDivider } from '../../components/ContextMenu'
 import { CommandMenuItem } from '../commands/CommandMenuItem'
+import { computeClipGhosts } from '../../domain/copilot/ghost'
 
 export function TimelineView() {
   const timeline = useProjectStore((state) => state.project.timeline)
+  const project = useProjectStore((state) => state.project)
+  const copilotProposals = useProjectStore((state) => state.copilotProposals)
   const assets = useProjectStore((state) => state.project.assets.assets)
   const assetThumbnails = useProjectStore((state) => state.assetThumbnails)
   const selectedClipId = useProjectStore((state) => state.ui.selectedClipId)
@@ -40,6 +43,7 @@ export function TimelineView() {
   const playbackRate = useProjectStore((state) => state.ui.playbackRate)
   const scrubPreviewState = useProjectStore((state) => state.ui.scrubPreviewState)
   const audio = useProjectStore((state) => state.project.audio)
+  const clipGhosts = useMemo(() => computeClipGhosts(project, copilotProposals), [project, copilotProposals])
   const addDemoClip = useProjectStore((state) => state.addDemoClip)
   const importAssetFromPath = useProjectStore((state) => state.importAssetFromPath)
   const rescanAssetStatuses = useProjectStore((state) => state.rescanAssetStatuses)
@@ -757,6 +761,7 @@ export function TimelineView() {
                     {track.clips.map((clip) => {
                       const asset = assets[clip.assetId]
                       const isSelected = selectedClipIds.includes(clip.id)
+                      const ghost = clipGhosts.clips.get(clip.id)
 
                       return (
                         <article
@@ -797,6 +802,12 @@ export function TimelineView() {
                             isSelected
                               ? 'border-accent/70 bg-[linear-gradient(135deg,rgba(224,255,0,0.18),rgba(255,255,255,0.08))] shadow-[0_0_0_1px_rgba(224,255,0,0.2)]'
                               : 'border-white/8 bg-[linear-gradient(135deg,rgba(224,255,0,0.15),rgba(255,255,255,0.04))]'
+                          } ${
+                            ghost
+                              ? ghost.kind === 'removed'
+                                ? 'opacity-60 ring-2 ring-red-400/60'
+                                : 'ring-2 ring-[#e0ff00]/50'
+                              : ''
                           }`}
                         >
                           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -830,6 +841,7 @@ export function TimelineView() {
                               {selectedClipId === clip.id ? <Badge label="Primary" /> : null}
                               {isSelected ? <Badge label="Selected" /> : null}
                               {clip.keyframes.length > 0 ? <Badge label={`${clip.keyframes.length} keyframe${clip.keyframes.length === 1 ? '' : 's'}`} /> : null}
+                              {ghost ? <Badge label={`Copilot: ${ghost.detail}`} tone={ghost.kind === 'removed' ? 'danger' : 'warn'} /> : null}
                             </div>
                           </div>
                           <KeyframeStrip duration={clip.duration} keyframes={clip.keyframes} />
@@ -850,6 +862,16 @@ export function TimelineView() {
                         </article>
                       )
                     })}
+                    {clipGhosts.newClips
+                      .filter((newClip) => newClip.trackId === track.id)
+                      .map((newClip, index) => (
+                        <div
+                          key={`copilot-ghost-${track.id}-${index}`}
+                          className="rounded-[1rem] border border-dashed border-[#e0ff00]/50 bg-[#e0ff00]/[0.06] p-4 text-xs font-medium text-[#e0ff00]"
+                        >
+                          + New clip from copilot · starts {newClip.startTime}s · {newClip.duration}s
+                        </div>
+                      ))}
                   </div>
                 </div>
               ))}

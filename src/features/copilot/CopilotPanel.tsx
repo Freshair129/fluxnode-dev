@@ -1,11 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useProjectStore } from '../../store/project-store'
 import { runAgentChat } from '../../services/ipc/agent'
 import {
   applyProposalsToProject,
   isSupportedFrontendProposal,
   summarizeProposal,
-  type Proposal,
 } from '../../domain/copilot/proposals'
 import { isRoughCutIntent, planSilenceCuts } from '../../domain/copilot/rough-cut'
 import { transcribeAudio } from '../../services/ipc/transcribe'
@@ -18,13 +17,18 @@ import { transcribeAudio } from '../../services/ipc/transcribe'
 export function CopilotPanel({ onClose }: { onClose: () => void }) {
   const project = useProjectStore((state) => state.project)
   const applyCopilotProposals = useProjectStore((state) => state.applyCopilotProposals)
+  // Proposals live in the store so the timeline can render ghost edits from them.
+  const proposals = useProjectStore((state) => state.copilotProposals)
+  const setProposals = useProjectStore((state) => state.setCopilotProposals)
 
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [answer, setAnswer] = useState<string | null>(null)
-  const [proposals, setProposals] = useState<Proposal[]>([])
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
+
+  // Clear the ghost preview when the copilot closes.
+  useEffect(() => () => setProposals([]), [setProposals])
 
   const supported = useMemo(() => proposals.filter(isSupportedFrontendProposal), [proposals])
   const unsupported = useMemo(() => proposals.filter((p) => !isSupportedFrontendProposal(p)), [proposals])
