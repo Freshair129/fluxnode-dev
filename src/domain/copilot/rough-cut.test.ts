@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Clip, Track } from '../project/types'
 import type { MakeId } from '../timeline/remove-range'
 import { applyProposalToTracks } from './proposals'
-import { detectSilences, planSilenceCuts, type Transcript } from './rough-cut'
+import { detectSilences, isRoughCutIntent, planSilenceCuts, type Transcript } from './rough-cut'
 
 function makeIdFactory(): MakeId {
   const counters = { clip: 0, keyframe: 0 }
@@ -86,4 +86,25 @@ describe('planSilenceCuts', () => {
     const wall: Transcript = { text: 'x', segments: [{ start: 0, end: 10, text: 'x' }] }
     expect(planSilenceCuts(oneClipTrack, wall, { includeTrailing: false })).toEqual([])
   })
+})
+
+describe('isRoughCutIntent', () => {
+  it.each([
+    'rough-cut this',
+    'rough cut the podcast',
+    'cut the silences',
+    'remove silence please',
+    'trim out the silent parts',
+    'ตัดช่วงเงียบให้หน่อย',
+    'ตัด silence ที',
+  ])('matches "%s"', (msg) => {
+    expect(isRoughCutIntent(msg)).toBe(true)
+  })
+
+  it.each(['split the clip at 3s', 'add a title clip', 'what is the duration?', 'make it louder'])(
+    'does not match "%s"',
+    (msg) => {
+      expect(isRoughCutIntent(msg)).toBe(false)
+    },
+  )
 })

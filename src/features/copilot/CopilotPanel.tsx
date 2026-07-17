@@ -7,7 +7,7 @@ import {
   summarizeProposal,
   type Proposal,
 } from '../../domain/copilot/proposals'
-import { planSilenceCuts } from '../../domain/copilot/rough-cut'
+import { isRoughCutIntent, planSilenceCuts } from '../../domain/copilot/rough-cut'
 import { transcribeAudio } from '../../services/ipc/transcribe'
 
 /**
@@ -46,6 +46,12 @@ export function CopilotPanel({ onClose }: { onClose: () => void }) {
   async function send() {
     const message = input.trim()
     if (!message || busy) return
+    // "cut the silences" and friends run the deterministic rough-cut, not the LLM.
+    if (isRoughCutIntent(message)) {
+      setInput('')
+      await roughCut()
+      return
+    }
     setBusy(true)
     setError(null)
     setNote(null)

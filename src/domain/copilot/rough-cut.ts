@@ -40,6 +40,21 @@ export const DEFAULT_SILENCE_OPTIONS: SilenceCutOptions = {
   includeTrailing: true,
 }
 
+/**
+ * Whether a copilot message is asking for the rough-cut (cut the silences). Matched client-side so
+ * the deterministic pipeline runs instead of hoping the 4B brain composes the plan. Covers English
+ * and Thai phrasings.
+ */
+export function isRoughCutIntent(message: string): boolean {
+  const m = message.toLowerCase()
+  if (/\brough[\s-]?cut\b/.test(m)) return true
+  if (/(cut|remove|trim|strip|kill)\b.{0,24}\bsilen/.test(m)) return true
+  if (/silen.{0,24}\b(cut|remove|trim|out)\b/.test(m)) return true
+  // Thai: ตัด … เงียบ / ความเงียบ / ช่วงเงียบ / "ตัด silence"
+  if (/ตัด.{0,16}(เงียบ|silence)/.test(message)) return true
+  return false
+}
+
 interface Span {
   start: number
   end: number
