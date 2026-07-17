@@ -1010,6 +1010,87 @@ impl Action for TimelineTrimClip {
     }
 }
 
+pub struct TimelineMoveClip;
+impl Action for TimelineMoveClip {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "timeline_move_clip",
+            description: "Propose moving a clip to a new start time (seconds), optionally onto a \
+                different track. Proposal: previewed and applied only after approval.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "clipId":{"type":"string"},
+                    "startTime":{"type":"number","description":"New start time in seconds."},
+                    "trackId":{"type":"string","description":"Optional destination track id."}
+                },
+                "required":["clipId","startTime"]
+            }),
+            side_effect: SideEffect::FrontendEdit,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
+        Err("timeline_move_clip is materialized in the frontend after approval, not run in Rust".to_string())
+    }
+}
+
+pub struct TimelineAddClip;
+impl Action for TimelineAddClip {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "timeline_add_clip",
+            description: "Propose adding a clip for an existing asset onto a track at a start time. \
+                Proposal: previewed and applied only after approval.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "trackId":{"type":"string"},
+                    "assetId":{"type":"string"},
+                    "startTime":{"type":"number"},
+                    "duration":{"type":"number"},
+                    "inPoint":{"type":"number","description":"Optional source in-point (seconds)."},
+                    "outPoint":{"type":"number","description":"Optional source out-point (seconds)."}
+                },
+                "required":["trackId","assetId","startTime","duration"]
+            }),
+            side_effect: SideEffect::FrontendEdit,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
+        Err("timeline_add_clip is materialized in the frontend after approval, not run in Rust".to_string())
+    }
+}
+
+pub struct TimelineSetClipProperty;
+impl Action for TimelineSetClipProperty {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "timeline_set_clip_property",
+            description: "Propose setting a clip property (volume, opacity, or speed) to a value. \
+                Proposal: previewed and applied only after approval.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "clipId":{"type":"string"},
+                    "property":{"type":"string","enum":["volume","opacity","speed"]},
+                    "value":{"type":"number"}
+                },
+                "required":["clipId","property","value"]
+            }),
+            side_effect: SideEffect::FrontendEdit,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
+        Err("timeline_set_clip_property is materialized in the frontend after approval, not run in Rust".to_string())
+    }
+}
+
 /// Register every wrapped command into the registry.
 pub fn register_all(reg: &mut crate::action::Registry) {
     reg.register(Arc::new(InspectAssetPath));
@@ -1047,6 +1128,9 @@ pub fn register_all(reg: &mut crate::action::Registry) {
     reg.register(Arc::new(TimelineRemoveRange));
     reg.register(Arc::new(TimelineSplitClip));
     reg.register(Arc::new(TimelineTrimClip));
+    reg.register(Arc::new(TimelineMoveClip));
+    reg.register(Arc::new(TimelineAddClip));
+    reg.register(Arc::new(TimelineSetClipProperty));
 }
 
 // ---------------------------------------------------------------------------
