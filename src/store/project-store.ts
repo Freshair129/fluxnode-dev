@@ -29,6 +29,8 @@ import { createDefaultProject, createTemplateProject, type ProjectTemplateId } f
 import { activeViewForRatio, clampHorizonRatio, DEFAULT_HORIZON_RATIO, defaultRatioForView } from '../domain/project/horizon'
 import { DEFAULT_DENSITY_MODE, normalizeDensityMode, type DensityMode } from '../domain/project/density'
 import { validateProject, type ProjectValidationIssue } from '../domain/project/validators'
+import { removeRangeFromTracks } from '../domain/timeline/remove-range'
+import { isRemoveRangeArgs, isSupportedFrontendProposal, type Proposal } from '../domain/copilot/proposals'
 import type {
   AppPreferences,
   AppError,
@@ -278,6 +280,7 @@ interface ProjectStoreState {
   duplicateSelected: () => void
   deleteSelected: () => void
   splitSelectedClip: () => void
+  applyCopilotProposals: (proposals: Proposal[]) => void
   connectSelectedNodeToOutput: () => void
   disconnectSelectedNodeEdges: () => void
   moveWorkflowNodes: (nodeIds: string[], deltaX: number, deltaY: number) => void
@@ -5739,6 +5742,27 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         return
       }
     }),
+  applyCopilotProposals: (proposals) => {
+    // Materialize approved frontend timeline proposals as ONE undoable edit (one approval = one
+    // undo). We fold the pure op over the *committed* (non-draft) project so the op only ever sees
+    // plain objects — running it on an immer draft would leak Proxies into the assigned result
+    // (the same hazard splitSelectedClip documents). The precomputed plain tracks are then handed
+    // to applyMutation, which diffs them for patches/WAL/validation like any other mutation.
+    const current = get().project
+    let tracks = current.timeline.tracks
+    for (const proposal of proposals) {
+      if (proposal.action === 'timeline_remove_range' && isRemoveRangeArgs(proposal.args)) {
+        tracks = removeRangeFromTracks(tracks, proposal.args, (prefix) => nextId(prefix))
+      }
+    }
+    if (tracks === current.timeline.tracks) {
+      return
+    }
+    const count = proposals.filter(isSupportedFrontendProposal).length
+    applyMutation(set, get, 'copilot.timeline.edit', `Copilot: ${count} timeline edit${count === 1 ? '' : 's'}`, (project) => {
+      project.timeline.tracks = tracks
+    })
+  },
   connectSelectedNodeToOutput: () =>
     applyMutation(set, get, 'edge.add', 'Selected node connected to output', (project) => {
       const selectedNodeId = get().ui.selectedNodeId
