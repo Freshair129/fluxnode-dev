@@ -954,6 +954,62 @@ impl Action for TimelineRemoveRange {
     }
 }
 
+pub struct TimelineSplitClip;
+impl Action for TimelineSplitClip {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "timeline_split_clip",
+            description: "Propose splitting a timeline clip into two at an absolute time (seconds). \
+                The split point must be strictly inside the clip. This is a proposal: previewed and \
+                only applied after the user approves.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "clipId":{"type":"string","description":"Id of the clip to split."},
+                    "time":{"type":"number","description":"Absolute timeline time in seconds to cut at."}
+                },
+                "required":["clipId","time"]
+            }),
+            side_effect: SideEffect::FrontendEdit,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
+        Err("timeline_split_clip is materialized in the frontend after approval, not run in Rust"
+            .to_string())
+    }
+}
+
+pub struct TimelineTrimClip;
+impl Action for TimelineTrimClip {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "timeline_trim_clip",
+            description: "Propose trimming one edge of a timeline clip by a signed delta (seconds). \
+                edge='end' with positive delta extends the tail, negative trims it; edge='start' \
+                with positive delta trims the head, negative extends it. This is a proposal: \
+                previewed and only applied after the user approves.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "clipId":{"type":"string","description":"Id of the clip to trim."},
+                    "edge":{"type":"string","enum":["start","end"],"description":"Which edge to move."},
+                    "delta":{"type":"number","description":"Seconds to move the edge (signed)."}
+                },
+                "required":["clipId","edge","delta"]
+            }),
+            side_effect: SideEffect::FrontendEdit,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
+        Err("timeline_trim_clip is materialized in the frontend after approval, not run in Rust"
+            .to_string())
+    }
+}
+
 /// Register every wrapped command into the registry.
 pub fn register_all(reg: &mut crate::action::Registry) {
     reg.register(Arc::new(InspectAssetPath));
@@ -989,6 +1045,8 @@ pub fn register_all(reg: &mut crate::action::Registry) {
     reg.register(Arc::new(Synthesize));
     // Timeline-edit (FrontendEdit) actions.
     reg.register(Arc::new(TimelineRemoveRange));
+    reg.register(Arc::new(TimelineSplitClip));
+    reg.register(Arc::new(TimelineTrimClip));
 }
 
 // ---------------------------------------------------------------------------
