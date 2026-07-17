@@ -2,6 +2,15 @@ import type { FluxNodeProject, Track } from '../project/types'
 import { removeRangeFromTracks, type MakeId, type RemoveRangeOp } from '../timeline/remove-range'
 import { splitClipInTracks, type SplitClipOp } from '../timeline/split-clip'
 import { trimClipInTracks, type TrimClipOp } from '../timeline/trim-clip'
+import {
+  addClipInTracks,
+  moveClipInTracks,
+  setClipPropertyInTracks,
+  type AddClipOp,
+  type ClipProperty,
+  type MoveClipOp,
+  type SetClipPropertyOp,
+} from '../timeline/clip-edits'
 
 /**
  * A copilot proposal — the structured, gated action the agent wants to run, returned by the Rust
@@ -42,6 +51,37 @@ export function isTrimClipArgs(args: unknown): args is TrimClipOp {
   )
 }
 
+export function isMoveClipArgs(args: unknown): args is MoveClipOp {
+  const a = asObject(args)
+  return (
+    a !== null &&
+    typeof a.clipId === 'string' &&
+    typeof a.startTime === 'number' &&
+    (a.trackId === undefined || typeof a.trackId === 'string')
+  )
+}
+
+export function isAddClipArgs(args: unknown): args is AddClipOp {
+  const a = asObject(args)
+  return (
+    a !== null &&
+    typeof a.trackId === 'string' &&
+    typeof a.assetId === 'string' &&
+    typeof a.startTime === 'number' &&
+    typeof a.duration === 'number'
+  )
+}
+
+export function isSetClipPropertyArgs(args: unknown): args is SetClipPropertyOp {
+  const a = asObject(args)
+  return (
+    a !== null &&
+    typeof a.clipId === 'string' &&
+    (a.property === 'volume' || a.property === 'opacity' || a.property === 'speed') &&
+    typeof a.value === 'number'
+  )
+}
+
 function asObject(args: unknown): Record<string, unknown> | null {
   return typeof args === 'object' && args !== null ? (args as Record<string, unknown>) : null
 }
@@ -60,6 +100,12 @@ export function applyProposalToTracks(tracks: Track[], p: Proposal, makeId: Make
       return isSplitClipArgs(p.args) ? splitClipInTracks(tracks, p.args, makeId) : tracks
     case 'timeline_trim_clip':
       return isTrimClipArgs(p.args) ? trimClipInTracks(tracks, p.args, makeId) : tracks
+    case 'timeline_move_clip':
+      return isMoveClipArgs(p.args) ? moveClipInTracks(tracks, p.args, makeId) : tracks
+    case 'timeline_add_clip':
+      return isAddClipArgs(p.args) ? addClipInTracks(tracks, p.args, makeId) : tracks
+    case 'timeline_set_clip_property':
+      return isSetClipPropertyArgs(p.args) ? setClipPropertyInTracks(tracks, p.args, makeId) : tracks
     default:
       return tracks
   }
@@ -77,6 +123,12 @@ export function isSupportedFrontendProposal(p: Proposal): boolean {
       return isSplitClipArgs(p.args)
     case 'timeline_trim_clip':
       return isTrimClipArgs(p.args)
+    case 'timeline_move_clip':
+      return isMoveClipArgs(p.args)
+    case 'timeline_add_clip':
+      return isAddClipArgs(p.args)
+    case 'timeline_set_clip_property':
+      return isSetClipPropertyArgs(p.args)
     default:
       return false
   }
@@ -97,8 +149,21 @@ export function summarizeProposal(p: Proposal, project: FluxNodeProject): string
     const verb = p.args.delta < 0 && p.args.edge === 'end' ? 'shorten' : p.args.delta > 0 && p.args.edge === 'start' ? 'trim' : 'extend'
     return `${verb[0].toUpperCase()}${verb.slice(1)} clip ${p.args.clipId} ${p.args.edge} by ${Math.abs(p.args.delta)}s`
   }
+  if (p.action === 'timeline_move_clip' && isMoveClipArgs(p.args)) {
+    const where = p.args.trackId ? ` to track ${p.args.trackId}` : ''
+    return `Move clip ${p.args.clipId} to ${p.args.startTime}s${where}`
+  }
+  if (p.action === 'timeline_add_clip' && isAddClipArgs(p.args)) {
+    return `Add ${p.args.duration}s clip (${p.args.assetId}) at ${p.args.startTime}s on track ${p.args.trackId}`
+  }
+  if (p.action === 'timeline_set_clip_property' && isSetClipPropertyArgs(p.args)) {
+    return `Set clip ${p.args.clipId} ${p.args.property} to ${p.args.value}`
+  }
   return p.summary || p.action
 }
+
+/** Property names the set-clip-property op accepts (surfaced for the Rust schema doc). */
+export type { ClipProperty }
 
 /**
  * Apply the supported frontend proposals to a project, returning a new project — pure, for the

@@ -99,6 +99,21 @@ describe('project-store: applyCopilotProposals', () => {
     expect(useProjectStore.getState().history.undoStack.length).toBe(undoBefore + 1)
   })
 
+  it('routes a P1 set-clip-property proposal through the store as one undoable edit', () => {
+    useProjectStore.getState().addDemoClip()
+    const clip0 = trackWithClips().clips[0]
+    const undoBefore = useProjectStore.getState().history.undoStack.length
+
+    useProjectStore.getState().applyCopilotProposals([
+      { action: 'timeline_set_clip_property', args: { clipId: clip0.id, property: 'volume', value: 0.5 }, site: 'frontend', summary: 't' },
+    ])
+
+    expect(trackWithClips().clips.find((c) => c.id === clip0.id)!.volume).toBe(0.5)
+    expect(useProjectStore.getState().history.undoStack.length).toBe(undoBefore + 1)
+    useProjectStore.getState().undo()
+    expect(trackWithClips().clips.find((c) => c.id === clip0.id)!.volume).toBe(clip0.volume)
+  })
+
   it('is a no-op with no history entry when no supported proposal applies', () => {
     useProjectStore.getState().addDemoClip()
     const undoBefore = useProjectStore.getState().history.undoStack.length
