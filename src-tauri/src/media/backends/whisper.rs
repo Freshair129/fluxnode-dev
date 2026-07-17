@@ -117,11 +117,26 @@ fn whisper_tmp_wav() -> PathBuf {
 
 /// Decode + resample any audio/video to whisper.cpp's required 16 kHz mono 16-bit PCM WAV via the
 /// bundled ffmpeg sidecar.
-fn convert_to_whisper_wav(ffmpeg: &std::path::Path, input: &str, out_wav: &str) -> Result<(), String> {
+fn convert_to_whisper_wav(
+    ffmpeg: &std::path::Path,
+    input: &str,
+    out_wav: &str,
+) -> Result<(), String> {
     let output = no_window(&mut Command::new(ffmpeg))
         .args([
-            "-y", "-v", "error", "-i", input, "-vn", "-ar", "16000", "-ac", "1", "-c:a",
-            "pcm_s16le", out_wav,
+            "-y",
+            "-v",
+            "error",
+            "-i",
+            input,
+            "-vn",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "-c:a",
+            "pcm_s16le",
+            out_wav,
         ])
         .output()
         .map_err(|error| format!("failed to launch ffmpeg ({}): {error}", ffmpeg.display()))?;
@@ -244,8 +259,18 @@ mod tests {
         // A deliberately non-conforming source: 48 kHz stereo.
         let gen = no_window(&mut Command::new(&ffmpeg))
             .args([
-                "-y", "-v", "error", "-f", "lavfi", "-i",
-                "sine=frequency=440:sample_rate=48000", "-ac", "2", "-t", "1", &src_str,
+                "-y",
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:sample_rate=48000",
+                "-ac",
+                "2",
+                "-t",
+                "1",
+                &src_str,
             ])
             .output()
             .expect("run ffmpeg to make the test source");
@@ -255,8 +280,14 @@ mod tests {
 
         let probe = no_window(&mut Command::new(&ffprobe))
             .args([
-                "-v", "error", "-select_streams", "a:0", "-show_entries",
-                "stream=codec_name,sample_rate,channels", "-of", "default=noprint_wrappers=1",
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=codec_name,sample_rate,channels",
+                "-of",
+                "default=noprint_wrappers=1",
                 &out_str,
             ])
             .output()

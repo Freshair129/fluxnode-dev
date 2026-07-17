@@ -112,7 +112,10 @@ pub fn run_agent(
         match turn.reply {
             BrainReply::Text(text) => {
                 trace(json!({ "event": "final", "step": step, "proposals": proposals.len() }));
-                return Ok(AgentOutcome { answer: text, proposals });
+                return Ok(AgentOutcome {
+                    answer: text,
+                    proposals,
+                });
             }
             BrainReply::ToolCalls(calls) => {
                 for call in calls {

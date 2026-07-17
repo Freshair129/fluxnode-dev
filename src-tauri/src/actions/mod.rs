@@ -31,7 +31,13 @@ fn asset_id_or_derived(args: &Value, source_path: &str) -> String {
         .unwrap_or("asset");
     let safe: String = stem
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     format!("agent-{safe}")
 }
@@ -949,8 +955,10 @@ impl Action for TimelineRemoveRange {
     }
 
     fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
-        Err("timeline_remove_range is materialized in the frontend after approval, not run in Rust"
-            .to_string())
+        Err(
+            "timeline_remove_range is materialized in the frontend after approval, not run in Rust"
+                .to_string(),
+        )
     }
 }
 
@@ -976,8 +984,10 @@ impl Action for TimelineSplitClip {
     }
 
     fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
-        Err("timeline_split_clip is materialized in the frontend after approval, not run in Rust"
-            .to_string())
+        Err(
+            "timeline_split_clip is materialized in the frontend after approval, not run in Rust"
+                .to_string(),
+        )
     }
 }
 
@@ -1005,8 +1015,10 @@ impl Action for TimelineTrimClip {
     }
 
     fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
-        Err("timeline_trim_clip is materialized in the frontend after approval, not run in Rust"
-            .to_string())
+        Err(
+            "timeline_trim_clip is materialized in the frontend after approval, not run in Rust"
+                .to_string(),
+        )
     }
 }
 
@@ -1032,7 +1044,10 @@ impl Action for TimelineMoveClip {
     }
 
     fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
-        Err("timeline_move_clip is materialized in the frontend after approval, not run in Rust".to_string())
+        Err(
+            "timeline_move_clip is materialized in the frontend after approval, not run in Rust"
+                .to_string(),
+        )
     }
 }
 
@@ -1061,7 +1076,10 @@ impl Action for TimelineAddClip {
     }
 
     fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
-        Err("timeline_add_clip is materialized in the frontend after approval, not run in Rust".to_string())
+        Err(
+            "timeline_add_clip is materialized in the frontend after approval, not run in Rust"
+                .to_string(),
+        )
     }
 }
 
