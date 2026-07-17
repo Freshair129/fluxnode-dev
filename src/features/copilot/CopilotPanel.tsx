@@ -7,6 +7,8 @@ import {
   summarizeProposal,
   type Proposal,
 } from '../../domain/copilot/proposals'
+import { planSilenceCuts } from '../../domain/copilot/rough-cut'
+import { transcribeAudio } from '../../services/ipc/transcribe'
 
 /**
  * Slice-1 copilot surface: send a message to the agent, review the gated proposals it returns as
@@ -70,6 +72,39 @@ export function CopilotPanel({ onClose }: { onClose: () => void }) {
   function reject() {
     setProposals([])
     setNote('Proposals dismissed.')
+  }
+
+  // The rough-cut concierge: transcribe the first track's clip, plan the silence cuts
+  // deterministically (planSilenceCuts), and surface them as proposals — same review/ghost/approve
+  // path as any other edit. No LLM reasoning composes the plan, so it stays reliable at scale.
+  async function roughCut() {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    setNote(null)
+    setAnswer(null)
+    setProposals([])
+    try {
+      const track = project.timeline.tracks.find((t) => t.clips.length > 0)
+      if (!track) {
+        setError('No clips on the timeline to rough-cut.')
+        return
+      }
+      const firstClip = track.clips[0]
+      const asset = project.assets.assets[firstClip.assetId]
+      const transcript = await transcribeAudio(asset?.sourcePath ?? firstClip.assetId)
+      const plan = planSilenceCuts(track, transcript)
+      if (plan.length === 0) {
+        setAnswer(`Transcribed "${track.name}" — no silences long enough to cut.`)
+        return
+      }
+      setAnswer(`Found ${plan.length} silence${plan.length === 1 ? '' : 's'} to cut on "${track.name}". Review and approve below.`)
+      setProposals(plan)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -150,6 +185,14 @@ export function CopilotPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="border-t border-white/10 p-3">
+        <button
+          type="button"
+          onClick={() => void roughCut()}
+          disabled={busy}
+          className="mb-2 w-full rounded-lg border border-[#e0ff00]/30 bg-[#e0ff00]/5 px-3 py-1.5 text-xs font-semibold text-[#e0ff00] transition enabled:hover:bg-[#e0ff00]/10 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          ✂ Rough-cut silences
+        </button>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}

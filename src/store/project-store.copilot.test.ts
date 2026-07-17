@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { useProjectStore as UseProjectStoreType } from './project-store'
 import type { Proposal } from '../domain/copilot/proposals'
+import { planSilenceCuts, type Transcript } from '../domain/copilot/rough-cut'
 
 // Same dynamic-import + stubbed-globals dance as project-store.test.ts: the store touches
 // window.localStorage at module init, and static imports hoist above vi.stubGlobal.
@@ -118,6 +119,32 @@ describe('project-store: applyCopilotProposals', () => {
     expect(useProjectStore.getState().history.undoStack.length).toBe(undoBefore + 1)
     useProjectStore.getState().undo()
     expect(trackWithClips().clips).toHaveLength(beforeCount)
+  })
+
+  it('rough-cut concierge: plans silence cuts from a transcript and applies them as one undo', () => {
+    useProjectStore.getState().addDemoClip()
+    const track = trackWithClips()
+    const totalBefore = track.clips.reduce((sum, c) => sum + c.duration, 0)
+    const undoBefore = useProjectStore.getState().history.undoStack.length
+
+    // Speech at [0,1] and [3,3.5]; a ~2s silent gap between (inside the 4s demo clip).
+    const transcript: Transcript = {
+      text: 'a b',
+      segments: [
+        { start: 0, end: 1, text: 'a' },
+        { start: 3, end: 3.5, text: 'b' },
+      ],
+    }
+    const plan = planSilenceCuts(track, transcript)
+    expect(plan.length).toBeGreaterThan(0)
+
+    useProjectStore.getState().applyCopilotProposals(plan)
+    const totalAfter = trackWithClips().clips.reduce((sum, c) => sum + c.duration, 0)
+    expect(totalAfter).toBeLessThan(totalBefore) // silence removed
+    expect(useProjectStore.getState().history.undoStack.length).toBe(undoBefore + 1) // one undo for the whole cut
+
+    useProjectStore.getState().undo()
+    expect(trackWithClips().clips.reduce((sum, c) => sum + c.duration, 0)).toBeCloseTo(totalBefore, 5)
   })
 
   it('applies an approved trim, changing the clip duration as one undoable edit', () => {
