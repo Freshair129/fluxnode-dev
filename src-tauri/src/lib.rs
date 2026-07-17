@@ -3698,7 +3698,7 @@ async fn agent_chat(
     message: String,
     model: Option<String>,
     allow_writes: Option<bool>,
-) -> Result<String, String> {
+) -> Result<brain::AgentOutcome, String> {
     tokio::task::spawn_blocking(move || agent_chat_blocking(app, message, model, allow_writes))
         .await
         .map_err(|error| error.to_string())?
@@ -3709,7 +3709,7 @@ fn agent_chat_blocking(
     message: String,
     model: Option<String>,
     allow_writes: Option<bool>,
-) -> Result<String, String> {
+) -> Result<brain::AgentOutcome, String> {
     // Default: the shared brain (wired to the GPU arbiter). A custom model spins up a one-off.
     let allow_writes = allow_writes.unwrap_or(false); // gate write/long tools unless opted in
     match model {
@@ -3854,7 +3854,17 @@ fn run_agent_cli(message: &str, allow_writes: bool) {
         8,
         allow_writes,
     ) {
-        Ok(answer) => println!("{answer}"),
+        // stdout stays the plain answer (the bench harness reads it); proposals go to stderr so
+        // scripting can still see what the run would change without approval.
+        Ok(outcome) => {
+            println!("{}", outcome.answer);
+            if !outcome.proposals.is_empty() {
+                eprintln!(
+                    "proposals: {}",
+                    serde_json::to_string(&outcome.proposals).unwrap_or_default()
+                );
+            }
+        }
         Err(err) => eprintln!("agent error: {err}"),
     }
 }

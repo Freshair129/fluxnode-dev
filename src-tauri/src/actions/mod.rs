@@ -918,6 +918,42 @@ impl Action for SaveAppPreferences {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Timeline-edit actions — FrontendEdit: authored by the agent, materialized in the frontend store
+// so undo/WAL/validation stay authoritative. `invoke` turns these into proposals; `run` is a
+// never-reached safety net.
+// ---------------------------------------------------------------------------
+
+pub struct TimelineRemoveRange;
+impl Action for TimelineRemoveRange {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "timeline_remove_range",
+            description: "Propose deleting a time range [start, end) in seconds from one timeline \
+                track. With ripple=true, later clips slide left to close the gap — use this to cut \
+                silences or dead air. This is a proposal: it is previewed and only applied after \
+                the user approves.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "trackId":{"type":"string","description":"Id of the track to edit."},
+                    "start":{"type":"number","description":"Range start in seconds."},
+                    "end":{"type":"number","description":"Range end in seconds (must be greater than start)."},
+                    "ripple":{"type":"boolean","description":"Shift later clips left to close the gap."}
+                },
+                "required":["trackId","start","end","ripple"]
+            }),
+            side_effect: SideEffect::FrontendEdit,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
+        Err("timeline_remove_range is materialized in the frontend after approval, not run in Rust"
+            .to_string())
+    }
+}
+
 /// Register every wrapped command into the registry.
 pub fn register_all(reg: &mut crate::action::Registry) {
     reg.register(Arc::new(InspectAssetPath));
@@ -951,6 +987,8 @@ pub fn register_all(reg: &mut crate::action::Registry) {
     reg.register(Arc::new(GenerateImage));
     reg.register(Arc::new(Transcribe));
     reg.register(Arc::new(Synthesize));
+    // Timeline-edit (FrontendEdit) actions.
+    reg.register(Arc::new(TimelineRemoveRange));
 }
 
 // ---------------------------------------------------------------------------

@@ -52,6 +52,7 @@ impl RegistryMcp {
             SideEffect::ReadOnly => def_desc.to_string(),
             SideEffect::Mutating => format!("[mutating] {def_desc}"),
             SideEffect::LongJob => format!("[long job] {def_desc}"),
+            SideEffect::FrontendEdit => format!("[proposes edit] {def_desc}"),
         }
     }
 }
