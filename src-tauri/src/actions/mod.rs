@@ -13,6 +13,29 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use tauri::AppHandle;
 
+/// `asset_id` in the wrapped asset commands is only a cache/output filename key, so agent
+/// callers that only know a raw file path may omit it; derive a stable, filename-safe id from
+/// the source file's stem instead.
+fn asset_id_or_derived(args: &Value, source_path: &str) -> String {
+    if let Some(id) = args
+        .get("asset_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        return id.to_string();
+    }
+    let stem = std::path::Path::new(source_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("asset");
+    let safe: String = stem
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    format!("agent-{safe}")
+}
+
 pub struct InspectAssetPath;
 
 impl Action for InspectAssetPath {
@@ -324,31 +347,27 @@ impl Action for AssetGenerateWaveform {
         static DEF: OnceLock<ActionDef> = OnceLock::new();
         DEF.get_or_init(|| ActionDef {
             name: "asset_generate_waveform",
-            description: "Generate waveform data for an asset.",
+            description: "Generate waveform data for a media file. Works on a raw file path; no open project is required.",
             params: json!({
                 "type":"object",
                 "properties":{
-                    "asset_id":{"type":"string"},
+                    "asset_id":{"type":"string","description":"Optional cache key; derived from source_path when omitted."},
                     "source_path":{"type":"string"},
                     "bucket_count":{"type":"integer","minimum":0}
                 },
-                "required":["asset_id","source_path","bucket_count"]
+                "required":["source_path","bucket_count"]
             }),
             side_effect: SideEffect::Mutating,
         })
     }
 
     fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
-        let asset_id = args
-            .get("asset_id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "Missing or invalid 'asset_id'".to_string())?
-            .to_string();
         let source_path = args
             .get("source_path")
             .and_then(Value::as_str)
             .ok_or_else(|| "Missing or invalid 'source_path'".to_string())?
             .to_string();
+        let asset_id = asset_id_or_derived(&args, &source_path);
         let bucket_count = args
             .get("bucket_count")
             .and_then(Value::as_u64)
@@ -371,31 +390,27 @@ impl Action for AssetGenerateThumbnail {
         static DEF: OnceLock<ActionDef> = OnceLock::new();
         DEF.get_or_init(|| ActionDef {
             name: "asset_generate_thumbnail",
-            description: "Generate a thumbnail for an asset.",
+            description: "Generate a thumbnail image from a video file. Works on a raw file path; no open project is required.",
             params: json!({
                 "type":"object",
                 "properties":{
-                    "asset_id":{"type":"string"},
+                    "asset_id":{"type":"string","description":"Optional cache key; derived from source_path when omitted."},
                     "source_path":{"type":"string"},
                     "time":{"type":"number"}
                 },
-                "required":["asset_id","source_path","time"]
+                "required":["source_path","time"]
             }),
             side_effect: SideEffect::Mutating,
         })
     }
 
     fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
-        let asset_id = args
-            .get("asset_id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "Missing or invalid 'asset_id'".to_string())?
-            .to_string();
         let source_path = args
             .get("source_path")
             .and_then(Value::as_str)
             .ok_or_else(|| "Missing or invalid 'source_path'".to_string())?
             .to_string();
+        let asset_id = asset_id_or_derived(&args, &source_path);
         let time = args
             .get("time")
             .and_then(Value::as_f64)
@@ -448,32 +463,28 @@ impl Action for AssetGenerateProxy {
         static DEF: OnceLock<ActionDef> = OnceLock::new();
         DEF.get_or_init(|| ActionDef {
             name: "asset_generate_proxy",
-            description: "Generate a proxy for an asset.",
+            description: "Generate a lower-resolution proxy video from a video file. Works on a raw file path; no open project is required.",
             params: json!({
                 "type":"object",
                 "properties":{
-                    "asset_id":{"type":"string"},
+                    "asset_id":{"type":"string","description":"Optional cache key; derived from source_path when omitted."},
                     "source_path":{"type":"string"},
                     "target_width":{"type":"integer","minimum":0},
                     "target_height":{"type":"integer","minimum":0}
                 },
-                "required":["asset_id","source_path","target_width","target_height"]
+                "required":["source_path","target_width","target_height"]
             }),
             side_effect: SideEffect::LongJob,
         })
     }
 
     fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
-        let asset_id = args
-            .get("asset_id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "Missing or invalid 'asset_id'".to_string())?
-            .to_string();
         let source_path = args
             .get("source_path")
             .and_then(Value::as_str)
             .ok_or_else(|| "Missing or invalid 'source_path'".to_string())?
             .to_string();
+        let asset_id = asset_id_or_derived(&args, &source_path);
         let target_width = args
             .get("target_width")
             .and_then(Value::as_u64)

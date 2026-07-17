@@ -16,9 +16,22 @@ use crate::action::Registry;
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
+/// Benchmark/debug tracing: when `FLUXNODE_AGENT_TRACE=1`, every agent-loop event is emitted to
+/// stderr as one `AGENT_TRACE {json}` line so external harnesses can score tool plans without
+/// touching the loop's return value.
+fn trace(event: Value) {
+    if std::env::var("FLUXNODE_AGENT_TRACE").is_ok_and(|v| v == "1") {
+        eprintln!("AGENT_TRACE {event}");
+    }
+}
+
 pub const SYSTEM_PROMPT: &str = "You are FluxNode's in-app copilot for a video editor. \
 Use the provided tools to inspect and modify the user's project. Call a tool when an action or \
-data is needed; otherwise reply concisely. Never invent tool names — only call tools that exist.";
+data is needed; otherwise reply concisely. Never invent tool names — only call tools that exist. \
+Asset operations (probe, waveform, thumbnail, proxy, transcribe, decode frame) work directly on \
+a raw file path — no project needs to be open first. When a tool result says an action requires \
+user confirmation, it means the action is valid but gated: tell the user what you want to run \
+and ask them to approve it; do not conclude that access is restricted.";
 
 /// A tool the model asked to call.
 pub struct ToolCall {
@@ -82,14 +95,23 @@ pub fn run_agent(
         json!({ "role": "user", "content": user_message }),
     ];
 
-    for _ in 0..max_steps {
+    for step in 0..max_steps {
         let turn = brain.chat(&messages, &tools)?;
         // Thread the assistant turn back verbatim (keeps tool_calls intact for the model).
         messages.push(turn.raw_message);
         match turn.reply {
-            BrainReply::Text(text) => return Ok(text),
+            BrainReply::Text(text) => {
+                trace(json!({ "event": "final", "step": step }));
+                return Ok(text);
+            }
             BrainReply::ToolCalls(calls) => {
                 for call in calls {
+                    trace(json!({
+                        "event": "tool_call",
+                        "step": step,
+                        "name": call.name,
+                        "arguments": call.arguments,
+                    }));
                     // `Registry::invoke` is the single write gate (see `action::Registry::invoke`)
                     // — it refuses `Mutating`/`LongJob` actions itself when `allow_writes` is
                     // false, so every caller (this loop, `action_invoke`, the MCP server) is
@@ -97,6 +119,13 @@ pub fn run_agent(
                     let result = reg
                         .invoke(app, &call.name, call.arguments.clone(), allow_writes)
                         .unwrap_or_else(|e| json!({ "error": e }));
+                    trace(json!({
+                        "event": "tool_result",
+                        "step": step,
+                        "name": call.name,
+                        "ok": result.get("error").is_none(),
+                        "result": result.to_string().chars().take(600).collect::<String>(),
+                    }));
                     messages.push(json!({
                         "role": "tool",
                         "name": call.name,

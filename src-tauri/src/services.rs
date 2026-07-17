@@ -15,10 +15,11 @@ use crate::media::backends::whisper::WhisperBackend;
 use crate::media::gpu::{BrainVram, GpuArbiter};
 use crate::media::MediaBroker;
 
-/// Default local tool-calling model for the in-app brain. `qwen3.5:4b` is not a real Ollama tag
-/// (Ollama's Qwen3 line is `qwen3:*`, no ".5"); overridable via `FLUXNODE_BRAIN_MODEL` for
-/// anyone pinned to a different local tag.
-pub const DEFAULT_BRAIN_MODEL: &str = "qwen3:4b";
+/// Default local tool-calling model for the in-app brain. `qwen3.5:4b` is the tag validated by
+/// the plan-benchmark (`bench/plan-bench/`, 90% valid-plan rate, 0 hallucinated tools) and must
+/// be pulled into Ollama; overridable via `FLUXNODE_BRAIN_MODEL` for anyone pinned to a different
+/// local tag. NOTE: the beta ships a bundled model — that choice is separate from this dev default.
+pub const DEFAULT_BRAIN_MODEL: &str = "qwen3.5:4b";
 
 /// The shared brain instance (also implements `BrainVram`).
 pub fn brain() -> Arc<OllamaBrain> {
