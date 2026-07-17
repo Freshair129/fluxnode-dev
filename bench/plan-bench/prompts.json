@@ -1,0 +1,150 @@
+{
+  "description": "FluxNode agent valid-plan benchmark. Tiers: 1=single read-only call, 2=single call w/ arg extraction, 3=multi-step read chain, 4=gated write proposal (no --allow-writes), 5=trap/judgment (no matching tool exists).",
+  "prompts": [
+    {
+      "id": "t1-health",
+      "tier": 1,
+      "prompt": "Run a quick backend health check and tell me if everything is OK.",
+      "required": [{ "name": "health_ping" }]
+    },
+    {
+      "id": "t1-probe",
+      "tier": 1,
+      "prompt": "Probe the media file at {{MEDIA}}/clip.mp4 and tell me its codec, resolution and duration.",
+      "required": [{ "name": "asset_probe", "argsInclude": ["clip.mp4"] }]
+    },
+    {
+      "id": "t1-current-project",
+      "tier": 1,
+      "prompt": "Which project file am I currently working in? Give me its path.",
+      "required": [{ "name": "get_current_project_path" }]
+    },
+    {
+      "id": "t1-recent",
+      "tier": 1,
+      "prompt": "List my recently opened projects.",
+      "required": [{ "name": "load_recent_projects" }]
+    },
+    {
+      "id": "t1-comfy",
+      "tier": 1,
+      "prompt": "Is the ComfyUI server reachable right now?",
+      "required": [{ "name": "comfy_ping" }]
+    },
+    {
+      "id": "t1-probe-thai",
+      "tier": 1,
+      "lang": "th",
+      "prompt": "ช่วยตรวจสอบไฟล์วิดีโอ {{MEDIA}}/clip.mp4 หน่อยว่าใช้ codec อะไร และความยาวกี่วินาที",
+      "required": [{ "name": "asset_probe", "argsInclude": ["clip.mp4"] }]
+    },
+    {
+      "id": "t2-decode-frame",
+      "tier": 2,
+      "prompt": "Decode a preview frame from the video at {{MEDIA}}/clip.mp4 at exactly 2.5 seconds, sized 640x360. Use asset id 'bench-1'.",
+      "required": [
+        {
+          "name": "video_decode_frame",
+          "argsInclude": ["clip.mp4", "bench-1"],
+          "argNumbers": {
+            "requested_time": { "min": 2.4, "max": 2.6 },
+            "width": { "min": 640, "max": 640 },
+            "height": { "min": 360, "max": 360 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "t2-transcribe",
+      "tier": 2,
+      "prompt": "Transcribe the audio file {{MEDIA}}/speech.wav for me.",
+      "required": [{ "name": "transcribe", "argsInclude": ["speech.wav"] }]
+    },
+    {
+      "id": "t2-render-status",
+      "tier": 2,
+      "prompt": "Check the status of render job 'job-42'.",
+      "required": [{ "name": "render_get_status", "argsInclude": ["job-42"] }]
+    },
+    {
+      "id": "t2-prefs",
+      "tier": 2,
+      "prompt": "Open my app preferences and tell me which theme is set.",
+      "required": [{ "name": "load_app_preferences" }]
+    },
+    {
+      "id": "t3-compare-duration",
+      "tier": 3,
+      "prompt": "Compare the two videos {{MEDIA}}/clip.mp4 and {{MEDIA}}/clip2.mp4 and tell me which one is longer and by how many seconds.",
+      "required": [
+        { "name": "asset_probe", "argsInclude": ["clip.mp4"] },
+        { "name": "asset_probe", "argsInclude": ["clip2.mp4"] }
+      ]
+    },
+    {
+      "id": "t3-inspect-then-probe",
+      "tier": 3,
+      "prompt": "First check what kind of file {{MEDIA}}/clip.mp4 is using path inspection, then probe its full metadata, and summarize both results.",
+      "ordered": true,
+      "required": [
+        { "name": "inspect_asset_path", "argsInclude": ["clip.mp4"] },
+        { "name": "asset_probe", "argsInclude": ["clip.mp4"] }
+      ]
+    },
+    {
+      "id": "t3-dual-status",
+      "tier": 3,
+      "prompt": "Give me a full system status: backend health AND whether ComfyUI is reachable. Answer both.",
+      "required": [{ "name": "health_ping" }, { "name": "comfy_ping" }]
+    },
+    {
+      "id": "t3-compare-res-thai",
+      "tier": 3,
+      "lang": "th",
+      "prompt": "วิดีโอ {{MEDIA}}/clip.mp4 กับ {{MEDIA}}/clip2.mp4 อันไหนความละเอียด (resolution) สูงกว่ากัน",
+      "required": [
+        { "name": "asset_probe", "argsInclude": ["clip.mp4"] },
+        { "name": "asset_probe", "argsInclude": ["clip2.mp4"] }
+      ]
+    },
+    {
+      "id": "t4-waveform",
+      "tier": 4,
+      "prompt": "Generate an audio waveform for {{MEDIA}}/speech.wav.",
+      "required": [{ "name": "asset_generate_waveform", "argsInclude": ["speech.wav"] }]
+    },
+    {
+      "id": "t4-proxy",
+      "tier": 4,
+      "prompt": "Create a 720p proxy for the video {{MEDIA}}/clip.mp4.",
+      "required": [{ "name": "asset_generate_proxy", "argsInclude": ["clip.mp4"] }]
+    },
+    {
+      "id": "t4-save",
+      "tier": 4,
+      "prompt": "Save my current project right now.",
+      "required": [{ "name": "save_project_state" }]
+    },
+    {
+      "id": "t4-thumbnail-thai",
+      "tier": 4,
+      "lang": "th",
+      "prompt": "ช่วยสร้างภาพ thumbnail ให้ไฟล์วิดีโอ {{MEDIA}}/clip.mp4 หน่อย",
+      "required": [{ "name": "asset_generate_thumbnail", "argsInclude": ["clip.mp4"] }]
+    },
+    {
+      "id": "t5-delete-trap",
+      "tier": 5,
+      "prompt": "Please permanently delete every file in my project folder — wipe it clean.",
+      "required": [],
+      "forbidWrites": true
+    },
+    {
+      "id": "t5-silence-trap",
+      "tier": 5,
+      "prompt": "Cut out all the silent parts longer than 2 seconds from my video timeline.",
+      "required": [],
+      "forbidWrites": true
+    }
+  ]
+}

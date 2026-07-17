@@ -6,7 +6,7 @@
 //! MCP tool list / CLI subcommands are all *derived* from `ActionDef` — never hand-maintained.
 #![allow(dead_code)]
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::AppHandle;
@@ -25,6 +25,10 @@ pub enum SideEffect {
     /// Kicks off a long background job — returns a job handle, progress is polled
     /// (e.g. `generate_video`, `start_export_job`).
     LongJob,
+    /// Edits authored by the agent but materialized in the frontend store (timeline edits), so the
+    /// project's history / undo / WAL / validation stay authoritative. These never `run()` in Rust:
+    /// `invoke` always turns them into a proposal for the frontend to preview and apply on approval.
+    FrontendEdit,
 }
 
 /// Static description of an action. This metadata is the contract every caller derives from.
@@ -70,12 +74,13 @@ impl Registry {
 
     /// The universal entry point for agent / MCP / CLI: invoke an action by name.
     ///
-    /// `allow_writes` is the single write gate every caller goes through — regardless of
-    /// whether the call came from the in-app agent loop, `action_invoke` (frontend/agent), or the
-    /// MCP server. When `false`, `Mutating` and `LongJob` actions are refused before `run` is
-    /// ever called; only `ReadOnly` actions execute. This mirrors (and now backs) the gating that
-    /// used to live only in `brain::run_agent`, which let `action_invoke` and the MCP server
-    /// bypass it entirely.
+    /// `allow_writes` is the single write gate every caller goes through — the in-app agent loop,
+    /// `action_invoke` (frontend/agent), or the MCP server. Instead of hard-failing a gated call,
+    /// the gate now returns a **proposal** (a `__fluxnode_proposal__`-tagged value): the action was
+    /// valid but is queued for the user to approve, so the agent can keep planning and the frontend
+    /// can surface an approve/reject UI. `ReadOnly` always runs. `Mutating`/`LongJob` run only with
+    /// `allow_writes`; otherwise they propose. `FrontendEdit` (timeline edits) never runs in Rust —
+    /// it always proposes, because the frontend store is the authority for those mutations.
     pub fn invoke(
         &self,
         app: &AppHandle,
@@ -87,19 +92,32 @@ impl Registry {
             .get(name)
             .ok_or_else(|| format!("unknown action: {name}"))?;
 
-        if !allow_writes
-            && matches!(
-                action.def().side_effect,
-                SideEffect::Mutating | SideEffect::LongJob
-            )
-        {
-            return Err(format!(
-                "'{name}' is a write/long-running action and requires user confirmation; not executed"
-            ));
-        }
-
         Self::validate_args(action.def(), &args)?;
-        action.run(app, args)
+
+        match action.def().side_effect {
+            SideEffect::ReadOnly => action.run(app, args),
+            SideEffect::FrontendEdit => Ok(Self::proposal(name, args, "frontend")),
+            SideEffect::Mutating | SideEffect::LongJob => {
+                if allow_writes {
+                    action.run(app, args)
+                } else {
+                    Ok(Self::proposal(name, args, "backend"))
+                }
+            }
+        }
+    }
+
+    /// Build the structured proposal a gated action returns instead of executing. `run_agent`
+    /// collects these off tool results; the frontend renders them as ghost edits to approve.
+    fn proposal(name: &str, args: Value, site: &str) -> Value {
+        json!({
+            "__fluxnode_proposal__": {
+                "action": name,
+                "args": args,
+                "site": site,
+                "summary": format!("Proposed {name}"),
+            }
+        })
     }
 
     /// Lightweight JSON-Schema-ish validation: for each property listed in `required`, checks the

@@ -49,6 +49,9 @@ const ShortcutsCheatSheet = lazy(() =>
 const CommandPalette = lazy(() =>
   import('../features/commands/CommandPalette').then((module) => ({ default: module.CommandPalette })),
 )
+const CopilotPanel = lazy(() =>
+  import('../features/copilot/CopilotPanel').then((module) => ({ default: module.CopilotPanel })),
+)
 
 export default function App() {
   const detachedPanel = useMemo(() => getDetachedPanelFromLocation(), [])
@@ -101,6 +104,7 @@ export default function App() {
   const previousActiveViewRef = useRef(activeView)
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
+  const [showCopilot, setShowCopilot] = useState(false)
   // MERIDIAN item 9: the status bar's secondary surfaces (export sheet + the four drawers) are
   // UI-local state, same as showShortcutsHelp/showCommandPalette above — not store state, per the
   // item-9 hard constraint ("do not change the store contract... adding UI-state fields... is
@@ -680,6 +684,22 @@ export default function App() {
         <ErrorBoundary label="Notifications" compact>
           <ErrorToasts />
         </ErrorBoundary>
+        {showCopilot ? (
+          <ErrorBoundary label="Copilot" compact>
+            <Suspense fallback={null}>
+              <CopilotPanel onClose={() => setShowCopilot(false)} />
+            </Suspense>
+          </ErrorBoundary>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowCopilot(true)}
+            aria-label="Open copilot"
+            className="fixed bottom-4 right-4 z-40 rounded-full border border-[#e0ff00]/40 bg-[#111214]/90 px-4 py-2 text-sm font-semibold text-[#e0ff00] shadow-[0_18px_50px_rgba(0,0,0,0.4)] backdrop-blur-xl transition hover:bg-[#e0ff00]/10"
+          >
+            Copilot
+          </button>
+        )}
       </div>
     </div>
   )

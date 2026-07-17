@@ -13,6 +13,35 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use tauri::AppHandle;
 
+/// `asset_id` in the wrapped asset commands is only a cache/output filename key, so agent
+/// callers that only know a raw file path may omit it; derive a stable, filename-safe id from
+/// the source file's stem instead.
+fn asset_id_or_derived(args: &Value, source_path: &str) -> String {
+    if let Some(id) = args
+        .get("asset_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        return id.to_string();
+    }
+    let stem = std::path::Path::new(source_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("asset");
+    let safe: String = stem
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("agent-{safe}")
+}
+
 pub struct InspectAssetPath;
 
 impl Action for InspectAssetPath {
@@ -324,31 +353,27 @@ impl Action for AssetGenerateWaveform {
         static DEF: OnceLock<ActionDef> = OnceLock::new();
         DEF.get_or_init(|| ActionDef {
             name: "asset_generate_waveform",
-            description: "Generate waveform data for an asset.",
+            description: "Generate waveform data for a media file. Works on a raw file path; no open project is required.",
             params: json!({
                 "type":"object",
                 "properties":{
-                    "asset_id":{"type":"string"},
+                    "asset_id":{"type":"string","description":"Optional cache key; derived from source_path when omitted."},
                     "source_path":{"type":"string"},
                     "bucket_count":{"type":"integer","minimum":0}
                 },
-                "required":["asset_id","source_path","bucket_count"]
+                "required":["source_path","bucket_count"]
             }),
             side_effect: SideEffect::Mutating,
         })
     }
 
     fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
-        let asset_id = args
-            .get("asset_id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "Missing or invalid 'asset_id'".to_string())?
-            .to_string();
         let source_path = args
             .get("source_path")
             .and_then(Value::as_str)
             .ok_or_else(|| "Missing or invalid 'source_path'".to_string())?
             .to_string();
+        let asset_id = asset_id_or_derived(&args, &source_path);
         let bucket_count = args
             .get("bucket_count")
             .and_then(Value::as_u64)
@@ -371,31 +396,27 @@ impl Action for AssetGenerateThumbnail {
         static DEF: OnceLock<ActionDef> = OnceLock::new();
         DEF.get_or_init(|| ActionDef {
             name: "asset_generate_thumbnail",
-            description: "Generate a thumbnail for an asset.",
+            description: "Generate a thumbnail image from a video file. Works on a raw file path; no open project is required.",
             params: json!({
                 "type":"object",
                 "properties":{
-                    "asset_id":{"type":"string"},
+                    "asset_id":{"type":"string","description":"Optional cache key; derived from source_path when omitted."},
                     "source_path":{"type":"string"},
                     "time":{"type":"number"}
                 },
-                "required":["asset_id","source_path","time"]
+                "required":["source_path","time"]
             }),
             side_effect: SideEffect::Mutating,
         })
     }
 
     fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
-        let asset_id = args
-            .get("asset_id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "Missing or invalid 'asset_id'".to_string())?
-            .to_string();
         let source_path = args
             .get("source_path")
             .and_then(Value::as_str)
             .ok_or_else(|| "Missing or invalid 'source_path'".to_string())?
             .to_string();
+        let asset_id = asset_id_or_derived(&args, &source_path);
         let time = args
             .get("time")
             .and_then(Value::as_f64)
@@ -448,32 +469,28 @@ impl Action for AssetGenerateProxy {
         static DEF: OnceLock<ActionDef> = OnceLock::new();
         DEF.get_or_init(|| ActionDef {
             name: "asset_generate_proxy",
-            description: "Generate a proxy for an asset.",
+            description: "Generate a lower-resolution proxy video from a video file. Works on a raw file path; no open project is required.",
             params: json!({
                 "type":"object",
                 "properties":{
-                    "asset_id":{"type":"string"},
+                    "asset_id":{"type":"string","description":"Optional cache key; derived from source_path when omitted."},
                     "source_path":{"type":"string"},
                     "target_width":{"type":"integer","minimum":0},
                     "target_height":{"type":"integer","minimum":0}
                 },
-                "required":["asset_id","source_path","target_width","target_height"]
+                "required":["source_path","target_width","target_height"]
             }),
             side_effect: SideEffect::LongJob,
         })
     }
 
     fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
-        let asset_id = args
-            .get("asset_id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "Missing or invalid 'asset_id'".to_string())?
-            .to_string();
         let source_path = args
             .get("source_path")
             .and_then(Value::as_str)
             .ok_or_else(|| "Missing or invalid 'source_path'".to_string())?
             .to_string();
+        let asset_id = asset_id_or_derived(&args, &source_path);
         let target_width = args
             .get("target_width")
             .and_then(Value::as_u64)
@@ -907,6 +924,191 @@ impl Action for SaveAppPreferences {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Timeline-edit actions — FrontendEdit: authored by the agent, materialized in the frontend store
+// so undo/WAL/validation stay authoritative. `invoke` turns these into proposals; `run` is a
+// never-reached safety net.
+// ---------------------------------------------------------------------------
+
+pub struct TimelineRemoveRange;
+impl Action for TimelineRemoveRange {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "timeline_remove_range",
+            description: "Propose deleting a time range [start, end) in seconds from one timeline \
+                track. With ripple=true, later clips slide left to close the gap — use this to cut \
+                silences or dead air. This is a proposal: it is previewed and only applied after \
+                the user approves.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "trackId":{"type":"string","description":"Id of the track to edit."},
+                    "start":{"type":"number","description":"Range start in seconds."},
+                    "end":{"type":"number","description":"Range end in seconds (must be greater than start)."},
+                    "ripple":{"type":"boolean","description":"Shift later clips left to close the gap."}
+                },
+                "required":["trackId","start","end","ripple"]
+            }),
+            side_effect: SideEffect::FrontendEdit,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
+        Err(
+            "timeline_remove_range is materialized in the frontend after approval, not run in Rust"
+                .to_string(),
+        )
+    }
+}
+
+pub struct TimelineSplitClip;
+impl Action for TimelineSplitClip {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "timeline_split_clip",
+            description: "Propose splitting a timeline clip into two at an absolute time (seconds). \
+                The split point must be strictly inside the clip. This is a proposal: previewed and \
+                only applied after the user approves.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "clipId":{"type":"string","description":"Id of the clip to split."},
+                    "time":{"type":"number","description":"Absolute timeline time in seconds to cut at."}
+                },
+                "required":["clipId","time"]
+            }),
+            side_effect: SideEffect::FrontendEdit,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
+        Err(
+            "timeline_split_clip is materialized in the frontend after approval, not run in Rust"
+                .to_string(),
+        )
+    }
+}
+
+pub struct TimelineTrimClip;
+impl Action for TimelineTrimClip {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "timeline_trim_clip",
+            description: "Propose trimming one edge of a timeline clip by a signed delta (seconds). \
+                edge='end' with positive delta extends the tail, negative trims it; edge='start' \
+                with positive delta trims the head, negative extends it. This is a proposal: \
+                previewed and only applied after the user approves.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "clipId":{"type":"string","description":"Id of the clip to trim."},
+                    "edge":{"type":"string","enum":["start","end"],"description":"Which edge to move."},
+                    "delta":{"type":"number","description":"Seconds to move the edge (signed)."}
+                },
+                "required":["clipId","edge","delta"]
+            }),
+            side_effect: SideEffect::FrontendEdit,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
+        Err(
+            "timeline_trim_clip is materialized in the frontend after approval, not run in Rust"
+                .to_string(),
+        )
+    }
+}
+
+pub struct TimelineMoveClip;
+impl Action for TimelineMoveClip {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "timeline_move_clip",
+            description: "Propose moving a clip to a new start time (seconds), optionally onto a \
+                different track. Proposal: previewed and applied only after approval.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "clipId":{"type":"string"},
+                    "startTime":{"type":"number","description":"New start time in seconds."},
+                    "trackId":{"type":"string","description":"Optional destination track id."}
+                },
+                "required":["clipId","startTime"]
+            }),
+            side_effect: SideEffect::FrontendEdit,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
+        Err(
+            "timeline_move_clip is materialized in the frontend after approval, not run in Rust"
+                .to_string(),
+        )
+    }
+}
+
+pub struct TimelineAddClip;
+impl Action for TimelineAddClip {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "timeline_add_clip",
+            description: "Propose adding a clip for an existing asset onto a track at a start time. \
+                Proposal: previewed and applied only after approval.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "trackId":{"type":"string"},
+                    "assetId":{"type":"string"},
+                    "startTime":{"type":"number"},
+                    "duration":{"type":"number"},
+                    "inPoint":{"type":"number","description":"Optional source in-point (seconds)."},
+                    "outPoint":{"type":"number","description":"Optional source out-point (seconds)."}
+                },
+                "required":["trackId","assetId","startTime","duration"]
+            }),
+            side_effect: SideEffect::FrontendEdit,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
+        Err(
+            "timeline_add_clip is materialized in the frontend after approval, not run in Rust"
+                .to_string(),
+        )
+    }
+}
+
+pub struct TimelineSetClipProperty;
+impl Action for TimelineSetClipProperty {
+    fn def(&self) -> &ActionDef {
+        static DEF: OnceLock<ActionDef> = OnceLock::new();
+        DEF.get_or_init(|| ActionDef {
+            name: "timeline_set_clip_property",
+            description: "Propose setting a clip property (volume, opacity, or speed) to a value. \
+                Proposal: previewed and applied only after approval.",
+            params: json!({
+                "type":"object",
+                "properties":{
+                    "clipId":{"type":"string"},
+                    "property":{"type":"string","enum":["volume","opacity","speed"]},
+                    "value":{"type":"number"}
+                },
+                "required":["clipId","property","value"]
+            }),
+            side_effect: SideEffect::FrontendEdit,
+        })
+    }
+
+    fn run(&self, _app: &AppHandle, _args: Value) -> ActionResult {
+        Err("timeline_set_clip_property is materialized in the frontend after approval, not run in Rust".to_string())
+    }
+}
+
 /// Register every wrapped command into the registry.
 pub fn register_all(reg: &mut crate::action::Registry) {
     reg.register(Arc::new(InspectAssetPath));
@@ -940,6 +1142,13 @@ pub fn register_all(reg: &mut crate::action::Registry) {
     reg.register(Arc::new(GenerateImage));
     reg.register(Arc::new(Transcribe));
     reg.register(Arc::new(Synthesize));
+    // Timeline-edit (FrontendEdit) actions.
+    reg.register(Arc::new(TimelineRemoveRange));
+    reg.register(Arc::new(TimelineSplitClip));
+    reg.register(Arc::new(TimelineTrimClip));
+    reg.register(Arc::new(TimelineMoveClip));
+    reg.register(Arc::new(TimelineAddClip));
+    reg.register(Arc::new(TimelineSetClipProperty));
 }
 
 // ---------------------------------------------------------------------------

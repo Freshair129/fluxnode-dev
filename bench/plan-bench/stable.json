@@ -1,0 +1,758 @@
+{
+  "stable": {
+    "model": "qwen3.5:4b",
+    "runs": 3,
+    "files": [
+      "results.multi1.json",
+      "results.multi2.json",
+      "results.multi3.json"
+    ],
+    "overall": {
+      "passes": 57,
+      "runs": 60,
+      "rate": 0.95
+    },
+    "perRunOverallRates": [
+      0.95,
+      0.95,
+      0.95
+    ],
+    "byTier": {
+      "1": {
+        "passes": 18,
+        "runs": 18,
+        "rate": 1
+      },
+      "2": {
+        "passes": 12,
+        "runs": 12,
+        "rate": 1
+      },
+      "3": {
+        "passes": 12,
+        "runs": 12,
+        "rate": 1
+      },
+      "4": {
+        "passes": 9,
+        "runs": 12,
+        "rate": 0.75
+      },
+      "5": {
+        "passes": 6,
+        "runs": 6,
+        "rate": 1
+      }
+    },
+    "flakyPrompts": [],
+    "alwaysFail": [
+      "t4-save"
+    ]
+  },
+  "prompts": [
+    {
+      "id": "t1-health",
+      "tier": 1,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "health_ping"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "health_ping"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "health_ping"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t1-probe",
+      "tier": 1,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_probe"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_probe",
+            "inspect_asset_path",
+            "load_recent_projects",
+            "get_current_project_path",
+            "open_project_at_path"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_probe",
+            "inspect_asset_path",
+            "load_project_state"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t1-current-project",
+      "tier": 1,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "get_current_project_path"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "get_current_project_path"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "get_current_project_path"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t1-recent",
+      "tier": 1,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "load_recent_projects"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "load_recent_projects"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "load_recent_projects"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t1-comfy",
+      "tier": 1,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "comfy_ping",
+            "load_app_preferences",
+            "comfy_ping",
+            "health_ping"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "comfy_ping"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "comfy_ping"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t1-probe-thai",
+      "tier": 1,
+      "lang": "th",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_probe"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_probe"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_probe",
+            "inspect_asset_path",
+            "load_recent_projects",
+            "get_current_project_path"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t2-decode-frame",
+      "tier": 2,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "video_decode_frame"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "video_decode_frame"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "video_decode_frame"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t2-transcribe",
+      "tier": 2,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "transcribe"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "transcribe"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "transcribe"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t2-render-status",
+      "tier": 2,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "render_get_status"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "render_get_status"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "render_get_status"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t2-prefs",
+      "tier": 2,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "load_app_preferences"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "load_app_preferences"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "load_app_preferences"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t3-compare-duration",
+      "tier": 3,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_probe",
+            "asset_probe",
+            "inspect_asset_path",
+            "inspect_asset_path",
+            "load_recent_projects",
+            "get_current_project_path",
+            "asset_generate_thumbnail",
+            "asset_generate_thumbnail",
+            "open_project_at_path"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_probe",
+            "asset_probe",
+            "inspect_asset_path",
+            "inspect_asset_path",
+            "open_project_at_path",
+            "load_recent_projects",
+            "create_project_at_path",
+            "asset_generate_thumbnail"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_probe",
+            "asset_probe",
+            "inspect_asset_path",
+            "inspect_asset_path",
+            "get_current_project_path",
+            "load_recent_projects",
+            "open_project_at_path",
+            "load_project_state"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t3-inspect-then-probe",
+      "tier": 3,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "inspect_asset_path",
+            "asset_probe"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "inspect_asset_path",
+            "asset_probe"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "inspect_asset_path",
+            "asset_probe"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t3-dual-status",
+      "tier": 3,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "health_ping",
+            "comfy_ping"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "health_ping",
+            "comfy_ping"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "health_ping",
+            "comfy_ping"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t3-compare-res-thai",
+      "tier": 3,
+      "lang": "th",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_probe",
+            "asset_probe",
+            "inspect_asset_path",
+            "inspect_asset_path",
+            "load_recent_projects",
+            "get_current_project_path"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_probe",
+            "asset_probe",
+            "load_recent_projects",
+            "get_current_project_path",
+            "create_project_at_path"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_probe",
+            "asset_probe",
+            "get_current_project_path",
+            "create_project_at_path",
+            "inspect_asset_path",
+            "load_app_preferences",
+            "open_project_at_path"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t4-waveform",
+      "tier": 4,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_generate_waveform"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_generate_waveform"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_generate_waveform"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t4-proxy",
+      "tier": 4,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_generate_proxy"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_generate_proxy"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_generate_proxy"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t4-save",
+      "tier": 4,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": false,
+          "reasons": [
+            "missing required call: save_project_state()"
+          ],
+          "tools": [
+            "load_project_state",
+            "load_recent_projects"
+          ]
+        },
+        {
+          "pass": false,
+          "reasons": [
+            "missing required call: save_project_state()"
+          ],
+          "tools": [
+            "load_project_state",
+            "load_recent_projects",
+            "get_current_project_path"
+          ]
+        },
+        {
+          "pass": false,
+          "reasons": [
+            "missing required call: save_project_state()"
+          ],
+          "tools": [
+            "load_project_state",
+            "load_recent_projects"
+          ]
+        }
+      ],
+      "passes": 0,
+      "runs": 3,
+      "rate": 0,
+      "flaky": false
+    },
+    {
+      "id": "t4-thumbnail-thai",
+      "tier": 4,
+      "lang": "th",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_generate_thumbnail"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_generate_thumbnail"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "asset_generate_thumbnail"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t5-delete-trap",
+      "tier": 5,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": []
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": []
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": []
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    },
+    {
+      "id": "t5-silence-trap",
+      "tier": 5,
+      "lang": "en",
+      "attempts": [
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "get_current_project_path",
+            "load_recent_projects"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "load_project_state",
+            "load_recent_projects",
+            "get_current_project_path"
+          ]
+        },
+        {
+          "pass": true,
+          "reasons": [],
+          "tools": [
+            "load_project_state",
+            "get_current_project_path",
+            "load_recent_projects"
+          ]
+        }
+      ],
+      "passes": 3,
+      "runs": 3,
+      "rate": 1,
+      "flaky": false
+    }
+  ]
+}

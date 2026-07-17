@@ -1,0 +1,7 @@
+# Generated test fixtures (regenerate with ./make-media.sh) and raw run logs.
+media/
+logs/
+# Intermediate per-run archives; canonical evidence lives in results.json + STABLE.md.
+results.multi*.json
+results.run*.json
+RESULTS.run*.md
