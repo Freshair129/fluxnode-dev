@@ -196,3 +196,78 @@ fn parse_whisper_json(raw: &str) -> Result<Transcript, String> {
         segments,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_whisper_json_maps_offsets_to_seconds() {
+        let raw = r#"{ "transcription": [
+            { "offsets": { "from": 0, "to": 2500 }, "text": " Hello world" },
+            { "offsets": { "from": 3000, "to": 4200 }, "text": " again" }
+        ] }"#;
+        let t = parse_whisper_json(raw).unwrap();
+        assert_eq!(t.text, "Hello world again");
+        assert_eq!(t.segments.len(), 2);
+        assert_eq!(t.segments[0].start, 0.0);
+        assert_eq!(t.segments[0].end, 2.5);
+        assert_eq!(t.segments[0].text, "Hello world");
+        assert_eq!(t.segments[1].start, 3.0);
+        assert_eq!(t.segments[1].end, 4.2);
+    }
+
+    #[test]
+    fn parse_whisper_json_rejects_malformed() {
+        assert!(parse_whisper_json("{}").is_err());
+        assert!(parse_whisper_json("not json").is_err());
+    }
+
+    /// Integration: the ffmpeg pre-convert must emit exactly what whisper.cpp requires — 16 kHz
+    /// mono 16-bit PCM. Skips cleanly if the ffmpeg/ffprobe sidecars aren't staged (e.g. CI without
+    /// bundled binaries).
+    #[test]
+    fn pre_convert_produces_16khz_mono_pcm() {
+        let ffmpeg = crate::sidecar_path("ffmpeg");
+        let ffprobe = crate::sidecar_path("ffprobe");
+        if !ffmpeg.exists() || !ffprobe.exists() {
+            eprintln!("skipping pre_convert test: ffmpeg/ffprobe sidecar not present");
+            return;
+        }
+
+        let dir = std::env::temp_dir();
+        let src = dir.join("fluxnode-whisper-pretest-src.wav");
+        let out = dir.join("fluxnode-whisper-pretest-out.wav");
+        let src_str = src.to_string_lossy().to_string();
+        let out_str = out.to_string_lossy().to_string();
+
+        // A deliberately non-conforming source: 48 kHz stereo.
+        let gen = no_window(&mut Command::new(&ffmpeg))
+            .args([
+                "-y", "-v", "error", "-f", "lavfi", "-i",
+                "sine=frequency=440:sample_rate=48000", "-ac", "2", "-t", "1", &src_str,
+            ])
+            .output()
+            .expect("run ffmpeg to make the test source");
+        assert!(gen.status.success(), "ffmpeg source gen failed");
+
+        convert_to_whisper_wav(&ffmpeg, &src_str, &out_str).expect("pre-convert");
+
+        let probe = no_window(&mut Command::new(&ffprobe))
+            .args([
+                "-v", "error", "-select_streams", "a:0", "-show_entries",
+                "stream=codec_name,sample_rate,channels", "-of", "default=noprint_wrappers=1",
+                &out_str,
+            ])
+            .output()
+            .expect("run ffprobe");
+        let report = String::from_utf8_lossy(&probe.stdout);
+
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&out);
+
+        assert!(report.contains("codec_name=pcm_s16le"), "report: {report}");
+        assert!(report.contains("sample_rate=16000"), "report: {report}");
+        assert!(report.contains("channels=1"), "report: {report}");
+    }
+}
