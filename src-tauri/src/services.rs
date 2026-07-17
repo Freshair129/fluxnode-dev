@@ -51,6 +51,26 @@ fn env_path(var: &str) -> Option<PathBuf> {
         .filter(|p| p.exists())
 }
 
+/// The bundled whisper model filename (whisper.cpp GGML format). Resolved next to the whisper-cli
+/// sidecar (the `binaries/` dir in dev, beside the app exe in release). Override the whole path
+/// with `FLUXNODE_WHISPER_MODEL`.
+const WHISPER_MODEL_FILE: &str = "ggml-base.en.bin";
+
+/// Locate the bundled whisper backend: `whisper-cli` sidecar + the GGML model beside it. Returns
+/// the pair only when BOTH exist, so transcription auto-enables the moment the files are dropped
+/// into `binaries/` — no env vars needed. Env vars still override each path individually.
+fn bundled_whisper() -> Option<(PathBuf, PathBuf)> {
+    let bin = env_path("FLUXNODE_WHISPER_BIN").or_else(|| {
+        let path = crate::sidecar_path("whisper-cli");
+        path.exists().then_some(path)
+    })?;
+    let model = env_path("FLUXNODE_WHISPER_MODEL").or_else(|| {
+        let path = bin.parent()?.join(WHISPER_MODEL_FILE);
+        path.exists().then_some(path)
+    })?;
+    Some((bin, model))
+}
+
 /// The shared media broker, wired to the GPU arbiter. ComfyUI (image) is always registered
 /// (it only needs a running server). The native sidecar backends (sd.cpp / whisper / piper) are
 /// registered only when their binary + model paths are provided via env vars and exist on disk,
@@ -72,10 +92,9 @@ pub fn media_broker() -> &'static MediaBroker {
         {
             broker.add_image(Arc::new(SdCppBackend::new(bin, model, out_dir.clone())));
         }
-        if let (Some(bin), Some(model)) = (
-            env_path("FLUXNODE_WHISPER_BIN"),
-            env_path("FLUXNODE_WHISPER_MODEL"),
-        ) {
+        // whisper STT: auto-enabled when the bundled `whisper-cli` + model are present in
+        // `binaries/` (or via env override). Falls back to no STT until they are.
+        if let Some((bin, model)) = bundled_whisper() {
             broker.set_stt(Arc::new(WhisperBackend::new(bin, model)));
         }
         if let (Some(bin), Some(voice)) = (
