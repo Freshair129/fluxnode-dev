@@ -51,18 +51,32 @@ impl Transcriber for WhisperBackend {
     }
 
     fn transcribe(&self, audio_path: &str) -> Result<Transcript, String> {
-        // TODO(ffmpeg pre-convert): whisper.cpp only accepts 16kHz mono 16-bit PCM WAV. If
-        // `audio_path` is anything else (mp4/mp3/48kHz/stereo) the CLI errors out. The lead should
-        // decode+resample first via the existing ffmpeg sidecar, e.g.:
-        //   ffmpeg -i <audio_path> -ar 16000 -ac 1 -c:a pcm_s16le <tmp>.wav
-        // using `sidecar_path("ffmpeg")` from lib.rs, then pass <tmp>.wav here. Not implemented
-        // here to avoid duplicating the sidecar resolver / ffmpeg piping in this file.
+        // whisper.cpp only accepts 16 kHz mono 16-bit PCM WAV; anything else (mp4/mp3/48kHz/stereo)
+        // makes the CLI error out. Decode + resample to a temp WAV via the bundled ffmpeg sidecar
+        // first, transcribe that, then clean up the temp WAV and the `<tmp>.json` whisper leaves
+        // beside it — regardless of success.
+        let ffmpeg = crate::sidecar_path("ffmpeg");
+        let tmp_wav = whisper_tmp_wav();
+        let tmp_wav_str = tmp_wav.to_string_lossy().to_string();
 
-        // `-oj` (== `--output-json`) writes `<audio_path>.json` next to the input. We ask for it and
+        let result = convert_to_whisper_wav(&ffmpeg, audio_path, &tmp_wav_str)
+            .and_then(|()| self.run_whisper(&tmp_wav_str));
+
+        let _ = std::fs::remove_file(&tmp_wav);
+        let _ = std::fs::remove_file(format!("{tmp_wav_str}.json"));
+
+        result
+    }
+}
+
+impl WhisperBackend {
+    /// Run the whisper.cpp CLI on an already-16kHz-mono WAV and parse its JSON output.
+    fn run_whisper(&self, wav_path: &str) -> Result<Transcript, String> {
+        // `-oj` (== `--output-json`) writes `<wav_path>.json` next to the input. We ask for it and
         // then read that file back. `-nt` (no-timestamps) is intentionally NOT set — we want the
         // per-segment start/end offsets that the JSON carries.
         let output = no_window(&mut Command::new(&self.bin))
-            .args(["-m", &self.model.to_string_lossy(), "-f", audio_path, "-oj"])
+            .args(["-m", &self.model.to_string_lossy(), "-f", wav_path, "-oj"])
             .output()
             .map_err(|error| {
                 format!(
@@ -79,8 +93,8 @@ impl Transcriber for WhisperBackend {
             ));
         }
 
-        // whisper.cpp writes the JSON to `<audio_path>.json` (input path + ".json" suffix).
-        let json_path = format!("{audio_path}.json");
+        // whisper.cpp writes the JSON to `<wav_path>.json` (input path + ".json" suffix).
+        let json_path = format!("{wav_path}.json");
         let raw = std::fs::read_to_string(&json_path).map_err(|error| {
             format!(
                 "whisper.cpp produced no JSON at {json_path}: {error} (stderr: {})",
@@ -90,6 +104,36 @@ impl Transcriber for WhisperBackend {
 
         parse_whisper_json(&raw)
     }
+}
+
+/// A unique temp path for the resampled WAV. Uniqueness (pid + a process-local counter) avoids
+/// collisions when several transcriptions run concurrently; no timestamp needed.
+fn whisper_tmp_wav() -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("fluxnode-whisper-{}-{n}.wav", std::process::id()))
+}
+
+/// Decode + resample any audio/video to whisper.cpp's required 16 kHz mono 16-bit PCM WAV via the
+/// bundled ffmpeg sidecar.
+fn convert_to_whisper_wav(ffmpeg: &std::path::Path, input: &str, out_wav: &str) -> Result<(), String> {
+    let output = no_window(&mut Command::new(ffmpeg))
+        .args([
+            "-y", "-v", "error", "-i", input, "-vn", "-ar", "16000", "-ac", "1", "-c:a",
+            "pcm_s16le", out_wav,
+        ])
+        .output()
+        .map_err(|error| format!("failed to launch ffmpeg ({}): {error}", ffmpeg.display()))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "ffmpeg failed to resample {input} for whisper ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
 }
 
 /// Parses whisper.cpp `-oj` output into the frozen `Transcript` contract.

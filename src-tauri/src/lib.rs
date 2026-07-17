@@ -577,7 +577,8 @@ const SIDECAR_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 /// Resolves a bundled sidecar (`ffmpeg` / `ffprobe`) across dev and release.
 /// Release: Tauri places `<name><EXE_SUFFIX>` next to the app executable.
 /// Dev: the staged `<name>-<triple><EXE_SUFFIX>` lives in `src-tauri/binaries/`.
-fn sidecar_path(name: &str) -> PathBuf {
+/// `pub(crate)` so media backends (e.g. the whisper pre-convert) reuse the one resolver.
+pub(crate) fn sidecar_path(name: &str) -> PathBuf {
     let plain = format!("{name}{}", std::env::consts::EXE_SUFFIX);
     let triple = format!("{name}-{SIDECAR_TRIPLE}{}", std::env::consts::EXE_SUFFIX);
 
