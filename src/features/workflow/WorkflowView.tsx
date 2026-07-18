@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, CheckCircle2, ClipboardPaste, Cloud, Copy, CopyPlus, Cpu, Link2, Loader2, Maximize2, Plus, Search, Sparkles, Trash2, X } from 'lucide-react'
 import { NODE_PORT_DEFINITIONS } from '../../domain/workflow/node-definitions'
 import { validateConnectionAttempt } from '../../domain/workflow/validation'
@@ -95,9 +95,13 @@ export interface WorkflowViewProps {
   frame?: 'contained' | 'flow'
 }
 
-export function WorkflowView({ frame = 'contained' }: WorkflowViewProps = {}) {
+function WorkflowViewImpl({ frame = 'contained' }: WorkflowViewProps = {}) {
   const workflow = useProjectStore((state) => state.project.workflow)
-  const project = useProjectStore((state) => state.project)
+  // Subscribe to just the timeline tracks (all this view reads from the timeline branch — the
+  // linked-audio-clip count below), NOT the whole `project`. `movePlayhead` rebuilds the project
+  // and timeline objects on every playback tick (~10Hz) but leaves `timeline.tracks` referentially
+  // stable, so this view no longer re-renders while the playhead runs.
+  const timelineTracks = useProjectStore((state) => state.project.timeline.tracks)
   const selectedNodeIds = useProjectStore((state) => state.ui.selectedNodeIds)
   const showNodePicker = useProjectStore((state) => state.ui.showNodePicker)
   const workflowClipboard = useProjectStore((state) => state.ui.workflowClipboard)
@@ -469,7 +473,7 @@ export function WorkflowView({ frame = 'contained' }: WorkflowViewProps = {}) {
     audioMixNode
       ? workflow.edges.filter((edge) => edge.target === audioMixNode.id && edge.targetHandle === 'input').length
       : 0
-  const connectedAudioClipCount = project.timeline.tracks
+  const connectedAudioClipCount = timelineTracks
     .filter((track) => track.type === 'audio')
     .flatMap((track) => track.clips)
     .filter((clip) => clip.workflowNodeId && workflow.nodes.some((node) => node.id === clip.workflowNodeId))
@@ -1399,6 +1403,14 @@ export function WorkflowView({ frame = 'contained' }: WorkflowViewProps = {}) {
     </section>
   )
 }
+
+/**
+ * `App` rebuilds the project object on every playback tick (~10Hz) and re-renders, which would
+ * cascade into this whole view — the node canvas AND the status dock — even though nothing it
+ * reads from the store changed. `memo` cuts that cascade: with a stable `frame` prop, this view
+ * re-renders only when its own store subscriptions actually change.
+ */
+export const WorkflowView = memo(WorkflowViewImpl)
 
 function WorkflowNodePicker({
   nodeSearch,
