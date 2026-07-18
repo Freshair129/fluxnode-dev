@@ -107,7 +107,9 @@ function migrateStudioLayout(project: FluxNodeProject) {
     current === null ||
     typeof current !== 'object' ||
     current.timelineHeightPx !== normalized.timelineHeightPx ||
-    current.mediaCollapsed !== normalized.mediaCollapsed
+    current.mediaCollapsed !== normalized.mediaCollapsed ||
+    current.mediaWidthPx !== normalized.mediaWidthPx ||
+    current.inspectorWidthPx !== normalized.inspectorWidthPx
   ) {
     project.meta.studioLayout = normalized
   }

@@ -46,6 +46,8 @@ export interface ProjectMeta {
 export interface StudioLayoutState {
   timelineHeightPx: number
   mediaCollapsed: boolean
+  mediaWidthPx: number
+  inspectorWidthPx: number
 }
 
 export type StageRowSide = 'ledger' | 'inspector'

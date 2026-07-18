@@ -61,20 +61,51 @@ describe('migrateProject', () => {
     delete legacyProject.meta.studioLayout
 
     const migratedLegacy = migrateProject(legacyProject)
-    expect(migratedLegacy.meta.studioLayout).toEqual({ timelineHeightPx: 300, mediaCollapsed: false })
+    expect(migratedLegacy.meta.studioLayout).toEqual({
+      timelineHeightPx: 300,
+      mediaCollapsed: false,
+      mediaWidthPx: 264,
+      inspectorWidthPx: 300,
+    })
 
     const malformedProject = createDefaultProject()
     malformedProject.meta.studioLayout = { timelineHeightPx: -50 } as unknown as typeof malformedProject.meta.studioLayout
 
     const migratedMalformed = migrateProject(malformedProject)
-    expect(migratedMalformed.meta.studioLayout).toEqual({ timelineHeightPx: 160, mediaCollapsed: false })
+    expect(migratedMalformed.meta.studioLayout).toEqual({
+      timelineHeightPx: 160,
+      mediaCollapsed: false,
+      mediaWidthPx: 264,
+      inspectorWidthPx: 300,
+    })
 
     const currentProject = createDefaultProject()
-    currentProject.meta.studioLayout = { timelineHeightPx: 420, mediaCollapsed: true }
+    currentProject.meta.studioLayout = {
+      timelineHeightPx: 420,
+      mediaCollapsed: true,
+      mediaWidthPx: 320,
+      inspectorWidthPx: 360,
+    }
     const before = JSON.stringify(currentProject)
 
     const migratedCurrent = migrateProject(currentProject)
     expect(JSON.stringify(migratedCurrent)).toBe(before)
-    expect(migratedCurrent.meta.studioLayout).toEqual({ timelineHeightPx: 420, mediaCollapsed: true })
+  })
+
+  it('fills panel widths into a studioLayout saved by the first (v1) studio schema', () => {
+    const v1Project = createDefaultProject()
+    // The first studioLayout schema had only these two fields.
+    v1Project.meta.studioLayout = {
+      timelineHeightPx: 420,
+      mediaCollapsed: true,
+    } as unknown as typeof v1Project.meta.studioLayout
+
+    const migrated = migrateProject(v1Project)
+    expect(migrated.meta.studioLayout).toEqual({
+      timelineHeightPx: 420,
+      mediaCollapsed: true,
+      mediaWidthPx: 264,
+      inspectorWidthPx: 300,
+    })
   })
 })
