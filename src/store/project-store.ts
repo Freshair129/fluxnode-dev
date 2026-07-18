@@ -3570,10 +3570,11 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       const requestedTrack = options?.trackId
         ? project.timeline.tracks.find((track) => track.id === options.trackId)
         : null
-      // A drop onto an incompatible lane (audio file over a video track and vice versa) falls
-      // back to the matching-type track rather than silently creating an invalid clip.
+      // A drop onto an incompatible lane (audio file over a video track, media over a subtitle
+      // track, and so on) falls back to the matching-type track rather than silently creating a
+      // clip the rest of the pipeline doesn't expect on that lane type.
       const track =
-        requestedTrack && (requestedTrack.type === trackType || (trackType === 'video' && requestedTrack.type === 'subtitle'))
+        requestedTrack && requestedTrack.type === trackType
           ? requestedTrack
           : getOrCreateTrack(project, trackType)
 

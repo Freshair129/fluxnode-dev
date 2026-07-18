@@ -193,6 +193,12 @@ export function StudioShell({ className }: StudioShellProps) {
           }
           setDragHeight(null)
         }}
+        onPointerCancel={() => {
+          // OS-level cancellation (alt-tab, touch cancel): discard the uncommitted preview so a
+          // later plain hover over the splitter can't keep resizing.
+          dragOriginRef.current = null
+          setDragHeight(null)
+        }}
         onKeyDown={(event) => {
           const stepPx = event.shiftKey ? 64 : 16
 

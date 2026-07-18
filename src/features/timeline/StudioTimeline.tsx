@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react'
 import {
   Copy,
   Eye,
@@ -123,7 +131,9 @@ export function StudioTimeline() {
   const toggleSelectedTrackLock = useProjectStore((state) => state.toggleSelectedTrackLock)
   const toggleSelectedTrackMute = useProjectStore((state) => state.toggleSelectedTrackMute)
   const toggleSelectedTrackSolo = useProjectStore((state) => state.toggleSelectedTrackSolo)
-  const toggleSelectedTrackVisibility = useProjectStore((state) => state.toggleSelectedTrackVisibility)
+  const toggleSelectedTrackVisibility = useProjectStore(
+    (state) => state.toggleSelectedTrackVisibility,
+  )
   const setSelectedClipSpeed = useProjectStore((state) => state.setSelectedClipSpeed)
   const replaceSelectedAssetPath = useProjectStore((state) => state.replaceSelectedAssetPath)
   const unlinkSelectedMedia = useProjectStore((state) => state.unlinkSelectedMedia)
@@ -133,7 +143,11 @@ export function StudioTimeline() {
 
   const [snapEnabled, setSnapEnabled] = useState(true)
   const [dragState, setDragState] = useState<DragState | null>(null)
-  const [contextMenu, setContextMenu] = useState<{ type: 'clip' | 'track'; x: number; y: number } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{
+    type: 'clip' | 'track'
+    x: number
+    y: number
+  } | null>(null)
   const [confirmDeleteTrack, setConfirmDeleteTrack] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
@@ -141,7 +155,11 @@ export function StudioTimeline() {
   const timelineEnd = useMemo(
     () =>
       timeline.tracks.reduce(
-        (end, track) => track.clips.reduce((clipEnd, clip) => Math.max(clipEnd, clip.startTime + clip.duration), end),
+        (end, track) =>
+          track.clips.reduce(
+            (clipEnd, clip) => Math.max(clipEnd, clip.startTime + clip.duration),
+            end,
+          ),
         0,
       ),
     [timeline.tracks],
@@ -203,6 +221,27 @@ export function StudioTimeline() {
     return best?.delta ?? rawDelta
   }
 
+  // Ctrl+wheel zoom needs a NATIVE non-passive listener: React 17+ registers its root `wheel`
+  // handler passively, so `preventDefault()` inside an `onWheel` prop can't stop the browser/
+  // webview page-zoom from firing alongside the timeline zoom.
+  useEffect(() => {
+    const scroller = scrollRef.current
+
+    if (!scroller) {
+      return
+    }
+
+    function handleWheel(event: WheelEvent) {
+      if (event.ctrlKey) {
+        event.preventDefault()
+        adjustTimelineZoom(event.deltaY < 0 ? 0.15 : -0.15)
+      }
+    }
+
+    scroller.addEventListener('wheel', handleWheel, { passive: false })
+    return () => scroller.removeEventListener('wheel', handleWheel)
+  }, [adjustTimelineZoom])
+
   // Follow the playhead while playing (keep the line inside the viewport, CapCut-style).
   const playheadX = HEADER_W + timeline.playhead * pps
   useEffect(() => {
@@ -248,7 +287,13 @@ export function StudioTimeline() {
     capturePointer(event)
 
     if (kind === 'move') {
-      setDragState({ kind, clipId: clip.id, originStart: clip.startTime, startClientX: event.clientX, dx: 0 })
+      setDragState({
+        kind,
+        clipId: clip.id,
+        originStart: clip.startTime,
+        startClientX: event.clientX,
+        dx: 0,
+      })
     } else {
       setDragState({
         kind,
@@ -269,6 +314,12 @@ export function StudioTimeline() {
 
     event.stopPropagation()
     setDragState({ ...dragState, dx: event.clientX - dragState.startClientX })
+  }
+
+  /** OS-level cancellation (alt-tab, touch cancel, capture loss) discards the uncommitted drag —
+   *  without this, the stale drag state would keep tracking plain hover moves. */
+  function cancelClipDrag() {
+    setDragState(null)
   }
 
   function commitClipDrag(event: PointerEvent<HTMLElement>) {
@@ -294,7 +345,10 @@ export function StudioTimeline() {
     } else {
       const maxDelta = dragState.originDuration - 0.1
       const minDelta = -dragState.originInPoint
-      const delta = Math.min(maxDelta, Math.max(minDelta, snapTime([dragState.originStart], rawDelta)))
+      const delta = Math.min(
+        maxDelta,
+        Math.max(minDelta, snapTime([dragState.originStart], rawDelta)),
+      )
 
       if (Math.abs(delta) > 0.0005) {
         setSelectedClipInPoint(dragState.originInPoint + delta)
@@ -326,8 +380,14 @@ export function StudioTimeline() {
     const rawDelta = dragState.dx / pps
 
     if (dragState.kind === 'move') {
-      const delta = snapTime([dragState.originStart, dragState.originStart + clip.duration], rawDelta)
-      return { left: Math.max(0, dragState.originStart + delta) * pps, width: Math.max(clip.duration * pps, 8) }
+      const delta = snapTime(
+        [dragState.originStart, dragState.originStart + clip.duration],
+        rawDelta,
+      )
+      return {
+        left: Math.max(0, dragState.originStart + delta) * pps,
+        width: Math.max(clip.duration * pps, 8),
+      }
     }
 
     if (dragState.kind === 'trim-right') {
@@ -338,7 +398,10 @@ export function StudioTimeline() {
 
     const maxDelta = dragState.originDuration - 0.1
     const minDelta = -dragState.originInPoint
-    const delta = Math.min(maxDelta, Math.max(minDelta, snapTime([dragState.originStart], rawDelta)))
+    const delta = Math.min(
+      maxDelta,
+      Math.max(minDelta, snapTime([dragState.originStart], rawDelta)),
+    )
     return {
       left: Math.max(0, dragState.originStart + delta) * pps,
       width: Math.max((dragState.originDuration - delta) * pps, 8),
@@ -388,7 +451,9 @@ export function StudioTimeline() {
           </ToolbarIcon>
           <div className="mx-1 h-4 w-px bg-white/10" aria-hidden="true" />
           <ToolbarIcon
-            label={snapEnabled ? 'Snapping on — click to turn off' : 'Snapping off — click to turn on'}
+            label={
+              snapEnabled ? 'Snapping on — click to turn off' : 'Snapping off — click to turn on'
+            }
             pressed={snapEnabled}
             onClick={() => setSnapEnabled((current) => !current)}
           >
@@ -438,12 +503,6 @@ export function StudioTimeline() {
         className={`relative min-h-0 flex-1 overflow-auto outline-2 -outline-offset-2 transition ${
           fileDropZone.isActive ? 'outline-accent/60' : 'outline-transparent'
         }`}
-        onWheel={(event) => {
-          if (event.ctrlKey) {
-            event.preventDefault()
-            adjustTimelineZoom(event.deltaY < 0 ? 0.15 : -0.15)
-          }
-        }}
       >
         <div className="relative" style={{ width: HEADER_W + laneWidth }}>
           {/* Ruler row */}
@@ -491,11 +550,16 @@ export function StudioTimeline() {
                 }
               }}
             >
-              {timeline.inPoint !== null && timeline.outPoint !== null && timeline.outPoint > timeline.inPoint ? (
+              {timeline.inPoint !== null &&
+              timeline.outPoint !== null &&
+              timeline.outPoint > timeline.inPoint ? (
                 <div
                   aria-hidden="true"
                   className="absolute bottom-0 top-0 bg-accent/10"
-                  style={{ left: timeline.inPoint * pps, width: (timeline.outPoint - timeline.inPoint) * pps }}
+                  style={{
+                    left: timeline.inPoint * pps,
+                    width: (timeline.outPoint - timeline.inPoint) * pps,
+                  }}
                 />
               ) : null}
               {Array.from({ length: tickCount }, (_, index) => {
@@ -558,8 +622,15 @@ export function StudioTimeline() {
                   style={{ width: HEADER_W }}
                 >
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <TrackTypeIcon size={12} aria-hidden="true" className="shrink-0 text-text-secondary" />
-                    <span className="truncate text-xs font-medium text-text-data" title={track.name}>
+                    <TrackTypeIcon
+                      size={12}
+                      aria-hidden="true"
+                      className="shrink-0 text-text-secondary"
+                    />
+                    <span
+                      className="truncate text-xs font-medium text-text-data"
+                      title={track.name}
+                    >
                       {track.name}
                     </span>
                   </div>
@@ -572,7 +643,11 @@ export function StudioTimeline() {
                         toggleSelectedTrackVisibility()
                       }}
                     >
-                      {track.visible === false ? <EyeOff size={12} aria-hidden="true" /> : <Eye size={12} aria-hidden="true" />}
+                      {track.visible === false ? (
+                        <EyeOff size={12} aria-hidden="true" />
+                      ) : (
+                        <Eye size={12} aria-hidden="true" />
+                      )}
                     </TrackToggle>
                     <TrackToggle
                       label={track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`}
@@ -602,7 +677,11 @@ export function StudioTimeline() {
                         toggleSelectedTrackLock()
                       }}
                     >
-                      {track.locked ? <Lock size={12} aria-hidden="true" /> : <LockOpen size={12} aria-hidden="true" />}
+                      {track.locked ? (
+                        <Lock size={12} aria-hidden="true" />
+                      ) : (
+                        <LockOpen size={12} aria-hidden="true" />
+                      )}
                     </TrackToggle>
                   </div>
                 </div>
@@ -634,7 +713,8 @@ export function StudioTimeline() {
                     const isSelected = selectedClipIds.includes(clip.id)
                     const geometry = clipGeometry(clip)
                     const thumbnail = assetThumbnails[clip.assetId]?.thumbnailPath ?? null
-                    const peaks = track.type === 'audio' ? waveformCache[clip.assetId]?.peaks ?? null : null
+                    const peaks =
+                      track.type === 'audio' ? (waveformCache[clip.assetId]?.peaks ?? null) : null
 
                     return (
                       <article
@@ -668,6 +748,7 @@ export function StudioTimeline() {
                         }}
                         onPointerMove={updateClipDrag}
                         onPointerUp={commitClipDrag}
+                        onPointerCancel={cancelClipDrag}
                         className={`absolute bottom-1 top-1 cursor-grab touch-none select-none overflow-hidden rounded-[var(--radius-md)] border transition-[border-color,box-shadow] active:cursor-grabbing ${
                           isSelected
                             ? 'z-10 border-accent shadow-[0_0_0_1px_rgba(224,255,0,0.35)]'
@@ -716,6 +797,7 @@ export function StudioTimeline() {
                               onPointerDown={(event) => beginClipDrag(event, clip, 'trim-left')}
                               onPointerMove={updateClipDrag}
                               onPointerUp={commitClipDrag}
+                              onPointerCancel={cancelClipDrag}
                               className="absolute inset-y-0 left-0 w-2 cursor-ew-resize bg-accent/80"
                               style={{ borderRadius: 'var(--radius-md) 0 0 var(--radius-md)' }}
                             />
@@ -724,6 +806,7 @@ export function StudioTimeline() {
                               onPointerDown={(event) => beginClipDrag(event, clip, 'trim-right')}
                               onPointerMove={updateClipDrag}
                               onPointerUp={commitClipDrag}
+                              onPointerCancel={cancelClipDrag}
                               className="absolute inset-y-0 right-0 w-2 cursor-ew-resize bg-accent/80"
                               style={{ borderRadius: '0 var(--radius-md) var(--radius-md) 0' }}
                             />
@@ -746,10 +829,15 @@ export function StudioTimeline() {
         </div>
 
         {totalClips === 0 ? (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center" style={{ paddingLeft: HEADER_W }}>
+          <div
+            className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center"
+            style={{ paddingLeft: HEADER_W }}
+          >
             <div className="pointer-events-auto flex flex-col items-center gap-3 rounded-[var(--radius-lg)] border border-dashed border-white/15 bg-black/40 px-8 py-6 text-center backdrop-blur-sm">
               <Upload size={20} aria-hidden="true" className="text-text-secondary" />
-              <p className="text-sm text-text-data">Drag media here, or import to start your edit.</p>
+              <p className="text-sm text-text-data">
+                Drag media here, or import to start your edit.
+              </p>
               <button
                 type="button"
                 onClick={() => void importAssetFromPath()}
@@ -763,12 +851,26 @@ export function StudioTimeline() {
       </div>
 
       {contextMenu ? (
-        <ContextMenu x={contextMenu.x} y={contextMenu.y} label={contextMenu.type === 'clip' ? 'Clip actions' : 'Track actions'}>
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          label={contextMenu.type === 'clip' ? 'Clip actions' : 'Track actions'}
+        >
           {contextMenu.type === 'clip' ? (
             <div className="space-y-1">
-              <CommandMenuItem commandId="timeline.split" onActivated={() => setContextMenu(null)} />
-              <CommandMenuItem commandId="selection.duplicate" onActivated={() => setContextMenu(null)} />
-              <CommandMenuItem commandId="selection.delete" tone="danger" onActivated={() => setContextMenu(null)} />
+              <CommandMenuItem
+                commandId="timeline.split"
+                onActivated={() => setContextMenu(null)}
+              />
+              <CommandMenuItem
+                commandId="selection.duplicate"
+                onActivated={() => setContextMenu(null)}
+              />
+              <CommandMenuItem
+                commandId="selection.delete"
+                tone="danger"
+                onActivated={() => setContextMenu(null)}
+              />
               <ContextMenuDivider />
               {[0.5, 1, 2, 4].map((speed) => (
                 <ContextMenuItem
@@ -937,7 +1039,9 @@ function TrackToggle({
         onClick()
       }}
       className={`inline-flex h-5 w-5 items-center justify-center rounded-[var(--radius-sm)] transition ${
-        active ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:bg-white/8 hover:text-white'
+        active
+          ? 'bg-accent/20 text-accent'
+          : 'text-text-secondary hover:bg-white/8 hover:text-white'
       }`}
     >
       {children}
@@ -964,7 +1068,14 @@ function WaveformStrip({ peaks }: { peaks: { min: number; max: number }[] }) {
       preserveAspectRatio="none"
     >
       {sampled.map((value, index) => (
-        <rect key={index} x={index + 0.15} y={1 - value} width={0.7} height={Math.max(value * 2, 0.06)} fill="currentColor" />
+        <rect
+          key={index}
+          x={index + 0.15}
+          y={1 - value}
+          width={0.7}
+          height={Math.max(value * 2, 0.06)}
+          fill="currentColor"
+        />
       ))}
     </svg>
   )
