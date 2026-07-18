@@ -322,3 +322,84 @@ describe('project-store: split-clip id uniqueness', () => {
     expect(new Set(allKeyframeIds).size).toBe(allKeyframeIds.length)
   })
 })
+
+describe('project-store: moveSelectedClips (cross-track + multi-select drag)', () => {
+  let useProjectStore: typeof UseProjectStoreType
+
+  beforeEach(async () => {
+    useProjectStore = await loadStore()
+  })
+
+  function videoTrack() {
+    return useProjectStore.getState().project.timeline.tracks.find((t) => t.id === 'track-video-01')!
+  }
+
+  it('shifts every selected clip by the same time delta, preserving the gap between them', () => {
+    // Add a second video clip so the video track holds two selectable clips.
+    useProjectStore.getState().selectClip('clip-video-01')
+    useProjectStore.getState().duplicateSelected()
+    const clips = videoTrack().clips
+    expect(clips.length).toBeGreaterThanOrEqual(2)
+
+    const [a, b] = clips
+    const gapBefore = b.startTime - a.startTime
+    useProjectStore.getState().selectClip(a.id)
+    useProjectStore.getState().selectClip(b.id, true)
+
+    useProjectStore.getState().moveSelectedClips(1.5, 0)
+
+    const after = videoTrack().clips
+    const a2 = after.find((c) => c.id === a.id)!
+    const b2 = after.find((c) => c.id === b.id)!
+    expect(a2.startTime).toBeCloseTo(a.startTime + 1.5, 2)
+    expect(b2.startTime).toBeCloseTo(b.startTime + 1.5, 2)
+    expect(b2.startTime - a2.startTime).toBeCloseTo(gapBefore, 2)
+  })
+
+  it('group-clamps the time delta so the leftmost selected clip never crosses 0', () => {
+    useProjectStore.getState().selectClip('clip-video-01')
+    const start = videoTrack().clips.find((c) => c.id === 'clip-video-01')!.startTime
+
+    // Drag far past 0 — the clip pins at 0, not a negative start.
+    useProjectStore.getState().moveSelectedClips(-(start + 100), 0)
+    expect(videoTrack().clips.find((c) => c.id === 'clip-video-01')!.startTime).toBe(0)
+  })
+
+  it('moves a clip down into a second video track (valid type + unlocked)', () => {
+    // Add a second video track directly below the first.
+    useProjectStore.getState().selectTrack('track-video-01')
+    useProjectStore.getState().addTrackBelow()
+    const tracks = useProjectStore.getState().project.timeline.tracks
+    const secondVideo = tracks[1]
+    expect(secondVideo.type).toBe('video')
+
+    useProjectStore.getState().selectClip('clip-video-01')
+    useProjectStore.getState().moveSelectedClips(0, 1)
+
+    const state = useProjectStore.getState().project.timeline
+    expect(videoTrack().clips.some((c) => c.id === 'clip-video-01')).toBe(false)
+    const moved = state.tracks[1].clips.find((c) => c.id === 'clip-video-01')!
+    expect(moved).toBeDefined()
+    expect(moved.trackId).toBe(secondVideo.id)
+  })
+
+  it('drops the vertical move (keeps the horizontal one) when the destination track type mismatches', () => {
+    // track index 1 is the AUDIO track — a video clip can't land there.
+    useProjectStore.getState().selectClip('clip-video-01')
+    const start = videoTrack().clips.find((c) => c.id === 'clip-video-01')!.startTime
+
+    useProjectStore.getState().moveSelectedClips(0.5, 1)
+
+    // Still on the video track, but the time shift applied.
+    const clip = videoTrack().clips.find((c) => c.id === 'clip-video-01')!
+    expect(clip).toBeDefined()
+    expect(clip.startTime).toBeCloseTo(start + 0.5, 2)
+  })
+
+  it('is one undoable step', () => {
+    const undoBefore = useProjectStore.getState().history.undoStack.length
+    useProjectStore.getState().selectClip('clip-video-01')
+    useProjectStore.getState().moveSelectedClips(1, 0)
+    expect(useProjectStore.getState().history.undoStack.length).toBe(undoBefore + 1)
+  })
+})

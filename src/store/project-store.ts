@@ -261,6 +261,15 @@ interface ProjectStoreState {
   cycleSelectedTrackHeight: () => void
   setSelectedTrackHeight: (height: number) => void
   moveSelectedClipToAdjacentTrack: (direction: 'up' | 'down') => void
+  /**
+   * Timeline drag primitive: shift every selected clip by one relative delta — `timeDelta`
+   * seconds along the timeline and `trackDelta` lanes vertically — in a single undoable step.
+   * The group is clamped as a whole (the leftmost clip can't cross 0; the top/bottom clips can't
+   * leave the track stack), and the vertical move is all-or-nothing: if ANY selected clip would
+   * land on a locked or type-incompatible track, `trackDelta` is dropped and only the horizontal
+   * move applies. This is what powers cross-track drag and multi-clip drag in StudioTimeline.
+   */
+  moveSelectedClips: (timeDelta: number, trackDelta: number) => void
   setSelectedClipStartTime: (startTime: number) => void
   setSelectedClipDuration: (duration: number) => void
   setSelectedClipInPoint: (inPoint: number) => void
@@ -4992,6 +5001,108 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         const [clip] = currentTrack.clips.splice(clipIndex, 1)
         clip.trackId = targetTrack.id
         targetTrack.clips.push(clip)
+      }
+    }),
+  moveSelectedClips: (timeDelta, trackDelta) =>
+    applyMutation(set, get, 'clip.move', 'Clips moved', (project) => {
+      const selectedClipIds = new Set(get().ui.selectedClipIds)
+
+      if (selectedClipIds.size === 0) {
+        return
+      }
+
+      const tracks = project.timeline.tracks
+      // Gather every selected clip with its source-track index, skipping clips whose track is
+      // locked (a locked source can't give up its clips) — mirrors the trim/move guards.
+      const members: Array<{ clip: Clip; sourceIndex: number }> = []
+      let minStart = Infinity
+      let minTrackIndex = Infinity
+      let maxTrackIndex = -Infinity
+
+      for (let index = 0; index < tracks.length; index += 1) {
+        const track = tracks[index]
+
+        if (track.locked) {
+          continue
+        }
+
+        for (const clip of track.clips) {
+          if (selectedClipIds.has(clip.id)) {
+            members.push({ clip, sourceIndex: index })
+            minStart = Math.min(minStart, clip.startTime)
+            minTrackIndex = Math.min(minTrackIndex, index)
+            maxTrackIndex = Math.max(maxTrackIndex, index)
+          }
+        }
+      }
+
+      if (members.length === 0) {
+        return
+      }
+
+      // Group time clamp: the whole selection shifts together, so the leftmost clip is what pins
+      // how far left the group can go.
+      const effectiveTimeDelta = Math.max(timeDelta, -minStart)
+
+      // Group track clamp: keep the selection's index span inside the stack, then verify EVERY
+      // destination is a valid, unlocked, type-matching lane. Any failure cancels the vertical
+      // move entirely (all-or-nothing) so a partial drop can't scatter a multi-selection.
+      let effectiveTrackDelta = trackDelta
+
+      if (effectiveTrackDelta !== 0) {
+        if (minTrackIndex + effectiveTrackDelta < 0) {
+          effectiveTrackDelta = -minTrackIndex
+        }
+
+        if (maxTrackIndex + effectiveTrackDelta > tracks.length - 1) {
+          effectiveTrackDelta = tracks.length - 1 - maxTrackIndex
+        }
+
+        const everyDestinationValid = members.every(({ sourceIndex }) => {
+          const targetIndex = sourceIndex + effectiveTrackDelta
+
+          if (targetIndex === sourceIndex) {
+            return true
+          }
+
+          const targetTrack = tracks[targetIndex]
+          return Boolean(targetTrack) && !targetTrack.locked && targetTrack.type === tracks[sourceIndex].type
+        })
+
+        if (!everyDestinationValid) {
+          effectiveTrackDelta = 0
+        }
+      }
+
+      if (effectiveTimeDelta === 0 && effectiveTrackDelta === 0) {
+        return
+      }
+
+      // Apply the horizontal shift to every member first (independent of track moves).
+      for (const { clip } of members) {
+        clip.startTime = Math.max(0, Number((clip.startTime + effectiveTimeDelta).toFixed(2)))
+      }
+
+      if (effectiveTrackDelta === 0) {
+        return
+      }
+
+      // Detach every moving clip from its source track BEFORE re-inserting, so the splices don't
+      // shift the indices the destinations were computed against.
+      const relocations = members
+        .filter(({ sourceIndex }) => sourceIndex + effectiveTrackDelta !== sourceIndex)
+        .map(({ clip, sourceIndex }) => {
+          const sourceTrack = tracks[sourceIndex]
+          const clipIndex = sourceTrack.clips.findIndex((entry) => entry.id === clip.id)
+          sourceTrack.clips.splice(clipIndex, 1)
+          return { clip, targetIndex: sourceIndex + effectiveTrackDelta }
+        })
+
+      for (const { clip, targetIndex } of relocations) {
+        const targetTrack = tracks[targetIndex]
+        clip.trackId = targetTrack.id
+        targetTrack.clips.push(clip)
+        targetTrack.clips.sort((a, b) => a.startTime - b.startTime)
       }
     }),
   setSelectedClipStartTime: (startTime) =>

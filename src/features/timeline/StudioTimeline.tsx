@@ -46,7 +46,23 @@ const SNAP_PX = 8
 const TAIL_PX = 480
 
 type DragState =
-  | { kind: 'move'; clipId: string; originStart: number; startClientX: number; dx: number }
+  | {
+      kind: 'move'
+      primaryClipId: string
+      startClientX: number
+      startClientY: number
+      dx: number
+      dy: number
+      primaryOriginStart: number
+      primaryDuration: number
+      sourceTrackIndex: number
+      /** Live pointer-derived destination lane; equals sourceTrackIndex when it can't move there. */
+      targetTrackIndex: number
+      /** Every clip that moves with this gesture, with the start time it had when the drag began. */
+      members: Array<{ clipId: string; originStart: number }>
+      /** Leftmost origin start across the selection — pins how far left the group can slide. */
+      minSelectedStart: number
+    }
   | {
       kind: 'trim-left' | 'trim-right'
       clipId: string
@@ -116,6 +132,7 @@ export function StudioTimeline() {
   const setSelectedClipStartTime = useProjectStore((state) => state.setSelectedClipStartTime)
   const setSelectedClipInPoint = useProjectStore((state) => state.setSelectedClipInPoint)
   const setSelectedClipOutPoint = useProjectStore((state) => state.setSelectedClipOutPoint)
+  const moveSelectedClips = useProjectStore((state) => state.moveSelectedClips)
   const splitSelectedClip = useProjectStore((state) => state.splitSelectedClip)
   const deleteSelected = useProjectStore((state) => state.deleteSelected)
   const duplicateSelected = useProjectStore((state) => state.duplicateSelected)
@@ -154,6 +171,10 @@ export function StudioTimeline() {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lastWrittenScrollXRef = useRef<number | null>(null)
   const scrollPersistTimerRef = useRef<number | null>(null)
+  // Per-lane DOM refs so a vertical drag can hit-test the pointer against each lane's box and
+  // resolve which track it's hovering (lanes have unequal heights, so a fixed row-height guess
+  // won't do). Keyed by track id.
+  const laneRefs = useRef(new Map<string, HTMLElement>())
 
   const pps = BASE_PPS * timeline.zoom
   const timelineEnd = useMemo(
@@ -187,13 +208,24 @@ export function StudioTimeline() {
   }
   const fileDropZone = useFileDropZone<HTMLDivElement>(handleFilesDropped)
 
+  /** Clip ids currently being dragged (excluded from snap targets so a clip can't snap to itself). */
+  const draggedClipIds = useMemo(() => {
+    if (!dragState) {
+      return new Set<string>()
+    }
+
+    return dragState.kind === 'move'
+      ? new Set(dragState.members.map((member) => member.clipId))
+      : new Set([dragState.clipId])
+  }, [dragState])
+
   /** Every static edge a dragged clip may snap to: 0, the playhead, and other clips' edges. */
   const snapCandidates = useMemo(() => {
     const candidates = [0, timeline.playhead]
 
     for (const track of timeline.tracks) {
       for (const clip of track.clips) {
-        if (dragState && clip.id === dragState.clipId) {
+        if (draggedClipIds.has(clip.id)) {
           continue
         }
 
@@ -202,7 +234,7 @@ export function StudioTimeline() {
     }
 
     return candidates
-  }, [dragState, timeline.playhead, timeline.tracks])
+  }, [draggedClipIds, timeline.playhead, timeline.tracks])
 
   function snapTime(edges: number[], rawDelta: number): number {
     if (!snapEnabled) {
@@ -325,27 +357,88 @@ export function StudioTimeline() {
     }
   }
 
+  /** Which lane the pointer's Y currently sits over, as a track index; -1 if outside every lane. */
+  function trackIndexAtClientY(clientY: number): number {
+    for (let index = 0; index < timeline.tracks.length; index += 1) {
+      const lane = laneRefs.current.get(timeline.tracks[index].id)
+
+      if (!lane) {
+        continue
+      }
+
+      const rect = lane.getBoundingClientRect()
+
+      if (clientY >= rect.top && clientY <= rect.bottom) {
+        return index
+      }
+    }
+
+    return -1
+  }
+
+  /** Clamp a pointer-derived destination to a lane the primary clip may legally land on
+   *  (matching type, unlocked); otherwise keep it on its source lane. */
+  function resolveTargetTrackIndex(clientY: number, sourceTrackIndex: number): number {
+    const hovered = trackIndexAtClientY(clientY)
+
+    if (hovered === -1 || hovered === sourceTrackIndex) {
+      return sourceTrackIndex
+    }
+
+    const sourceTrack = timeline.tracks[sourceTrackIndex]
+    const targetTrack = timeline.tracks[hovered]
+
+    if (!sourceTrack || !targetTrack || targetTrack.locked || targetTrack.type !== sourceTrack.type) {
+      return sourceTrackIndex
+    }
+
+    return hovered
+  }
+
   function beginClipDrag(event: PointerEvent<HTMLElement>, clip: Clip, kind: DragState['kind']) {
     if (event.button !== 0) {
       return
     }
 
     event.stopPropagation()
-    // Non-additive select: move/trim always operates on exactly this clip (the store's
-    // setSelectedClipStartTime applies to every selected clip, which would stack a
-    // multi-selection onto one start time).
-    selectClip(clip.id, false)
     capturePointer(event)
 
     if (kind === 'move') {
+      // Keep an existing multi-selection if this clip is part of it (drag the whole group);
+      // otherwise select just this clip. Trim always collapses to a single clip (below).
+      const additive = event.ctrlKey || event.metaKey
+      const alreadySelected = selectedClipIds.includes(clip.id)
+
+      if (!alreadySelected) {
+        selectClip(clip.id, additive)
+      }
+
+      const memberIds = alreadySelected ? selectedClipIds : [clip.id]
+      const members = memberIds
+        .map((id) => {
+          const found = findClip(id)
+          return found ? { clipId: id, originStart: found.startTime } : null
+        })
+        .filter((entry): entry is { clipId: string; originStart: number } => entry !== null)
+      const minSelectedStart = members.reduce((min, member) => Math.min(min, member.originStart), Infinity)
+      const sourceTrackIndex = timeline.tracks.findIndex((track) => track.clips.some((c) => c.id === clip.id))
+
       setDragState({
         kind,
-        clipId: clip.id,
-        originStart: clip.startTime,
+        primaryClipId: clip.id,
         startClientX: event.clientX,
+        startClientY: event.clientY,
         dx: 0,
+        dy: 0,
+        primaryOriginStart: clip.startTime,
+        primaryDuration: clip.duration,
+        sourceTrackIndex,
+        targetTrackIndex: sourceTrackIndex,
+        members,
+        minSelectedStart: Number.isFinite(minSelectedStart) ? minSelectedStart : clip.startTime,
       })
     } else {
+      selectClip(clip.id, false)
       setDragState({
         kind,
         clipId: clip.id,
@@ -364,6 +457,17 @@ export function StudioTimeline() {
     }
 
     event.stopPropagation()
+
+    if (dragState.kind === 'move') {
+      setDragState({
+        ...dragState,
+        dx: event.clientX - dragState.startClientX,
+        dy: event.clientY - dragState.startClientY,
+        targetTrackIndex: resolveTargetTrackIndex(event.clientY, dragState.sourceTrackIndex),
+      })
+      return
+    }
+
     setDragState({ ...dragState, dx: event.clientX - dragState.startClientX })
   }
 
@@ -382,14 +486,24 @@ export function StudioTimeline() {
     const rawDelta = dragState.dx / pps
 
     if (dragState.kind === 'move') {
-      const clipEnd = dragState.originStart + (findClip(dragState.clipId)?.duration ?? 0)
-      const delta = snapTime([dragState.originStart, clipEnd], rawDelta)
-      const nextStart = Math.max(0, dragState.originStart + delta)
+      const snapped = snapTime(
+        [dragState.primaryOriginStart, dragState.primaryOriginStart + dragState.primaryDuration],
+        rawDelta,
+      )
+      // Group floor: don't let the leftmost clip cross 0 (the store re-clamps, but this keeps the
+      // committed value honest for the primary too).
+      const timeDelta = Math.max(snapped, -dragState.minSelectedStart)
+      const trackDelta = dragState.targetTrackIndex - dragState.sourceTrackIndex
 
-      if (Math.abs(nextStart - dragState.originStart) > 0.0005) {
-        setSelectedClipStartTime(nextStart)
+      if (Math.abs(timeDelta) > 0.0005 || trackDelta !== 0) {
+        moveSelectedClips(timeDelta, trackDelta)
       }
-    } else if (dragState.kind === 'trim-right') {
+
+      setDragState(null)
+      return
+    }
+
+    if (dragState.kind === 'trim-right') {
       const delta = snapTime([dragState.originStart + dragState.originDuration], rawDelta)
       const nextDuration = Math.max(0.1, dragState.originDuration + delta)
       setSelectedClipOutPoint(dragState.originInPoint + nextDuration)
@@ -422,29 +536,47 @@ export function StudioTimeline() {
     return null
   }
 
-  /** Visual position while dragging (uncommitted preview). */
-  function clipGeometry(clip: Clip): { left: number; width: number } {
-    if (!dragState || dragState.clipId !== clip.id) {
-      return { left: clip.startTime * pps, width: Math.max(clip.duration * pps, 8) }
+  /** Visual position while dragging (uncommitted preview). `translateY` floats the clip toward
+   *  the destination lane during a cross-track drag; it's 0 for horizontal-only moves and trims. */
+  function clipGeometry(clip: Clip): { left: number; width: number; translateY: number } {
+    const resting = { left: clip.startTime * pps, width: Math.max(clip.duration * pps, 8), translateY: 0 }
+
+    if (!dragState) {
+      return resting
+    }
+
+    if (dragState.kind === 'move') {
+      const member = dragState.members.find((entry) => entry.clipId === clip.id)
+
+      if (!member) {
+        return resting
+      }
+
+      const rawDelta = dragState.dx / pps
+      // Snap on the PRIMARY clip's edges, then shift the whole group by that one delta so the
+      // selection keeps its internal spacing. Group floor keeps the leftmost clip at >= 0.
+      const snapped = snapTime(
+        [dragState.primaryOriginStart, dragState.primaryOriginStart + dragState.primaryDuration],
+        rawDelta,
+      )
+      const groupDelta = Math.max(snapped, -dragState.minSelectedStart)
+      return {
+        left: (member.originStart + groupDelta) * pps,
+        width: Math.max(clip.duration * pps, 8),
+        translateY: dragState.dy,
+      }
+    }
+
+    if (dragState.clipId !== clip.id) {
+      return resting
     }
 
     const rawDelta = dragState.dx / pps
 
-    if (dragState.kind === 'move') {
-      const delta = snapTime(
-        [dragState.originStart, dragState.originStart + clip.duration],
-        rawDelta,
-      )
-      return {
-        left: Math.max(0, dragState.originStart + delta) * pps,
-        width: Math.max(clip.duration * pps, 8),
-      }
-    }
-
     if (dragState.kind === 'trim-right') {
       const delta = snapTime([dragState.originStart + dragState.originDuration], rawDelta)
       const width = Math.max(0.1, dragState.originDuration + delta) * pps
-      return { left: dragState.originStart * pps, width: Math.max(width, 8) }
+      return { left: dragState.originStart * pps, width: Math.max(width, 8), translateY: 0 }
     }
 
     const maxDelta = dragState.originDuration - 0.1
@@ -456,6 +588,7 @@ export function StudioTimeline() {
     return {
       left: Math.max(0, dragState.originStart + delta) * pps,
       width: Math.max((dragState.originDuration - delta) * pps, 8),
+      translateY: 0,
     }
   }
 
@@ -641,10 +774,14 @@ export function StudioTimeline() {
           </div>
 
           {/* Track rows */}
-          {timeline.tracks.map((track) => {
+          {timeline.tracks.map((track, trackIndex) => {
             const TrackTypeIcon = trackIcon(track.type)
             const laneHeight = Math.max(track.height, 44)
             const isSelectedTrack = selectedTrackId === track.id
+            const isDropTarget =
+              dragState?.kind === 'move' &&
+              dragState.targetTrackIndex === trackIndex &&
+              dragState.targetTrackIndex !== dragState.sourceTrackIndex
 
             return (
               <div key={track.id} className="flex" style={{ height: laneHeight }}>
@@ -739,10 +876,21 @@ export function StudioTimeline() {
                 </div>
 
                 <div
+                  ref={(element) => {
+                    if (element) {
+                      laneRefs.current.set(track.id, element)
+                    } else {
+                      laneRefs.current.delete(track.id)
+                    }
+                  }}
                   role="group"
                   aria-label={`${track.name} lane`}
-                  className={`relative shrink-0 border-b border-hairline ${track.locked ? 'opacity-60' : ''} ${
-                    isSelectedTrack ? 'bg-white/[0.02]' : ''
+                  className={`relative shrink-0 border-b border-hairline transition-colors ${track.locked ? 'opacity-60' : ''} ${
+                    isDropTarget
+                      ? 'bg-accent/[0.07] outline-2 -outline-offset-2 outline-accent/50'
+                      : isSelectedTrack
+                        ? 'bg-white/[0.02]'
+                        : ''
                   }`}
                   style={{ width: laneWidth }}
                   onDragOver={(event) => {
@@ -764,6 +912,9 @@ export function StudioTimeline() {
                     const asset = assets[clip.assetId]
                     const isSelected = selectedClipIds.includes(clip.id)
                     const geometry = clipGeometry(clip)
+                    const isDraggingMember =
+                      dragState?.kind === 'move' &&
+                      dragState.members.some((member) => member.clipId === clip.id)
                     const thumbnail = assetThumbnails[clip.assetId]?.thumbnailPath ?? null
                     const peaks =
                       track.type === 'audio' ? (waveformCache[clip.assetId]?.peaks ?? null) : null
@@ -802,11 +953,17 @@ export function StudioTimeline() {
                         onPointerUp={commitClipDrag}
                         onPointerCancel={cancelClipDrag}
                         className={`absolute bottom-1 top-1 cursor-grab touch-none select-none overflow-hidden rounded-[var(--radius-md)] border transition-[border-color,box-shadow] active:cursor-grabbing ${
-                          isSelected
-                            ? 'z-10 border-accent shadow-[0_0_0_1px_rgba(224,255,0,0.35)]'
-                            : 'border-white/15 hover:border-white/30'
+                          isDraggingMember
+                            ? 'z-30 border-accent shadow-[0_8px_24px_rgba(0,0,0,0.55)]'
+                            : isSelected
+                              ? 'z-10 border-accent shadow-[0_0_0_1px_rgba(224,255,0,0.35)]'
+                              : 'border-white/15 hover:border-white/30'
                         } ${track.type === 'audio' ? 'bg-[#12240f]' : 'bg-[#101d2b]'}`}
-                        style={{ left: geometry.left, width: geometry.width }}
+                        style={{
+                          left: geometry.left,
+                          width: geometry.width,
+                          transform: geometry.translateY ? `translateY(${geometry.translateY}px)` : undefined,
+                        }}
                       >
                         {thumbnail && track.type !== 'audio' ? (
                           <div
