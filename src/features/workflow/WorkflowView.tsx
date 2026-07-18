@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, CheckCircle2, Cloud, Copy, Cpu, Link2, Loader2, Move, Network, Plus, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ClipboardPaste, Cloud, Copy, CopyPlus, Cpu, Link2, Loader2, Maximize2, Plus, Search, Sparkles, Trash2, X } from 'lucide-react'
 import { NODE_PORT_DEFINITIONS } from '../../domain/workflow/node-definitions'
 import { validateConnectionAttempt } from '../../domain/workflow/validation'
 import type { NodeType, WorkflowNode, WorkflowState } from '../../domain/project/types'
@@ -7,7 +7,6 @@ import { buildNodePreviewSource, useProjectStore } from '../../store/project-sto
 import { isTauriRuntime } from '../../services/ipc/tauri-runtime'
 import { useModalA11y } from '../settings/useModalA11y'
 import { Button } from '../../components/Button'
-import { StatCard } from '../../components/StatCard'
 import { ContextMenu, ContextMenuItem, ContextMenuDivider } from '../../components/ContextMenu'
 
 const PORT_COLOR_MAP = {
@@ -86,7 +85,17 @@ type WorkflowGroupFrame = {
   height: number
 }
 
-export function WorkflowView() {
+export interface WorkflowViewProps {
+  /**
+   * How the host sizes this surface. `contained` (studio shell) pins the section to the host's
+   * height — the canvas pans and the status dock scrolls internally. `flow` (strata sky) lets
+   * the section grow with its content so the STRATUM remains the scroll surface, which the
+   * MERIDIAN lineage-pill behavior (endpoints leaving their stratum band) depends on.
+   */
+  frame?: 'contained' | 'flow'
+}
+
+export function WorkflowView({ frame = 'contained' }: WorkflowViewProps = {}) {
   const workflow = useProjectStore((state) => state.project.workflow)
   const project = useProjectStore((state) => state.project)
   const selectedNodeIds = useProjectStore((state) => state.ui.selectedNodeIds)
@@ -669,112 +678,61 @@ export function WorkflowView() {
   return (
     <section
       aria-label="Workflow editor"
-      className="flex h-full flex-col gap-4 rounded-[2rem] border border-white/10 bg-[#101113]/85 p-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl"
+      className={`flex flex-col bg-surface-3 ${frame === 'contained' ? 'h-full min-h-0' : 'min-h-full'}`}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[1.5rem] border border-white/8 bg-black/20 p-4">
-        <div>
-          <p className="text-[11px] uppercase tracking-[0.3em] text-text-secondary">Workflow Mode</p>
-          <h2 className="mt-2 font-display text-2xl font-semibold text-white">Node graph foundation</h2>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#98a1ad]">
-            Node positions, edges, and compute mode are stored in the same project document as the timeline.
-          </p>
-          <p id="workflow-canvas-hint" className="mt-2 text-xs uppercase tracking-[0.2em] text-text-secondary">
-            Hold Space to pan • Scroll to zoom • Drag nodes • Click output then input to connect. Drag from an output
-            port to an input port to wire two nodes together.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={nudgeFirstNode}
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white"
-          >
-            <Network size={16} />
-            Nudge Node
-          </button>
+      {/* Compact icon toolbar — studio grammar (mirrors StudioTimeline's): verbs left, context
+          right, canvas gets the pixels. Accessible names are unchanged from the old labeled
+          pills so the command docs and e2e suite keep addressing the same controls. */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-hairline px-2 py-1">
+        <div className="flex items-center gap-0.5">
           <button
             type="button"
             onClick={openNodePicker}
-            className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-black"
+            className="mr-1 inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-md)] bg-accent px-2.5 text-xs font-semibold text-black transition hover:brightness-95"
           >
-            <Plus size={16} />
+            <Plus size={13} aria-hidden="true" />
             Add Node
           </button>
-          <button
-            type="button"
-            onClick={fitWorkflowViewport}
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white"
-          >
-            <Move size={16} />
-            Fit View
-          </button>
-          <button
-            type="button"
-            onClick={selectOutputNode}
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white"
-          >
-            <ArrowRight size={16} />
-            Select Output
-          </button>
-          <button
-            type="button"
-            onClick={connectSelectedNodeToOutput}
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white"
-          >
-            <Link2 size={16} />
-            Connect to Output
-          </button>
-          <button
-            type="button"
-            onClick={copySelectedNodes}
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white"
-          >
-            <Copy size={16} />
-            Copy
-          </button>
-          <button
-            type="button"
-            onClick={pasteWorkflowClipboard}
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white"
-          >
-            <Copy size={16} />
-            Paste
-          </button>
-          <button
-            type="button"
-            onClick={duplicateSelected}
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white"
-          >
-            <Copy size={16} />
-            Duplicate
-          </button>
-          <button
-            type="button"
-            onClick={deleteSelected}
-            className="inline-flex items-center gap-2 rounded-full border border-red-400/20 bg-red-500/10 px-4 py-2 text-sm text-red-100"
-          >
-            <Trash2 size={16} />
-            Delete
-          </button>
-          <button
-            type="button"
-            onClick={validateWorkflow}
-            className="inline-flex items-center gap-2 rounded-full border border-accent/25 bg-accent/10 px-4 py-2 text-sm text-[#f5ffd5]"
-          >
-            <CheckCircle2 size={16} />
-            Validate Graph
-          </button>
+          <WorkflowToolIcon label="Fit View" onClick={fitWorkflowViewport}>
+            <Maximize2 size={14} aria-hidden="true" />
+          </WorkflowToolIcon>
+          <WorkflowToolIcon label="Select Output" onClick={selectOutputNode}>
+            <ArrowRight size={14} aria-hidden="true" />
+          </WorkflowToolIcon>
+          <WorkflowToolIcon label="Connect to Output" onClick={connectSelectedNodeToOutput}>
+            <Link2 size={14} aria-hidden="true" />
+          </WorkflowToolIcon>
+          <WorkflowToolIcon label="Validate Graph" onClick={validateWorkflow}>
+            <CheckCircle2 size={14} aria-hidden="true" />
+          </WorkflowToolIcon>
+          <div className="mx-1 h-4 w-px bg-white/10" aria-hidden="true" />
+          <WorkflowToolIcon label="Copy" onClick={copySelectedNodes}>
+            <Copy size={14} aria-hidden="true" />
+          </WorkflowToolIcon>
+          <WorkflowToolIcon label="Paste" onClick={pasteWorkflowClipboard}>
+            <ClipboardPaste size={14} aria-hidden="true" />
+          </WorkflowToolIcon>
+          <WorkflowToolIcon label="Duplicate" onClick={duplicateSelected}>
+            <CopyPlus size={14} aria-hidden="true" />
+          </WorkflowToolIcon>
+          <WorkflowToolIcon label="Delete" tone="danger" onClick={deleteSelected}>
+            <Trash2 size={14} aria-hidden="true" />
+          </WorkflowToolIcon>
         </div>
+
+        <p id="workflow-canvas-hint" className="hidden truncate text-[11px] text-text-secondary lg:block">
+          Space pans · scroll zooms · drag nodes · wire an output port to an input port to connect
+        </p>
       </div>
 
-      <div className="grid flex-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className={`flex flex-1 ${frame === 'contained' ? 'min-h-0' : 'min-h-[560px]'}`}>
         <div
           ref={canvasRef}
           tabIndex={0}
           role="region"
           aria-label="Workflow canvas"
           aria-describedby="workflow-canvas-hint"
-          className={`relative overflow-hidden rounded-[1.5rem] border border-white/8 bg-[#0c0d0f] ${
+          className={`relative min-w-0 flex-1 overflow-hidden bg-[#0c0d0f] ${
             isHandToolActive ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : dragState ? 'cursor-grabbing' : 'cursor-default'
           }`}
           onMouseDown={(event) => {
@@ -856,26 +814,13 @@ export function WorkflowView() {
             selectNode(null)
           }}
         >
-          <div className="absolute left-4 top-4 z-10 flex flex-wrap gap-2">
-            {WORKFLOW_NODE_TYPES.map((type) => (
-              <button
-                key={type}
-                type="button"
-                onClick={() => addNodeOfType(type)}
-                aria-label={`Add ${type.replace('_', ' ')} node`}
-                className="rounded-full border border-white/10 bg-black/45 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-[#d6dce5] backdrop-blur"
-              >
-                {type.replace('_', ' ')}
-              </button>
-            ))}
-          </div>
           {connectionFeedback ? (
             <div
               aria-live="polite"
-              className={`absolute right-4 top-4 z-10 rounded-full border px-4 py-2 text-xs ${
+              className={`absolute right-3 top-3 z-10 rounded-[var(--radius-md)] border px-3 py-1.5 text-xs ${
                 connectionFeedback.tone === 'error'
                   ? 'border-red-400/20 bg-red-500/15 text-red-100'
-                  : 'border-accent/25 bg-accent/10 text-[#f5ffd5]'
+                  : 'border-accent/25 bg-accent/10 text-accent-soft'
               }`}
             >
               {connectionFeedback.message}
@@ -1255,9 +1200,20 @@ export function WorkflowView() {
           )}
         </div>
 
-        <aside aria-label="Workflow status and actions" className="rounded-[1.5rem] border border-white/8 bg-[#17181b] p-4">
-          <p className="text-xs uppercase tracking-[0.25em] text-text-secondary">Workflow Status</p>
-          <div className="mt-4 grid gap-3">
+        <aside
+          aria-label="Workflow status and actions"
+          className="flex w-72 shrink-0 flex-col border-l border-hairline bg-surface-2"
+        >
+          <div className="flex shrink-0 items-center border-b border-hairline px-3 py-[var(--meridian-gutter)]">
+            <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">Workflow Status</p>
+          </div>
+          {/* In `flow` frame the dock renders at natural height so the stratum scrolls the whole
+              surface; in `contained` it scrolls internally within the pinned section. */}
+          <div className={frame === 'contained' ? 'min-h-0 flex-1 overflow-y-auto p-3' : 'p-3'}>
+          {/* minmax(0,1fr): long nowrap values (execution order) must truncate instead of
+              propagating their intrinsic width into the track and pushing every row past the
+              dock's edge. */}
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
             <StatusCard
               icon={workflow.computeMode === 'local' ? Cpu : Cloud}
               label="Compute"
@@ -1297,9 +1253,9 @@ export function WorkflowView() {
             />
           </div>
 
-          <div className="mt-5 rounded-[1.25rem] border border-white/8 bg-black/20 p-4">
+          <div className="mt-4 border-t border-hairline pt-3">
             <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">Validation</p>
-            <div aria-live="polite" className="mt-3 space-y-3">
+            <div aria-live="polite" className="mt-2 space-y-2">
               {combinedIssues.length === 0 ? (
                 <p className="text-sm text-[#d7f9a7]">No current validation issues.</p>
               ) : (
@@ -1318,10 +1274,11 @@ export function WorkflowView() {
               )}
             </div>
           </div>
-          <div className="mt-5 rounded-[1.25rem] border border-white/8 bg-black/20 p-4">
+          <div className="mt-4 border-t border-hairline pt-3">
             <p className="text-[11px] uppercase tracking-[0.22em] text-text-secondary">Node Actions</p>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-2 flex flex-wrap gap-1.5">
               <ActionPill label="Select All" onClick={selectAllWorkflowNodes} />
+              <ActionPill label="Nudge Node" onClick={nudgeFirstNode} />
               <ActionPill label="Copy" onClick={copySelectedNodes} />
               <ActionPill label="Paste" onClick={pasteWorkflowClipboard} />
               <ActionPill label="Group" onClick={groupSelectedWorkflowNodes} />
@@ -1348,6 +1305,7 @@ export function WorkflowView() {
                 {workflowBenchmarkMetric.zoomSweepDurationMs !== null ? ` Zoom sweep measured at ${workflowBenchmarkMetric.zoomSweepDurationMs.toFixed(1)} ms.` : ''}
               </p>
             ) : null}
+          </div>
           </div>
         </aside>
       </div>
@@ -1533,22 +1491,22 @@ function WorkflowNodePicker({
 
 function EmptyWorkflowState({ onAddNode }: { onAddNode: () => void }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center rounded-[1.25rem] border border-dashed border-white/10 bg-white/[0.02] px-6 py-12 text-center">
-      <ArrowRight size={28} className="text-accent" />
-      <h3 className="mt-4 text-xl font-semibold text-white">Press N to add a node</h3>
-      <p className="mt-2 max-w-md text-sm leading-6 text-[#8f97a2]">
-        Build an AI/VFX graph by adding nodes and wiring their typed ports together. Every edit is undoable.
-      </p>
-      <p className="mt-2 max-w-md text-xs leading-5 text-text-secondary">
-        Tip: drag from a node's output port to another node's input port to connect them.
-      </p>
-      <button
-        type="button"
-        onClick={onAddNode}
-        className="mt-5 rounded-full bg-accent px-5 py-3 text-sm font-semibold text-black"
-      >
-        Add Shader Node
-      </button>
+    <div className="flex h-full items-center justify-center p-6">
+      <div className="flex flex-col items-center gap-3 rounded-[var(--radius-lg)] border border-dashed border-white/15 bg-black/40 px-8 py-6 text-center">
+        <ArrowRight size={20} aria-hidden="true" className="text-text-secondary" />
+        <h3 className="text-sm font-semibold text-white">Press N to add a node</h3>
+        <p className="max-w-sm text-xs leading-5 text-text-data">
+          Build an AI/VFX graph by wiring typed ports together — drag from an output port to an input port. Every edit
+          is undoable.
+        </p>
+        <button
+          type="button"
+          onClick={onAddNode}
+          className="rounded-[var(--radius-md)] bg-accent px-3 py-1.5 text-xs font-semibold text-black transition hover:brightness-95"
+        >
+          Add Shader Node
+        </button>
+      </div>
     </div>
   )
 }
@@ -1640,11 +1598,10 @@ function PortGroup({
   )
 }
 
-// Thin delegating wrappers over the shared src/components primitives — kept
-// under their historical local names so the many call sites throughout this
-// file didn't need touching, while the actual styling now lives in one place.
+/** Studio-density status row (replaces the old StatCard boxes): label left, value right,
+ *  full value recoverable via the title tooltip when it truncates. */
 function StatusCard({
-  icon,
+  icon: Icon,
   label,
   value,
 }: {
@@ -1652,7 +1609,45 @@ function StatusCard({
   label: string
   value: string
 }) {
-  return <StatCard icon={icon} label={label} value={value} note={undefined} />
+  return (
+    <div className="flex items-baseline justify-between gap-3 py-0.5">
+      <span className="flex shrink-0 items-center gap-1.5 text-[11px] uppercase tracking-[0.18em] text-text-secondary">
+        {Icon ? <Icon size={11} aria-hidden="true" className="translate-y-px" /> : null}
+        {label}
+      </span>
+      <span className="min-w-0 truncate text-right text-xs text-text-data" title={value}>
+        {value}
+      </span>
+    </div>
+  )
+}
+
+function WorkflowToolIcon({
+  label,
+  onClick,
+  children,
+  tone = 'default',
+}: {
+  label: string
+  onClick: () => void
+  children: React.ReactNode
+  tone?: 'default' | 'danger'
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className={`inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)] transition ${
+        tone === 'danger'
+          ? 'text-text-secondary hover:bg-danger/15 hover:text-danger'
+          : 'text-text-secondary hover:bg-white/8 hover:text-white'
+      }`}
+    >
+      {children}
+    </button>
+  )
 }
 
 function ActionPill({

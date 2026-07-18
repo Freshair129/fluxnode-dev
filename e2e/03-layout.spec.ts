@@ -59,9 +59,11 @@ test.describe('strata shell layout (item 3)', () => {
     expect(initialFraction).toBeLessThan(0.62 + RATIO_TOLERANCE)
 
     // Tab flips between the two default detents (spec F.2/H). Focus must be "at rest" for the
-    // shell's global Tab handler to fire (StrataShell.isTabFlipRestingTarget) — click the plain
-    // sky stratum surface (not a focusable control inside it) first.
-    await sky.click({ position: { x: 10, y: 10 } })
+    // shell's global Tab handler to fire (StrataShell.isTabFlipRestingTarget) — click a plain,
+    // non-focusable surface inside the sky first. Position (10,10) used to be the old workflow
+    // header card's padding; the studio-chrome toolbar now puts the Add Node button there, so
+    // target the status dock's plain header label instead.
+    await sky.getByText('Workflow Status').click()
     await page.keyboard.press('Tab')
 
     // 200ms ease-out-quart tween (HORIZON_ANIMATION_MS) — poll past it with margin.
