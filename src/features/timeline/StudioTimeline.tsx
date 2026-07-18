@@ -91,6 +91,18 @@ function tickStepSeconds(pps: number): number {
   return steps.find((step) => step * pps >= 72) ?? 600
 }
 
+/** Clamp a left-trim delta to what the clip allows: the in-edge can't slide the source in-point
+ *  or the timeline start below 0, and the clip can't shrink past the minimum duration. Kept in one
+ *  place so the drag preview and the committed value agree (and both match the store's clamp). */
+function clampLeftTrimDelta(
+  delta: number,
+  origin: { originStart: number; originInPoint: number; originDuration: number },
+): number {
+  const lower = Math.max(-origin.originInPoint, -origin.originStart)
+  const upper = origin.originDuration - 0.1
+  return Math.min(upper, Math.max(lower, delta))
+}
+
 /** Pointer capture that tolerates synthetic events (automation dispatches have no active pointer). */
 function capturePointer(event: PointerEvent<HTMLElement>) {
   try {
@@ -129,9 +141,8 @@ export function StudioTimeline() {
   const selectTrack = useProjectStore((state) => state.selectTrack)
   const setPlayhead = useProjectStore((state) => state.setPlayhead)
   const scrubPlayhead = useProjectStore((state) => state.scrubPlayhead)
-  const setSelectedClipStartTime = useProjectStore((state) => state.setSelectedClipStartTime)
-  const setSelectedClipInPoint = useProjectStore((state) => state.setSelectedClipInPoint)
   const setSelectedClipOutPoint = useProjectStore((state) => state.setSelectedClipOutPoint)
+  const trimSelectedClipStart = useProjectStore((state) => state.trimSelectedClipStart)
   const moveSelectedClips = useProjectStore((state) => state.moveSelectedClips)
   const splitSelectedClip = useProjectStore((state) => state.splitSelectedClip)
   const deleteSelected = useProjectStore((state) => state.deleteSelected)
@@ -508,16 +519,12 @@ export function StudioTimeline() {
       const nextDuration = Math.max(0.1, dragState.originDuration + delta)
       setSelectedClipOutPoint(dragState.originInPoint + nextDuration)
     } else {
-      const maxDelta = dragState.originDuration - 0.1
-      const minDelta = -dragState.originInPoint
-      const delta = Math.min(
-        maxDelta,
-        Math.max(minDelta, snapTime([dragState.originStart], rawDelta)),
-      )
+      // Left trim: one store action moves in-point + timeline start + duration together, so the
+      // whole gesture is a single undo. Bound mirrors the store (start floor folded in).
+      const delta = clampLeftTrimDelta(snapTime([dragState.originStart], rawDelta), dragState)
 
       if (Math.abs(delta) > 0.0005) {
-        setSelectedClipInPoint(dragState.originInPoint + delta)
-        setSelectedClipStartTime(Math.max(0, dragState.originStart + delta))
+        trimSelectedClipStart(delta)
       }
     }
 
@@ -579,12 +586,7 @@ export function StudioTimeline() {
       return { left: dragState.originStart * pps, width: Math.max(width, 8), translateY: 0 }
     }
 
-    const maxDelta = dragState.originDuration - 0.1
-    const minDelta = -dragState.originInPoint
-    const delta = Math.min(
-      maxDelta,
-      Math.max(minDelta, snapTime([dragState.originStart], rawDelta)),
-    )
+    const delta = clampLeftTrimDelta(snapTime([dragState.originStart], rawDelta), dragState)
     return {
       left: Math.max(0, dragState.originStart + delta) * pps,
       width: Math.max((dragState.originDuration - delta) * pps, 8),
