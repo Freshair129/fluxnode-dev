@@ -44,10 +44,17 @@ Single Zustand store (`src/store/project-store.ts`) is the central state authori
 
 All mutations go through `applyMutation()` which clones project state, applies the change, updates timestamps, runs validation, pushes to history, and appends to WAL.
 
+### Workspace Layouts
+
+Two shells, switched by `AppPreferences.workspaceLayout` (header View menu):
+
+- **Studio (default)** - CapCut/Premiere grammar: media bin / preview monitor + transport / inspector over a time-proportional timeline (`StudioShell.tsx`, `StudioTimeline.tsx`, `MediaPanel.tsx`, `TransportBar.tsx`)
+- **Strata** - MERIDIAN sky/horizon/ground shell (`StrataShell.tsx`, spec in `docs/design/MERIDIAN-UI-SPEC.md`); the Playwright e2e suite pins this layout via `e2e/fixtures.ts`
+
 ### Key Frontend Directories
 
 - `src/app/` - app root with lifecycle effects, view orchestration, and lazy loading
-- `src/features/` - UI panels: header, preview, timeline, workflow, settings, onboarding, inspector, status, shortcuts, workspace sharing
+- `src/features/` - UI panels: header, preview, media, timeline, workflow, settings, onboarding, inspector, status, shortcuts, workspace sharing
 - `src/store/` - Zustand store
 - `src/domain/` - pure business logic: project types/defaults/validators, workflow node definitions/validation, history manager
 - `src/services/ipc/` - Tauri command wrappers for asset probing, thumbnails, waveforms, render jobs, preview decode, proxying, app shell, ComfyUI, and more

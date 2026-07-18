@@ -16,12 +16,28 @@ import { test as base, expect, type Page } from '@playwright/test'
  * call on mount), so clearing storage here — not just after load — is what actually guarantees a
  * clean `createDefaultProject()` boot every time.
  */
+/**
+ * Shared boot init script for EVERY spec-driven page load — the `freshPage` fixture,
+ * `bootFreshWithClock`, and the specs that must boot manually (e.g. the reduced-motion lineage
+ * case, which needs `emulateMedia` before navigation). Clears persisted state AND pins the
+ * MERIDIAN strata layout: this suite predates the studio workspace layout and asserts the strata
+ * shell (horizon splitter, stage row, sky/ground strata, job ledger). The app now defaults to
+ * `workspaceLayout: 'studio'`, so seed the legacy layout via the same persisted-preferences key
+ * `services/persistence/app-preferences.ts` reads; `normalizeAppPreferences` fills in every other
+ * field from defaults. Any manual boot that skips this helper will land in the studio shell,
+ * where `[data-meridian-node-id]` / `[data-meridian-ledger]` never mount in the Edit view.
+ */
+export async function installFreshBootState(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.clear()
+    window.sessionStorage.clear()
+    window.localStorage.setItem('fluxnode.appPreferences', JSON.stringify({ workspaceLayout: 'strata' }))
+  })
+}
+
 export const test = base.extend<{ freshPage: Page }>({
   freshPage: async ({ page }, use) => {
-    await page.addInitScript(() => {
-      window.localStorage.clear()
-      window.sessionStorage.clear()
-    })
+    await installFreshBootState(page)
     await page.goto('/')
     await use(page)
   },
@@ -74,10 +90,7 @@ export async function dismissWelcomeModal(page: Page): Promise<void> {
  * it needs to inspect.
  */
 export async function bootFreshWithClock(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    window.localStorage.clear()
-    window.sessionStorage.clear()
-  })
+  await installFreshBootState(page)
   await page.clock.install()
   await page.goto('/')
   await dismissWelcomeModal(page)

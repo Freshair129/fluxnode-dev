@@ -22,7 +22,7 @@ test.describe('Preview monitor empty state (item 8)', () => {
   }) => {
     const monitor = page.locator('section[aria-label="Preview monitor"]')
 
-    // The default demo project boots into the Workflow view; switch to Timeline via the Header's
+    // The app boots into the Timeline view already; clicking is a harmless no-op kept via the Header's
     // real mode toggle (not a store poke) — Timeline starts with no clip selected.
     await page.getByRole('button', { name: 'Timeline view' }).click()
 
@@ -41,6 +41,10 @@ test.describe('Preview monitor empty state (item 8)', () => {
   }) => {
     const monitor = page.locator('section[aria-label="Preview monitor"]')
     const canvas = page.getByRole('region', { name: 'Workflow canvas' })
+
+    // The app now boots into the Timeline (Edit) view; this case asserts Workflow-view copy, so
+    // switch explicitly first.
+    await page.getByRole('button', { name: 'Workflow view' }).click()
 
     // The default demo template already routes a node to Output, so the monitor isn't empty yet
     // even with no explicit selection — reach the true empty state via real UI actions: select

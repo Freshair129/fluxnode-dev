@@ -1,5 +1,6 @@
 import { nextId } from '../id'
 import { DEFAULT_HORIZON_RATIO } from './horizon'
+import { DEFAULT_STUDIO_LAYOUT } from './studio-layout'
 import type {
   Asset,
   Clip,
@@ -457,6 +458,7 @@ export function createTemplateProject(templateId: ProjectTemplateId): FluxNodePr
       sharing: createDefaultWorkspaceSharing(projectId, createdAt),
       horizonRatio: DEFAULT_HORIZON_RATIO,
       stageRowCollapse: { ledger: false, inspector: false },
+      studioLayout: { ...DEFAULT_STUDIO_LAYOUT },
       section11TargetProfileOverride: null,
       section11ProofHistory: [],
       section11CoverageMapHistory: [],

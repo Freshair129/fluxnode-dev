@@ -19,9 +19,15 @@ export interface PreviewPanelProps {
    * `detachedPanel === 'preview'` branch) keeps the original floating-card look, unchanged.
    */
   embedded?: boolean
+  /**
+   * Studio layout: bare monitor only — the decoded frame letterboxed into the available space,
+   * no metric cards or explanatory chrome (the transport bar and inspector own that context).
+   * Wins over `embedded`.
+   */
+  monitor?: boolean
 }
 
-export function PreviewPanel({ embedded = false }: PreviewPanelProps = {}) {
+export function PreviewPanel({ embedded = false, monitor = false }: PreviewPanelProps = {}) {
   const project = useProjectStore((state) => state.project)
   const runtimeHealth = useProjectStore((state) => state.runtimeHealth)
   const activeView = useProjectStore((state) => state.ui.activeView)
@@ -277,6 +283,18 @@ export function PreviewPanel({ embedded = false }: PreviewPanelProps = {}) {
       ) : null}
     </>
   )
+
+  if (monitor) {
+    return (
+      <section aria-label="Preview monitor" className="flex h-full min-h-0 flex-col bg-[#0a0b0c]">
+        <div className="flex min-h-0 flex-1 items-center justify-center p-3">
+          <div className="aspect-video h-full max-w-full overflow-hidden rounded-[var(--radius-md)] border border-white/8 bg-[#0c0d0f]">
+            {monitorSurface}
+          </div>
+        </div>
+      </section>
+    )
+  }
 
   if (embedded) {
     // Stage-row layout (spec F: monitor is the center organ). The first-fold wrapper is

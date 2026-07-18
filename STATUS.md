@@ -28,6 +28,24 @@ shortcuts, onboarding, workspace sharing, and timeline<->workflow sync are all i
 covered by at least some Vitest coverage and/or browser verification. Dual runtime (Tauri
 desktop vs. browser/localStorage dev mode) both work.
 
+## Workspace layouts (2026-07-18 UX redesign)
+
+**Implemented.** The app now defaults to the **Studio layout** — the familiar CapCut/Premiere
+arrangement: slim 48px top bar (File/View menus, Edit|Nodes tabs, accent Export), media bin
+(import, search, drag/double-click to timeline) left, bare preview monitor + transport bar
+center, inspector right, and a **time-proportional timeline** (adaptive ruler, spanning
+playhead, drag-to-move / edge-trim with snapping, per-track M/S/lock/visibility toggles,
+Ctrl+wheel zoom) below a draggable splitter. Key files:
+`src/features/workspace/StudioShell.tsx`, `src/features/timeline/StudioTimeline.tsx`,
+`src/features/media/MediaPanel.tsx`, `src/features/preview/TransportBar.tsx`. New store actions
+`addClipFromAsset` and `setWorkspaceLayout`; new `AppPreferences.workspaceLayout`
+(`studio` default | `strata`).
+
+The MERIDIAN **Strata layout** (sky/horizon/ground) remains fully available via the header's
+View menu; the Playwright e2e suite pins `workspaceLayout: 'strata'` in `e2e/fixtures.ts`
+because specs 03/05/07/09 assert strata-shell geometry. The old stacked-card `TimelineView`
+still serves the strata shell and detached timeline windows.
+
 **Known gap:** Section 11 (performance/system requirements) proof breadth across OS targets
 and hardware tiers beyond what's been directly benchmarked. See
 `masterplan-performance-evidence-audit.md`.

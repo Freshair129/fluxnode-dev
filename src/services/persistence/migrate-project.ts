@@ -1,4 +1,5 @@
 import { clampHorizonRatio, DEFAULT_HORIZON_RATIO } from '../../domain/project/horizon'
+import { normalizeStudioLayout } from '../../domain/project/studio-layout'
 import type { FluxNodeProject } from '../../domain/project/types'
 
 /**
@@ -93,6 +94,26 @@ function migrateStageRowCollapse(project: FluxNodeProject) {
 }
 
 /**
+ * Studio workspace layout: saves written before the studio shell existed lack this field. Same
+ * conditional-write guard as `migrateHorizonRatio` — `normalizeStudioLayout` returns a fresh
+ * valid object, but we only assign when the persisted value is actually missing/malformed so
+ * already-valid (possibly frozen) objects are left untouched.
+ */
+function migrateStudioLayout(project: FluxNodeProject) {
+  const current = project.meta.studioLayout
+  const normalized = normalizeStudioLayout(current)
+
+  if (
+    current === null ||
+    typeof current !== 'object' ||
+    current.timelineHeightPx !== normalized.timelineHeightPx ||
+    current.mediaCollapsed !== normalized.mediaCollapsed
+  ) {
+    project.meta.studioLayout = normalized
+  }
+}
+
+/**
  * Applies migrations in place and returns the (now current-version) project.
  * Safe to call on already-current projects — every step is idempotent.
  */
@@ -101,12 +122,14 @@ export function migrateProject(raw: FluxNodeProject): FluxNodeProject {
     migrateSection11Fields(raw)
     migrateHorizonRatio(raw)
     migrateStageRowCollapse(raw)
+    migrateStudioLayout(raw)
     raw.version = CURRENT_PROJECT_VERSION
   } else {
     // Still guard against partially-written saves even at the current version.
     migrateSection11Fields(raw)
     migrateHorizonRatio(raw)
     migrateStageRowCollapse(raw)
+    migrateStudioLayout(raw)
   }
 
   return raw

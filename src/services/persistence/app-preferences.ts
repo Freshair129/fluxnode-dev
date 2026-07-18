@@ -1,5 +1,5 @@
 import { DEFAULT_DENSITY_MODE, normalizeDensityMode } from '../../domain/project/density'
-import type { AppPreferences, KeyBinding } from '../../domain/project/types'
+import type { AppPreferences, KeyBinding, WorkspaceLayout } from '../../domain/project/types'
 import { invokeCommand } from '../ipc/tauri-commands'
 import { isTauriRuntime } from '../ipc/tauri-runtime'
 import { DEFAULT_KEYBINDINGS } from '../shortcuts/shortcut-config'
@@ -14,6 +14,11 @@ const DEFAULT_APP_PREFERENCES: AppPreferences = {
   updateManifestUrl: null,
   keybindings: DEFAULT_KEYBINDINGS,
   density: DEFAULT_DENSITY_MODE,
+  workspaceLayout: 'studio',
+}
+
+export function normalizeWorkspaceLayout(value: unknown): WorkspaceLayout {
+  return value === 'strata' ? 'strata' : 'studio'
 }
 
 export async function loadAppPreferences(): Promise<AppPreferences> {
@@ -104,6 +109,7 @@ function normalizeAppPreferences(preferences: Partial<AppPreferences>): AppPrefe
         : null,
     keybindings: normalizeKeybindings(preferences.keybindings),
     density: normalizeDensityMode(preferences.density),
+    workspaceLayout: normalizeWorkspaceLayout(preferences.workspaceLayout),
   }
 }
 

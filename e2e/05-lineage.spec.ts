@@ -9,6 +9,7 @@ import {
   expect,
   freezeClock,
   horizonSplitterLocator,
+  installFreshBootState,
   readComputedDashoffset,
   readThreadPathLength,
   selectDemoClip,
@@ -385,10 +386,7 @@ test.describe('lineage thread (item 5)', () => {
 
   test('prefers-reduced-motion: thread is fully drawn immediately, no tween', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
-    await page.addInitScript(() => {
-      window.localStorage.clear()
-      window.sessionStorage.clear()
-    })
+    await installFreshBootState(page)
     await page.goto('/')
     await dismissWelcomeModal(page)
     await bringBothEndpointsIntoView(page)
