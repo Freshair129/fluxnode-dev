@@ -201,6 +201,10 @@ describe('project-store: horizon ratio (MERIDIAN strata shell)', () => {
   })
 
   it('a ratio change that stays on the same side of the midpoint leaves ui untouched', () => {
+    // The app now boots timeline-first (studio layout) while the demo project's horizonRatio
+    // default stays on the sky side (0.62), so align emphasis with the sky side first — the
+    // same-side move below is then a true no-op for ui state.
+    useProjectStore.getState().setActiveView('workflow')
     const uiBefore = useProjectStore.getState().ui
     useProjectStore.getState().setHorizonRatio(0.7)
 

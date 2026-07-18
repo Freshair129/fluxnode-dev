@@ -66,6 +66,7 @@ import type {
   WorkflowConnectionFeedback,
   WorkflowClipboard,
   WorkflowNode,
+  WorkspaceLayout,
   WorkspaceRole,
   WorkspaceSharingState,
   WorkspaceSyncConflict,
@@ -91,7 +92,8 @@ import { generateComfyNode, pingComfy } from '../services/ipc/comfy'
 import { isTauriRuntime } from '../services/ipc/tauri-runtime'
 import { generateWaveformPeaks } from '../services/ipc/waveform'
 import { pickMediaFile, pickRelinkDirectory } from '../services/ipc/file-dialog'
-import { loadAppPreferences, saveAppPreferences, saveCloudApiKey } from '../services/persistence/app-preferences'
+import { loadAppPreferences, normalizeWorkspaceLayout, saveAppPreferences, saveCloudApiKey } from '../services/persistence/app-preferences'
+import { hasSeenWelcome, markWelcomeSeen } from '../services/persistence/welcome-seen'
 import { closeDetachedPanelWindow, openDetachedPanelWindow } from '../services/ipc/detached-panels'
 import type { ShortcutCommand } from '../services/shortcuts/shortcut-config'
 import { DEFAULT_KEYBINDINGS } from '../services/shortcuts/shortcut-config'
@@ -156,6 +158,9 @@ interface ProjectStoreState {
   /** MERIDIAN item 7: comfortable/compact UI density, an app-level preference persisted the same
    *  way as `keybindings` (see `services/persistence/app-preferences.ts`), not a project field. */
   setDensityMode: (mode: DensityMode) => Promise<void>
+  /** Studio (default NLE arrangement) vs. strata (MERIDIAN horizon shell) — app-level preference
+   *  persisted exactly like `density`. */
+  setWorkspaceLayout: (layout: WorkspaceLayout) => Promise<void>
   enableWorkspaceSharing: () => void
   disableWorkspaceSharing: () => void
   setWorkspaceAccessLevel: (accessLevel: WorkspaceSharingState['accessLevel']) => void
@@ -190,6 +195,10 @@ interface ProjectStoreState {
   adjustTimelineZoom: (delta: number) => void
   fitTimelineToWindow: () => void
   addDemoClip: () => void
+  /** Adds a new clip instance of an already-imported asset onto the timeline (media-bin
+   *  drag/double-click). Appends to the end of the matching track unless a start time and/or
+   *  track is provided. Creates the linked media-source workflow node like import does. */
+  addClipFromAsset: (assetId: string, options?: { trackId?: string; startTime?: number }) => void
   addShaderNode: () => void
   addNodeOfType: (type: NodeType) => void
   nudgeFirstNode: () => void
@@ -2552,6 +2561,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     updateManifestUrl: null,
     keybindings: DEFAULT_KEYBINDINGS,
     density: DEFAULT_DENSITY_MODE,
+    workspaceLayout: 'studio',
   },
   history: createHistoryState(),
   recentProjects: [],
@@ -2599,8 +2609,12 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   assetThumbnails: {},
   ...getValidationState(createDefaultProject()),
   ui: {
-    activeView: 'workflow',
-    showWelcome: true,
+    // Boot into the Edit workspace (studio layout's timeline-first grammar). Node-centric verbs
+    // (openNodePicker, showSelectedClipInWorkflow, …) still jump to 'workflow' explicitly.
+    activeView: 'timeline',
+    // First boot only — any dismissal path marks the flag (see dismissWelcome) so returning
+    // users go straight to the editor. e2e clears storage per test, so specs still see it.
+    showWelcome: !hasSeenWelcome(),
     showSettings: false,
     showWorkspaceSharing: false,
     showNodePicker: false,
@@ -2749,14 +2763,16 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     applyMutation(set, get, 'settings.proxy.toggle', 'Proxy mode updated', (project) => {
       project.settings.proxyEnabled = !project.settings.proxyEnabled
     }),
-  dismissWelcome: () =>
+  dismissWelcome: () => {
+    markWelcomeSeen()
     set((state) => ({
       ui: {
         ...state.ui,
         showWelcome: false,
         statusMessage: 'Demo project ready',
       },
-    })),
+    }))
+  },
   openSettings: () =>
     set((state) => ({
       ui: {
@@ -2957,6 +2973,20 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       ui: {
         ...state.ui,
         statusMessage: `Density set to ${nextPreferences.density}`,
+      },
+    }))
+  },
+  setWorkspaceLayout: async (layout) => {
+    const nextPreferences = {
+      ...get().preferences,
+      workspaceLayout: normalizeWorkspaceLayout(layout),
+    }
+    await saveAppPreferences(nextPreferences)
+    set((state) => ({
+      preferences: nextPreferences,
+      ui: {
+        ...state.ui,
+        statusMessage: `Workspace layout set to ${nextPreferences.workspaceLayout}`,
       },
     }))
   },
@@ -3306,6 +3336,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       project.timeline.scrollX = 0
     }),
   newProject: async () => {
+    markWelcomeSeen()
     const project = createDefaultProject()
     const validationState = getValidationState(project)
     clearModuleGlobalCaches()
@@ -3339,6 +3370,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     }))
   },
   applyTemplate: async (templateId) => {
+    markWelcomeSeen()
     const project = createTemplateProject(templateId)
     const validationState = getValidationState(project)
     clearModuleGlobalCaches()
@@ -3374,6 +3406,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     await generateThumbnailsForAssets(set, get, Object.keys(project.assets.assets))
   },
   createProjectAtPath: async (path) => {
+    markWelcomeSeen()
     const project = cloneProject(get().project)
     syncUpdatedAt(project)
     const savedPath = await projectRepository.createProjectAtPath(path, project)
@@ -3391,6 +3424,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     }))
   },
   openProjectFromPath: async (path) => {
+    markWelcomeSeen()
     const loadedProject = await projectRepository.loadFromPath(path)
 
     if (!loadedProject) {
@@ -3485,6 +3519,80 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
       project.workflow.nodes.push(demoNode)
     }),
+  addClipFromAsset: (assetId, options) => {
+    const addedClipIdRef: { current: string | null } = { current: null }
+
+    applyMutation(set, get, 'clip.add', 'Clip added from media bin', (project) => {
+      const asset = project.assets.assets[assetId]
+
+      if (!asset) {
+        return
+      }
+
+      const trackType = asset.type === 'audio' ? 'audio' : 'video'
+      const requestedTrack = options?.trackId
+        ? project.timeline.tracks.find((track) => track.id === options.trackId)
+        : null
+      // A drop onto an incompatible lane (audio file over a video track and vice versa) falls
+      // back to the matching-type track rather than silently creating an invalid clip.
+      const track =
+        requestedTrack && (requestedTrack.type === trackType || (trackType === 'video' && requestedTrack.type === 'subtitle'))
+          ? requestedTrack
+          : getOrCreateTrack(project, trackType)
+
+      if (track.locked) {
+        return
+      }
+
+      const clipId = `clip-${trackType}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+      const duration = asset.duration ?? 4
+      const appendAt = Number(
+        ((track.clips.at(-1)?.startTime ?? 0) + (track.clips.at(-1)?.duration ?? 0) + (track.clips.length > 0 ? 0.1 : 0)).toFixed(2),
+      )
+      const startTime = Math.max(0, Number((options?.startTime ?? appendAt).toFixed(2)))
+      const mediaSourceNode = createMediaSourceNode(project, clipId, asset.id, asset.name)
+
+      track.clips.push({
+        id: clipId,
+        assetId: asset.id,
+        trackId: track.id,
+        startTime,
+        duration,
+        inPoint: 0,
+        outPoint: duration,
+        speed: 1,
+        volume: 1,
+        opacity: 1,
+        transform: {
+          x: 0,
+          y: 0,
+          scaleX: 1,
+          scaleY: 1,
+          rotation: 0,
+          anchorX: 0.5,
+          anchorY: 0.5,
+        },
+        keyframes: [],
+        linkedClipId: null,
+        workflowNodeId: mediaSourceNode.id,
+      })
+      track.clips.sort((a, b) => a.startTime - b.startTime)
+
+      project.workflow.nodes.push(mediaSourceNode)
+      addedClipIdRef.current = clipId
+    })
+
+    if (addedClipIdRef.current) {
+      set((state) => ({
+        ui: {
+          ...state.ui,
+          selectedClipId: addedClipIdRef.current,
+          selectedClipIds: [addedClipIdRef.current as string],
+          selectedTrackId: state.ui.selectedTrackId,
+        },
+      }))
+    }
+  },
   addShaderNode: () =>
     applyMutation(set, get, 'node.add', 'Shader node added', (project) => {
       const nextIndex = project.workflow.nodes.filter((node) => node.type === 'shader').length + 1

@@ -755,6 +755,13 @@ export interface AppUpdateState {
   errorMessage: string | null
 }
 
+/**
+ * Which workspace shell composes the main window. `studio` is the familiar NLE arrangement
+ * (media bin / monitor / inspector over a full-width timeline — CapCut/Premiere grammar) and the
+ * default; `strata` is the MERIDIAN sky/ground horizon shell (docs/design/MERIDIAN-UI-SPEC.md).
+ */
+export type WorkspaceLayout = 'studio' | 'strata'
+
 export interface AppPreferences {
   defaultProjectDirectory: string | null
   comfyUiEndpoint: string
@@ -766,6 +773,8 @@ export interface AppPreferences {
    *  `keybindings` above), not a project property — it follows the user across projects rather
    *  than living in `project.meta` alongside `horizonRatio`/`stageRowCollapse`. */
   density: DensityMode
+  /** App-level like `density`: the shell arrangement follows the user, not the project. */
+  workspaceLayout: WorkspaceLayout
 }
 
 export type ShortcutScope = 'global' | 'timeline' | 'workflow'

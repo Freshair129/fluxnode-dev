@@ -28,6 +28,9 @@ const TimelineView = lazy(() =>
 const StrataShell = lazy(() =>
   import('../features/workspace/StrataShell').then((module) => ({ default: module.StrataShell })),
 )
+const StudioShell = lazy(() =>
+  import('../features/workspace/StudioShell').then((module) => ({ default: module.StudioShell })),
+)
 const StatusOverlays = lazy(() =>
   import('../features/status/StatusOverlays').then((module) => ({ default: module.StatusOverlays })),
 )
@@ -63,6 +66,7 @@ export default function App() {
   // overlays/drawers/palette that render as this div's SIBLINGS-of-StrataShell rather than its
   // descendants — inherits the same `--meridian-*` CSS custom properties (decision D).
   const densityMode = useProjectStore((state) => state.preferences.density)
+  const workspaceLayout = useProjectStore((state) => state.preferences.workspaceLayout)
   const showSettings = useProjectStore((state) => state.ui.showSettings)
   const showWorkspaceSharing = useProjectStore((state) => state.ui.showWorkspaceSharing)
   const showWelcome = useProjectStore((state) => state.ui.showWelcome)
@@ -586,11 +590,16 @@ export default function App() {
       <div className="relative min-h-screen overflow-hidden">
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:80px_80px] opacity-20" />
         <ErrorBoundary label="Header" compact>
-          <Header />
+          <Header
+            onExport={() => {
+              setOpenStatusDrawer(null)
+              setShowExportSheet(true)
+            }}
+          />
         </ErrorBoundary>
         <main
           aria-label="FluxNode workspace"
-          className="relative z-10 h-[calc(100vh-4.5rem)] overflow-hidden p-4 md:p-5"
+          className={`relative z-10 h-[calc(100vh-3rem)] overflow-hidden ${workspaceLayout === 'studio' ? 'p-2' : 'p-4 md:p-5'}`}
         >
           <ErrorBoundary label="Workspace">
             {/* MERIDIAN item 9: dissolved SystemPanels' thousands-of-pixels-tall content into the
@@ -610,9 +619,13 @@ export default function App() {
                   as a blocking note for item 3: "must fold PreviewPanel onto the horizon").
                   `flex-1 min-h-0` is the minimum needed so the shell's CSS grid rows have real
                   height to split. */}
-              <ErrorBoundary label="Strata shell">
+              <ErrorBoundary label={workspaceLayout === 'studio' ? 'Studio shell' : 'Strata shell'}>
                 <Suspense fallback={<PanelFallback label="Loading workspace" />}>
-                  <StrataShell className="min-h-0 flex-1" />
+                  {workspaceLayout === 'studio' ? (
+                    <StudioShell className="min-h-0 flex-1" />
+                  ) : (
+                    <StrataShell className="min-h-0 flex-1" />
+                  )}
                 </Suspense>
               </ErrorBoundary>
               <ErrorBoundary label="Status bar" compact>

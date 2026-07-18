@@ -1,4 +1,4 @@
-import { Cloud, Cpu, FolderOpen, Redo2, Save, SaveAll, Settings2, Sparkles, Undo2, WifiOff } from 'lucide-react'
+import { Cloud, Cpu, Download, FileVideo, Menu as MenuIcon, PanelsTopLeft, Redo2, Settings2, Undo2, WifiOff } from 'lucide-react'
 import {
   createProjectWithPicker,
   openProjectWithPicker,
@@ -8,22 +8,31 @@ import { useProjectStore } from '../../store/project-store'
 import { IconButton } from '../../components/IconButton'
 import { Menu, MenuItem } from '../../components/Menu'
 
-export function Header() {
+export interface HeaderProps {
+  /** Opens the export sheet (owned by App, same surface the status bar toggles). */
+  onExport?: () => void
+}
+
+/**
+ * Slim single-row top bar (48px) — CapCut/Premiere grammar: project identity + file verbs on the
+ * left, the Edit/Nodes workspace switch in the center, and Export as the one accent action on the
+ * right. Everything that used to be a labeled pill here now lives in the File and View menus; the
+ * status rows moved to the status bar, keeping only the aria-live status message.
+ */
+export function Header({ onExport }: HeaderProps = {}) {
   const projectName = useProjectStore((state) => state.project.meta.name)
   const activeView = useProjectStore((state) => state.ui.activeView)
   const computeMode = useProjectStore((state) => state.project.workflow.computeMode)
   const proxyEnabled = useProjectStore((state) => state.project.settings.proxyEnabled)
-  const assets = useProjectStore((state) => state.project.assets.assets)
   const statusMessage = useProjectStore((state) => state.ui.statusMessage)
   const currentProjectPath = useProjectStore((state) => state.ui.currentProjectPath)
   const panelLayouts = useProjectStore((state) => state.project.meta.panelLayouts)
   const sharing = useProjectStore((state) => state.project.meta.sharing)
   const defaultProjectDirectory = useProjectStore((state) => state.preferences.defaultProjectDirectory)
+  const density = useProjectStore((state) => state.preferences.density)
+  const workspaceLayout = useProjectStore((state) => state.preferences.workspaceLayout)
   const lastSavedAt = useProjectStore((state) => state.ui.lastSavedAt)
-  const lastAutoSavedAt = useProjectStore((state) => state.ui.lastAutoSavedAt)
   const networkStatus = useProjectStore((state) => state.ui.networkStatus)
-  const performanceMode = useProjectStore((state) => state.ui.performanceMode)
-  const workflowNodes = useProjectStore((state) => state.project.workflow.nodes)
   const recentProjects = useProjectStore((state) => state.recentProjects)
   const newProject = useProjectStore((state) => state.newProject)
   const createProjectAtPath = useProjectStore((state) => state.createProjectAtPath)
@@ -39,180 +48,186 @@ export function Header() {
   const openWorkspaceSharing = useProjectStore((state) => state.openWorkspaceSharing)
   const openDetachedPanel = useProjectStore((state) => state.openDetachedPanel)
   const closeDetachedPanel = useProjectStore((state) => state.closeDetachedPanel)
+  const setDensityMode = useProjectStore((state) => state.setDensityMode)
+  const setWorkspaceLayout = useProjectStore((state) => state.setWorkspaceLayout)
   const undoCount = useProjectStore((state) => state.history.undoStack.length)
   const redoCount = useProjectStore((state) => state.history.redoStack.length)
-  const proxyCount = Object.values(assets).filter((asset) => asset.proxyPath).length
-  const activeCollaboratorCount = sharing.collaborators.length
-  const offlineBlockedNodeCount = workflowNodes.filter((node) => {
-    if (node.type !== 'ai_generate' && node.type !== 'ai_upscale') {
-      return false
-    }
-
-    if (!('computeSource' in node.data)) {
-      return false
-    }
-
-    const effectiveSource = node.data.computeSource === 'project' ? computeMode : node.data.computeSource
-    return networkStatus === 'offline' && effectiveSource === 'cloud'
-  }).length
 
   return (
     <header
       aria-label="Application header"
-      className="relative z-10 border-b border-white/10 bg-black/45 px-4 py-3 backdrop-blur-xl md:px-6"
+      className="relative z-20 flex h-12 items-center gap-3 border-b border-hairline bg-black/45 px-3 backdrop-blur-xl"
     >
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-4">
-          <div aria-hidden="true" className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(145deg,var(--color-accent),#7cd100)] text-lg font-black text-black shadow-[0_0_36px_rgba(224,255,0,0.35)]">
-            F
-          </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-[0.4em] text-[#8e929b]">FluxNode</p>
-            <div className="flex items-center gap-2">
-              <h1 className="font-display text-lg font-semibold tracking-tight text-white md:text-xl">
-                {projectName}
-              </h1>
-              <span className="rounded-full border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.25em] text-accent">
-                phase 1
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex rounded-full border border-white/10 bg-[#1a1a1b]/90 p-1">
-            <ModeButton active={activeView === 'timeline'} label="Timeline" onClick={() => setActiveView('timeline')} />
-            <ModeButton active={activeView === 'workflow'} label="Workflow" onClick={() => setActiveView('workflow')} />
-          </div>
-
-          <button
-            type="button"
-            onClick={toggleComputeMode}
-            disabled={networkStatus === 'offline'}
-            aria-label={`Switch compute mode. Current mode ${computeMode}.`}
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-[#1a1a1b]/90 px-4 py-2 text-xs font-medium text-white transition hover:border-[#3b82f6]/50 disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            {computeMode === 'local' ? <Cpu size={14} className="text-accent" aria-hidden="true" /> : <Cloud size={14} className="text-[#3b82f6]" aria-hidden="true" />}
-            {computeMode === 'local' ? 'Local Compute' : 'Cloud Compute'}
-          </button>
-          <button
-            type="button"
-            onClick={toggleProxyMode}
-            aria-pressed={proxyEnabled}
-            aria-label={`Toggle proxy mode. Proxy mode is ${proxyEnabled ? 'on' : 'off'}.`}
-            className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-medium transition ${
-              proxyEnabled
-                ? 'border-accent/25 bg-accent/10 text-[#f5ffd5]'
-                : 'border-white/10 bg-[#1a1a1b]/90 text-white'
-            }`}
-          >
-            {proxyEnabled ? 'Proxy Mode On' : 'Proxy Mode Off'}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => void createProjectWithPicker(newProject, createProjectAtPath, defaultProjectDirectory)}
-            aria-label="Create a new project"
-            className="rounded-full border border-white/10 bg-[#1a1a1b]/90 px-4 py-2 text-xs font-medium text-white transition hover:border-white/20"
-          >
-            New Project
-          </button>
-          <IconButton label="Open project" onClick={() => void openProjectWithPicker(openProjectFromPath, defaultProjectDirectory)}>
-            <FolderOpen size={16} />
-          </IconButton>
-          <IconButton disabled={undoCount === 0} label="Undo" onClick={undo}>
-            <Undo2 size={16} />
-          </IconButton>
-          <IconButton disabled={redoCount === 0} label="Redo" onClick={redo}>
-            <Redo2 size={16} />
-          </IconButton>
-          <IconButton label="Save project" onClick={() => void saveProject()}>
-            <Save size={16} />
-          </IconButton>
-          <IconButton label="Save project as" onClick={() => void saveProjectAsWithPicker(saveProjectAs, defaultProjectDirectory)}>
-            <SaveAll size={16} />
-          </IconButton>
-          <IconButton label="Open settings" onClick={openSettings}>
-            <Settings2 size={16} />
-          </IconButton>
-          <Menu label="More workspace actions">
-            <MenuItem
-              label={sharing.enabled ? `Share Workspace (${activeCollaboratorCount})` : 'Share Workspace'}
-              onClick={openWorkspaceSharing}
-              pressed={sharing.enabled}
-            />
-            <div role="separator" className="my-1 border-t border-white/8" />
-            <MenuItem
-              label="Detach Preview"
-              pressed={panelLayouts.preview.detached}
-              onClick={() =>
-                void (panelLayouts.preview.detached ? closeDetachedPanel('preview') : openDetachedPanel('preview'))
-              }
-            />
-            <MenuItem
-              label="Detach Timeline"
-              pressed={panelLayouts.timeline.detached}
-              onClick={() =>
-                void (panelLayouts.timeline.detached ? closeDetachedPanel('timeline') : openDetachedPanel('timeline'))
-              }
-            />
-            <MenuItem
-              label="Detach Inspector"
-              pressed={panelLayouts.inspector.detached}
-              onClick={() =>
-                void (panelLayouts.inspector.detached ? closeDetachedPanel('inspector') : openDetachedPanel('inspector'))
-              }
-            />
-          </Menu>
-        </div>
-      </div>
-
-      <div
-        aria-live="polite"
-        className="mt-3 flex flex-col gap-2 text-xs text-[#9ea4ae] md:flex-row md:items-center md:justify-between"
-      >
-        <div className="inline-flex items-center gap-2">
-          <Sparkles size={14} className="text-accent" aria-hidden="true" />
-          <span>{statusMessage}</span>
-        </div>
-        <span>
-          {lastSavedAt ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'Not saved yet'}
-          {lastAutoSavedAt ? ` | Autosaved ${new Date(lastAutoSavedAt).toLocaleTimeString()}` : ''}
-          {` | ${networkStatus}`}
-          {` | ${performanceMode.replace('_', ' ')}`}
-          {` | proxies ${proxyCount}`}
-          {sharing.enabled ? ` | workspace ${sharing.accessLevel.replace('_', ' ')} / ${activeCollaboratorCount} collaborator${activeCollaboratorCount === 1 ? '' : 's'}` : ''}
-          {recentProjects.length > 0 ? ` | ${recentProjects.length} recent project entries` : ''}
-        </span>
-      </div>
-      <div className="mt-2 text-[11px] text-[#7f8792]">
-        {currentProjectPath ?? 'Project path not assigned yet. Use Save As to create a .fluxnode directory.'}
-      </div>
-      {networkStatus === 'offline' ? (
+      {/* Left: identity + file verbs */}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <div
-          role="status"
-          className="mt-3 flex flex-wrap items-center gap-2 rounded-[1rem] border border-amber-300/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-50"
+          aria-hidden="true"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-accent text-xs font-black text-black"
         >
-          <WifiOff size={14} aria-hidden="true" />
-          <span>Offline mode active. Cloud compute is disabled and FluxNode will keep local editing, save/load, proxy, and local render paths available.</span>
-          {offlineBlockedNodeCount > 0 ? (
-            <span className="rounded-full border border-amber-200/20 px-2 py-1 text-[10px] uppercase tracking-[0.18em]">
-              {offlineBlockedNodeCount} AI node{offlineBlockedNodeCount === 1 ? '' : 's'} require internet
-            </span>
-          ) : null}
+          F
         </div>
-      ) : null}
+
+        <Menu label="File menu" icon={<MenuIcon size={15} aria-hidden="true" />}>
+          <MenuItem
+            label="New Project…"
+            onClick={() => void createProjectWithPicker(newProject, createProjectAtPath, defaultProjectDirectory)}
+          />
+          <MenuItem
+            label="Open Project…"
+            onClick={() => void openProjectWithPicker(openProjectFromPath, defaultProjectDirectory)}
+          />
+          <MenuItem label="Save" onClick={() => void saveProject()} />
+          <MenuItem label="Save As…" onClick={() => void saveProjectAsWithPicker(saveProjectAs, defaultProjectDirectory)} />
+          {recentProjects.length > 0 ? (
+            <>
+              <div role="separator" className="my-1 border-t border-white/8" />
+              {recentProjects.slice(0, 5).map((entry) => (
+                <MenuItem key={entry.path} label={`Recent: ${entry.name}`} onClick={() => void openProjectFromPath(entry.path)} />
+              ))}
+            </>
+          ) : null}
+          <div role="separator" className="my-1 border-t border-white/8" />
+          <MenuItem
+            label={sharing.enabled ? `Share Workspace (${sharing.collaborators.length})` : 'Share Workspace'}
+            onClick={openWorkspaceSharing}
+            pressed={sharing.enabled}
+          />
+        </Menu>
+
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="truncate font-display text-sm font-semibold tracking-tight text-white" title={currentProjectPath ?? projectName}>
+              {projectName}
+            </h1>
+            <span
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${lastSavedAt ? 'bg-success' : 'bg-warn'}`}
+              title={lastSavedAt ? `Saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'Not saved yet'}
+            />
+          </div>
+          <p aria-live="polite" className="truncate text-[10px] leading-tight text-text-secondary">
+            {statusMessage}
+          </p>
+        </div>
+
+        <div className="ml-1 flex shrink-0 items-center gap-1">
+          <IconButton size="sm" disabled={undoCount === 0} label="Undo" title="Undo (Ctrl+Z)" onClick={undo}>
+            <Undo2 size={14} />
+          </IconButton>
+          <IconButton size="sm" disabled={redoCount === 0} label="Redo" title="Redo (Ctrl+Shift+Z)" onClick={redo}>
+            <Redo2 size={14} />
+          </IconButton>
+        </div>
+      </div>
+
+      {/* Center: workspace switch. Accessible names stay "Timeline view"/"Workflow view" — the
+          command registry, docs, and e2e suite address them by those names. */}
+      <div className="flex shrink-0 rounded-full border border-white/10 bg-[#1a1a1b]/90 p-0.5" role="group" aria-label="Workspace">
+        <WorkspaceTab active={activeView === 'timeline'} label="Timeline view" text="Edit" onClick={() => setActiveView('timeline')} />
+        <WorkspaceTab active={activeView === 'workflow'} label="Workflow view" text="Nodes" onClick={() => setActiveView('workflow')} />
+      </div>
+
+      {/* Right: mode toggles + settings + export */}
+      <div className="flex flex-1 items-center justify-end gap-1.5">
+        {networkStatus === 'offline' ? (
+          <span
+            role="status"
+            title="Offline — cloud compute disabled, local editing continues"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-warn/30 bg-warn/10 text-warn"
+          >
+            <WifiOff size={14} aria-hidden="true" />
+            <span className="sr-only">Offline mode active. Cloud compute is disabled.</span>
+          </span>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={toggleComputeMode}
+          disabled={networkStatus === 'offline'}
+          aria-label={`Switch compute mode. Current mode ${computeMode}.`}
+          title={computeMode === 'local' ? 'Local compute — click for cloud' : 'Cloud compute — click for local'}
+          className="hidden h-8 items-center gap-1.5 rounded-full border border-white/10 bg-[#1a1a1b]/90 px-3 text-xs font-medium text-white transition hover:border-cloud/50 disabled:cursor-not-allowed disabled:opacity-45 md:inline-flex"
+        >
+          {computeMode === 'local' ? (
+            <Cpu size={13} className="text-accent" aria-hidden="true" />
+          ) : (
+            <Cloud size={13} className="text-cloud" aria-hidden="true" />
+          )}
+          {computeMode === 'local' ? 'Local' : 'Cloud'}
+        </button>
+
+        <button
+          type="button"
+          onClick={toggleProxyMode}
+          aria-pressed={proxyEnabled}
+          aria-label={`Toggle proxy mode. Proxy mode is ${proxyEnabled ? 'on' : 'off'}.`}
+          title={proxyEnabled ? 'Proxy mode on' : 'Proxy mode off'}
+          className={`hidden h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition md:inline-flex ${
+            proxyEnabled ? 'border-accent/30 bg-accent/10 text-accent-soft' : 'border-white/10 bg-[#1a1a1b]/90 text-text-secondary hover:text-white'
+          }`}
+        >
+          <FileVideo size={13} aria-hidden="true" />
+          Proxy
+        </button>
+
+        <Menu label="View options" icon={<PanelsTopLeft size={15} aria-hidden="true" />}>
+          <MenuItem
+            label="Studio Layout (media / monitor / timeline)"
+            pressed={workspaceLayout === 'studio'}
+            onClick={() => void setWorkspaceLayout('studio')}
+          />
+          <MenuItem
+            label="Strata Layout (sky / horizon / ground)"
+            pressed={workspaceLayout === 'strata'}
+            onClick={() => void setWorkspaceLayout('strata')}
+          />
+          <div role="separator" className="my-1 border-t border-white/8" />
+          <MenuItem label="Density: Comfortable" pressed={density === 'comfortable'} onClick={() => void setDensityMode('comfortable')} />
+          <MenuItem label="Density: Compact" pressed={density === 'compact'} onClick={() => void setDensityMode('compact')} />
+          <div role="separator" className="my-1 border-t border-white/8" />
+          <MenuItem
+            label="Detach Preview"
+            pressed={panelLayouts.preview.detached}
+            onClick={() => void (panelLayouts.preview.detached ? closeDetachedPanel('preview') : openDetachedPanel('preview'))}
+          />
+          <MenuItem
+            label="Detach Timeline"
+            pressed={panelLayouts.timeline.detached}
+            onClick={() => void (panelLayouts.timeline.detached ? closeDetachedPanel('timeline') : openDetachedPanel('timeline'))}
+          />
+          <MenuItem
+            label="Detach Inspector"
+            pressed={panelLayouts.inspector.detached}
+            onClick={() => void (panelLayouts.inspector.detached ? closeDetachedPanel('inspector') : openDetachedPanel('inspector'))}
+          />
+        </Menu>
+
+        <IconButton size="sm" label="Open settings" onClick={openSettings}>
+          <Settings2 size={14} />
+        </IconButton>
+
+        <button
+          type="button"
+          onClick={() => onExport?.()}
+          aria-label="Open export sheet"
+          className="ml-1 inline-flex h-8 items-center gap-1.5 rounded-full bg-accent px-4 text-xs font-semibold text-black transition hover:brightness-95"
+        >
+          <Download size={13} aria-hidden="true" />
+          Export
+        </button>
+      </div>
     </header>
   )
 }
 
-function ModeButton({
+function WorkspaceTab({
   active,
   label,
+  text,
   onClick,
 }: {
   active: boolean
   label: string
+  text: string
   onClick: () => void
 }) {
   return (
@@ -220,13 +235,12 @@ function ModeButton({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      aria-label={`${label} view`}
-      className={`rounded-full px-4 py-2 text-sm transition ${
+      aria-label={label}
+      className={`rounded-full px-4 py-1.5 text-xs font-medium transition ${
         active ? 'bg-white text-black' : 'text-[#8f96a3] hover:text-white'
       }`}
     >
-      {label}
+      {text}
     </button>
   )
 }
-
