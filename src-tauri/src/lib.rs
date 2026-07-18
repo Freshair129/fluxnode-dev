@@ -3756,6 +3756,11 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        // Signed auto-updates (tauri-plugin-updater) + relaunch-after-install
+        // (tauri-plugin-process). Registered only for the GUI entry — the headless
+        // --mcp/--agent builders never update themselves.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             actions::action_invoke,
             actions::action_list,

@@ -91,4 +91,11 @@ jobs:
           releaseBody: 'See CHANGELOG.md for details.'
           releaseDraft: true
           prerelease: false
+          # Signed auto-updates: `bundle.createUpdaterArtifacts` in tauri.conf.json makes this
+          # build emit `.sig` files (signed with TAURI_SIGNING_PRIVATE_KEY above) and
+          # `includeUpdaterJson` uploads the `latest.json` the in-app updater polls at
+          # https://github.com/Freshair129/fluxnode-dev/releases/latest/download/latest.json.
+          # NOTE: assets on a DRAFT release are not reachable at that URL — clients start seeing
+          # the update the moment the draft is published.
+          includeUpdaterJson: true
           args: ${{ matrix.args }}

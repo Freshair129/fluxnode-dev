@@ -385,6 +385,20 @@ export default function App() {
     void refreshRuntimeHealth()
   }, [detachedPanel, refreshRuntimeHealth])
 
+  // Silent auto-update check shortly after launch (signed updater endpoint; no status-bar
+  // chatter unless an update is actually found). Delayed so boot work settles first.
+  useEffect(() => {
+    if (detachedPanel) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      void useProjectStore.getState().checkForAppUpdates({ silent: true })
+    }, 8_000)
+
+    return () => window.clearTimeout(timer)
+  }, [detachedPanel])
+
   useEffect(() => {
     if (detachedPanel) {
       return
