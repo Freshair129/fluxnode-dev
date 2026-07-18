@@ -274,6 +274,15 @@ interface ProjectStoreState {
   setSelectedClipDuration: (duration: number) => void
   setSelectedClipInPoint: (inPoint: number) => void
   setSelectedClipOutPoint: (outPoint: number) => void
+  /**
+   * Left-trim primitive: slide every selected clip's IN edge by `delta` seconds — moving its
+   * source in-point and its timeline start together while the OUT edge stays fixed — as ONE
+   * undoable step. Previously the timeline committed this as two mutations
+   * (`setSelectedClipInPoint` + `setSelectedClipStartTime`), so undoing one left-trim gesture
+   * took two Ctrl+Z. `delta` is clamped per clip so neither the source in-point nor the timeline
+   * start crosses 0 and the duration never drops below the minimum.
+   */
+  trimSelectedClipStart: (delta: number) => void
   setSelectedClipSpeed: (speed: number) => void
   setSelectedClipVolume: (volume: number) => void
   setSelectedClipOpacity: (opacity: number) => void
@@ -5152,6 +5161,39 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
               .map((keyframe) => ({ ...keyframe, time: Math.min(keyframe.time, clip.duration) }))
             sortClipKeyframes(clip.keyframes)
           }
+        }
+      }
+    }),
+  trimSelectedClipStart: (delta) =>
+    applyMutation(set, get, 'clip.trim', 'Clip start trimmed', (project) => {
+      const selectedClipIds = new Set(get().ui.selectedClipIds)
+
+      for (const track of project.timeline.tracks) {
+        for (const clip of track.clips) {
+          if (!selectedClipIds.has(clip.id)) {
+            continue
+          }
+
+          // The in-edge stops when EITHER the source in-point OR the timeline start hits 0, and
+          // the clip can't shrink past the minimum duration. Folding the timeline-start floor
+          // into the bound (rather than clamping start independently) keeps inPoint, startTime,
+          // and duration shifting by the same amount so they never desync.
+          const lower = Math.max(-clip.inPoint, -clip.startTime)
+          const upper = clip.duration - 0.1
+          const effectiveDelta = Math.min(upper, Math.max(lower, delta))
+
+          if (Math.abs(effectiveDelta) < 0.0005) {
+            continue
+          }
+
+          clip.inPoint = Number((clip.inPoint + effectiveDelta).toFixed(2))
+          clip.startTime = Math.max(0, Number((clip.startTime + effectiveDelta).toFixed(2)))
+          // OUT edge is fixed, so duration absorbs the whole shift.
+          clip.duration = clampClipDuration(clip.outPoint - clip.inPoint)
+          clip.keyframes = clip.keyframes
+            .filter((keyframe) => keyframe.time <= clip.duration)
+            .map((keyframe) => ({ ...keyframe, time: Math.min(keyframe.time, clip.duration) }))
+          sortClipKeyframes(clip.keyframes)
         }
       }
     }),

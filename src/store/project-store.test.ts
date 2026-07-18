@@ -403,3 +403,82 @@ describe('project-store: moveSelectedClips (cross-track + multi-select drag)', (
     expect(useProjectStore.getState().history.undoStack.length).toBe(undoBefore + 1)
   })
 })
+
+describe('project-store: trimSelectedClipStart (single-undo left trim)', () => {
+  let useProjectStore: typeof UseProjectStoreType
+
+  beforeEach(async () => {
+    useProjectStore = await loadStore()
+  })
+
+  function videoClip() {
+    return useProjectStore
+      .getState()
+      .project.timeline.tracks.flatMap((t) => t.clips)
+      .find((c) => c.id === 'clip-video-01')!
+  }
+
+  it('shifts in-point + start together, keeps the out edge fixed, in ONE undo step', () => {
+    // Give the clip headroom on both the source in-point and the timeline start.
+    useProjectStore.getState().selectClip('clip-video-01')
+    useProjectStore.getState().setSelectedClipInPoint(2)
+    useProjectStore.getState().setSelectedClipStartTime(5)
+    const before = videoClip()
+    const outBefore = before.outPoint
+    const undoBefore = useProjectStore.getState().history.undoStack.length
+
+    useProjectStore.getState().trimSelectedClipStart(1)
+
+    const after = videoClip()
+    expect(after.inPoint).toBeCloseTo(before.inPoint + 1, 2)
+    expect(after.startTime).toBeCloseTo(before.startTime + 1, 2)
+    expect(after.outPoint).toBeCloseTo(outBefore, 2) // out edge fixed
+    expect(after.duration).toBeCloseTo(before.duration - 1, 2)
+    // One undo entry — the whole gesture reverses with a single undo.
+    expect(useProjectStore.getState().history.undoStack.length).toBe(undoBefore + 1)
+
+    useProjectStore.getState().undo()
+    const reverted = videoClip()
+    expect(reverted.inPoint).toBeCloseTo(before.inPoint, 2)
+    expect(reverted.startTime).toBeCloseTo(before.startTime, 2)
+    expect(reverted.duration).toBeCloseTo(before.duration, 2)
+  })
+
+  it('stops the in-edge when the source in-point would cross 0', () => {
+    useProjectStore.getState().selectClip('clip-video-01')
+    useProjectStore.getState().setSelectedClipInPoint(0.5)
+    useProjectStore.getState().setSelectedClipStartTime(10)
+    const outBefore = videoClip().outPoint
+
+    // Try to drag the in-edge left by 3s — inPoint (0.5) floors the move at -0.5.
+    useProjectStore.getState().trimSelectedClipStart(-3)
+
+    const after = videoClip()
+    expect(after.inPoint).toBe(0)
+    expect(after.startTime).toBeCloseTo(10 - 0.5, 2)
+    expect(after.outPoint).toBeCloseTo(outBefore, 2)
+  })
+
+  it('stops the in-edge when the timeline start would cross 0', () => {
+    useProjectStore.getState().selectClip('clip-video-01')
+    useProjectStore.getState().setSelectedClipInPoint(5)
+    useProjectStore.getState().setSelectedClipStartTime(0.5)
+
+    // inPoint has 5s of room but the timeline start only 0.5 — the smaller floor wins.
+    useProjectStore.getState().trimSelectedClipStart(-3)
+
+    const after = videoClip()
+    expect(after.startTime).toBe(0)
+    expect(after.inPoint).toBeCloseTo(5 - 0.5, 2)
+  })
+
+  it('never shrinks the clip below the minimum duration', () => {
+    useProjectStore.getState().selectClip('clip-video-01')
+    const dur = videoClip().duration
+
+    // Drag the in-edge right past the out edge — duration clamps at 0.1.
+    useProjectStore.getState().trimSelectedClipStart(dur + 100)
+
+    expect(videoClip().duration).toBeCloseTo(0.1, 2)
+  })
+})
