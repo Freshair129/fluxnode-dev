@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, FolderOpen, SlidersHorizontal } from 'lucide-react'
 import { useProjectStore } from '../../store/project-store'
+import { STUDIO_TIMELINE_MIN_HEIGHT_PX } from '../../domain/project/studio-layout'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { IconButton } from '../../components/IconButton'
 import { PanelFallback } from '../../app/App'
@@ -19,8 +20,6 @@ const StudioTimeline = lazy(() =>
 const MEDIA_W = 264
 const INSPECTOR_W = 300
 const RAIL_W = 40
-const TIMELINE_MIN_H = 160
-const TIMELINE_DEFAULT_H = 300
 
 interface StudioShellProps {
   className?: string
@@ -40,15 +39,26 @@ export function StudioShell({ className }: StudioShellProps) {
   const selectedClipId = useProjectStore((state) => state.ui.selectedClipId)
   const selectedNodeId = useProjectStore((state) => state.ui.selectedNodeId)
 
-  const [mediaCollapsed, setMediaCollapsed] = useState(false)
-  const [timelineHeight, setTimelineHeight] = useState(TIMELINE_DEFAULT_H)
+  // Persisted per-project (project.meta.studioLayout — saved with the project file, restored on
+  // load). `dragHeight` is the uncommitted preview while the splitter is being dragged; the store
+  // is only written on pointer-up / keyboard commit so autosave never captures a mid-drag value.
+  const mediaCollapsed = useProjectStore((state) => state.project.meta.studioLayout.mediaCollapsed)
+  const persistedTimelineHeight = useProjectStore((state) => state.project.meta.studioLayout.timelineHeightPx)
+  const setStudioTimelineHeight = useProjectStore((state) => state.setStudioTimelineHeight)
+  const toggleStudioMediaCollapse = useProjectStore((state) => state.toggleStudioMediaCollapse)
+  const [dragHeight, setDragHeight] = useState<number | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
   const dragOriginRef = useRef<{ startY: number; startHeight: number } | null>(null)
 
   const clampTimelineHeight = useCallback((height: number) => {
     const shellHeight = shellRef.current?.clientHeight ?? 900
-    return Math.min(Math.max(height, TIMELINE_MIN_H), Math.max(TIMELINE_MIN_H, Math.round(shellHeight * 0.7)))
+    return Math.min(
+      Math.max(height, STUDIO_TIMELINE_MIN_HEIGHT_PX),
+      Math.max(STUDIO_TIMELINE_MIN_HEIGHT_PX, Math.round(shellHeight * 0.7)),
+    )
   }, [])
+
+  const timelineHeight = clampTimelineHeight(dragHeight ?? persistedTimelineHeight)
 
   const hasSelection = selectedClipId !== null || selectedNodeId !== null
 
@@ -80,7 +90,7 @@ export function StudioShell({ className }: StudioShellProps) {
                   title="Expand media bin"
                   ariaExpanded={false}
                   size="sm"
-                  onClick={() => setMediaCollapsed(false)}
+                  onClick={toggleStudioMediaCollapse}
                 >
                   <ChevronRight size={14} aria-hidden="true" />
                 </IconButton>
@@ -89,7 +99,7 @@ export function StudioShell({ className }: StudioShellProps) {
             ) : (
               <div style={{ width: MEDIA_W }} className="h-full shrink-0 border-r border-hairline">
                 <ErrorBoundary label="Media bin" compact>
-                  <MediaPanel onCollapse={() => setMediaCollapsed(true)} />
+                  <MediaPanel onCollapse={toggleStudioMediaCollapse} />
                 </ErrorBoundary>
               </div>
             )}
@@ -174,20 +184,24 @@ export function StudioShell({ className }: StudioShellProps) {
             return
           }
 
-          setTimelineHeight(clampTimelineHeight(dragOriginRef.current.startHeight + (dragOriginRef.current.startY - event.clientY)))
+          setDragHeight(clampTimelineHeight(dragOriginRef.current.startHeight + (dragOriginRef.current.startY - event.clientY)))
         }}
         onPointerUp={() => {
           dragOriginRef.current = null
+          if (dragHeight !== null) {
+            setStudioTimelineHeight(dragHeight)
+          }
+          setDragHeight(null)
         }}
         onKeyDown={(event) => {
           const stepPx = event.shiftKey ? 64 : 16
 
           if (event.key === 'ArrowUp') {
             event.preventDefault()
-            setTimelineHeight((current) => clampTimelineHeight(current + stepPx))
+            setStudioTimelineHeight(clampTimelineHeight(timelineHeight + stepPx))
           } else if (event.key === 'ArrowDown') {
             event.preventDefault()
-            setTimelineHeight((current) => clampTimelineHeight(current - stepPx))
+            setStudioTimelineHeight(clampTimelineHeight(timelineHeight - stepPx))
           }
         }}
         className="group flex h-1.5 shrink-0 cursor-row-resize items-center justify-center border-y border-hairline bg-surface-3 transition hover:bg-accent/20"

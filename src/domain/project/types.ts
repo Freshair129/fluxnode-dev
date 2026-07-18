@@ -36,6 +36,16 @@ export interface ProjectMeta {
    * per-project like `panelLayouts`/`horizonRatio`.
    */
   stageRowCollapse: StageRowCollapseState
+  /**
+   * Studio shell workspace geometry (timeline strip height, media-bin rail),
+   * persisted per-project like `horizonRatio`. See `domain/project/studio-layout.ts`.
+   */
+  studioLayout: StudioLayoutState
+}
+
+export interface StudioLayoutState {
+  timelineHeightPx: number
+  mediaCollapsed: boolean
 }
 
 export type StageRowSide = 'ledger' | 'inspector'

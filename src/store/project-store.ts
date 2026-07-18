@@ -27,6 +27,7 @@ import {
 import { nextId } from '../domain/id'
 import { createDefaultProject, createTemplateProject, type ProjectTemplateId } from '../domain/project/defaults'
 import { activeViewForRatio, clampHorizonRatio, DEFAULT_HORIZON_RATIO, defaultRatioForView } from '../domain/project/horizon'
+import { clampStudioTimelineHeight } from '../domain/project/studio-layout'
 import { DEFAULT_DENSITY_MODE, normalizeDensityMode, type DensityMode } from '../domain/project/density'
 import { validateProject, type ProjectValidationIssue } from '../domain/project/validators'
 import type {
@@ -136,6 +137,11 @@ interface ProjectStoreState {
   setActiveView: (view: UserInterfaceState['activeView']) => void
   setHorizonRatio: (ratio: number) => void
   toggleStageRowCollapse: (side: StageRowSide) => void
+  /** Studio shell: persist the timeline strip height in project.meta (no undo history), like
+   *  `setHorizonRatio`. Clamped to the studio-layout sanity range. */
+  setStudioTimelineHeight: (heightPx: number) => void
+  /** Studio shell: collapse/expand the media-bin rail, persisted per-project (no undo history). */
+  toggleStudioMediaCollapse: () => void
   toggleComputeMode: () => void
   toggleProxyMode: () => void
   dismissWelcome: () => void
@@ -2692,6 +2698,37 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
           stageRowCollapse: {
             ...state.project.meta.stageRowCollapse,
             [side]: !state.project.meta.stageRowCollapse[side],
+          },
+        },
+      },
+    })),
+  setStudioTimelineHeight: (heightPx) =>
+    set((state) => {
+      const clamped = clampStudioTimelineHeight(heightPx)
+
+      if (clamped === state.project.meta.studioLayout.timelineHeightPx) {
+        return state
+      }
+
+      return {
+        project: {
+          ...state.project,
+          meta: {
+            ...state.project.meta,
+            studioLayout: { ...state.project.meta.studioLayout, timelineHeightPx: clamped },
+          },
+        },
+      }
+    }),
+  toggleStudioMediaCollapse: () =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        meta: {
+          ...state.project.meta,
+          studioLayout: {
+            ...state.project.meta.studioLayout,
+            mediaCollapsed: !state.project.meta.studioLayout.mediaCollapsed,
           },
         },
       },

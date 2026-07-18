@@ -222,6 +222,28 @@ describe('project-store: horizon ratio (MERIDIAN strata shell)', () => {
     expect(useProjectStore.getState().ui.activeView).toBe('workflow')
   })
 
+  it('setStudioTimelineHeight clamps and persists in project.meta without touching history', () => {
+    useProjectStore.getState().setStudioTimelineHeight(420)
+    expect(useProjectStore.getState().project.meta.studioLayout.timelineHeightPx).toBe(420)
+
+    useProjectStore.getState().setStudioTimelineHeight(1)
+    expect(useProjectStore.getState().project.meta.studioLayout.timelineHeightPx).toBe(160)
+
+    expect(useProjectStore.getState().history.undoStack).toHaveLength(0)
+  })
+
+  it('toggleStudioMediaCollapse flips the persisted media rail flag without touching history', () => {
+    expect(useProjectStore.getState().project.meta.studioLayout.mediaCollapsed).toBe(false)
+
+    useProjectStore.getState().toggleStudioMediaCollapse()
+    expect(useProjectStore.getState().project.meta.studioLayout.mediaCollapsed).toBe(true)
+
+    useProjectStore.getState().toggleStudioMediaCollapse()
+    expect(useProjectStore.getState().project.meta.studioLayout.mediaCollapsed).toBe(false)
+
+    expect(useProjectStore.getState().history.undoStack).toHaveLength(0)
+  })
+
   it('toggleStageRowCollapse flips only the targeted rail and persists without touching history', () => {
     expect(useProjectStore.getState().project.meta.stageRowCollapse).toEqual({ ledger: false, inspector: false })
 

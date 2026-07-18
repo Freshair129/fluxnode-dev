@@ -54,4 +54,27 @@ describe('migrateProject', () => {
     const migratedCurrent = migrateProject(currentProject)
     expect(JSON.stringify(migratedCurrent)).toBe(before)
   })
+
+  it('fills in a missing/malformed studioLayout field without touching an already-valid one', () => {
+    const legacyProject = createDefaultProject()
+    // @ts-expect-error simulating a save written before the studio workspace layout existed
+    delete legacyProject.meta.studioLayout
+
+    const migratedLegacy = migrateProject(legacyProject)
+    expect(migratedLegacy.meta.studioLayout).toEqual({ timelineHeightPx: 300, mediaCollapsed: false })
+
+    const malformedProject = createDefaultProject()
+    malformedProject.meta.studioLayout = { timelineHeightPx: -50 } as unknown as typeof malformedProject.meta.studioLayout
+
+    const migratedMalformed = migrateProject(malformedProject)
+    expect(migratedMalformed.meta.studioLayout).toEqual({ timelineHeightPx: 160, mediaCollapsed: false })
+
+    const currentProject = createDefaultProject()
+    currentProject.meta.studioLayout = { timelineHeightPx: 420, mediaCollapsed: true }
+    const before = JSON.stringify(currentProject)
+
+    const migratedCurrent = migrateProject(currentProject)
+    expect(JSON.stringify(migratedCurrent)).toBe(before)
+    expect(migratedCurrent.meta.studioLayout).toEqual({ timelineHeightPx: 420, mediaCollapsed: true })
+  })
 })
