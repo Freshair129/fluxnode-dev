@@ -104,7 +104,38 @@ signature on the downloaded package. What it does do (as of this hardening pass)
 **What this is not:** proof that the manifest itself came from FluxNode. An attacker who can serve
 an arbitrary (but `https`) manifest can still supply their own `sha256` alongside their own
 payload — the hash check only proves the bytes match what *the manifest* claimed, not that the
-manifest is authentic. Closing that gap requires actual publisher signature verification, i.e.
-migrating this flow to **`tauri-plugin-updater`** with a signed update artifact and Tauri's
-built-in public-key verification. That migration is the recommended long-term fix and is not yet
-done — treat the current hash check as download-integrity hardening, not authentication.
+manifest is authentic. That gap is closed by the signed updater below; this manifest flow remains
+only as the browser-mode / custom-manifest fallback.
+
+## Signed auto-updates (tauri-plugin-updater) — the default desktop pipeline
+
+FluxNode now ships `tauri-plugin-updater` as the primary update path:
+
+- **Endpoint:** `https://github.com/Freshair129/fluxnode-dev/releases/latest/download/latest.json`
+  (configured in `src-tauri/tauri.conf.json` under `plugins.updater`, alongside the minisign
+  **public key** compiled into the app).
+- **Publisher authentication:** every updater artifact is signed with the FluxNode minisign
+  private key; the plugin refuses any download whose signature doesn't verify against the
+  compiled-in public key. This is real authentication, not just integrity hashing.
+- **Release wiring:** `bundle.createUpdaterArtifacts: true` + `includeUpdaterJson: true` in
+  `.github/workflows/release.yml` make `tauri-action` emit the `.sig` files and upload
+  `latest.json` automatically on every tag build. Assets on a **draft** release are not served
+  from the `releases/latest/download/...` URL — the update goes live when the draft is published.
+- **In-app flow:** silent check ~8s after launch (plus Check Now in the status bar's Updates
+  drawer) → one-click Download & Install (streamed progress, signature-verified, staged) →
+  Restart FluxNode (`tauri-plugin-process` relaunch).
+
+### Key management (do not lose these)
+
+- The keypair was generated with `npx tauri signer generate` and lives OUTSIDE the repo at
+  `%USERPROFILE%\.tauri\fluxnode-updater.key` (+ `.pub`). **Never commit the private key.**
+- CI signs with the `TAURI_SIGNING_PRIVATE_KEY` GitHub secret (paste the private key file's
+  full contents; `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is empty for the current key).
+- Losing the private key means shipped apps can never accept another update (the public key is
+  compiled in) — back it up somewhere durable, and treat a leak as a full compromise requiring
+  a new keypair + a manually-installed release migrating users to the new public key.
+
+Note the updater signature (minisign) is **separate from Authenticode**: it authenticates the
+update channel, while Authenticode/SmartScreen (sections above) authenticate the installer to
+Windows itself. Ship both for a clean story; the updater works today even while Authenticode
+remains unsigned.

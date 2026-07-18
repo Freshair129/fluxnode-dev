@@ -104,6 +104,7 @@ import { inspectAssetPath } from '../services/ipc/asset-inspection'
 import { readRuntimeHealth } from '../services/ipc/runtime-health'
 import { canOpenPathInShell, openPathInShell } from '../services/ipc/app-shell'
 import { checkForAppUpdate, downloadAppUpdatePackage, getCurrentAppVersion } from '../services/ipc/app-update'
+import { checkNativeUpdate, relaunchApp, type NativeUpdateHandle } from '../services/ipc/app-auto-update'
 
 const projectRepository = createProjectRepository()
 
@@ -339,7 +340,14 @@ interface ProjectStoreState {
   refreshRuntimeHealth: () => Promise<void>
   syncResilienceState: () => void
   clearRuntimeCaches: () => void
-  checkForAppUpdates: () => Promise<void>
+  /** Native-first: under Tauri this checks the signed updater endpoint (tauri-plugin-updater),
+   *  falling back to the legacy manifest URL when configured; browser mode is manifest-only.
+   *  `silent` suppresses status-bar chatter unless an update is actually found (startup check). */
+  checkForAppUpdates: (options?: { silent?: boolean }) => Promise<void>
+  /** Signed updater only: download + verify + stage in one step, then prompt for relaunch. */
+  downloadAndInstallAppUpdate: () => Promise<void>
+  /** Applies a staged signed update by relaunching the app (tauri-plugin-process). */
+  restartToApplyUpdate: () => Promise<void>
   downloadAppUpdate: () => Promise<void>
   installDownloadedAppUpdate: () => Promise<void>
   openUpdateDownload: () => Promise<void>
@@ -515,10 +523,20 @@ function computeActiveViewUiPatch(
   }
 }
 
+/**
+ * The live tauri-plugin-updater handle between "check" and "download & install". Module-scoped
+ * (not store state) because it carries methods and a native resource — never serializable into
+ * snapshots/WAL. App-level, so it deliberately survives project switches.
+ */
+let nativeUpdateHandle: NativeUpdateHandle | null = null
+
 function createInitialAppUpdateState(): AppUpdateState {
   return {
     status: 'idle',
     downloadStatus: 'idle',
+    source: null,
+    installStatus: 'idle',
+    downloadProgressPct: null,
     versionInfo: {
       currentVersion: 'unknown',
       backend: typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window ? 'tauri' : 'browser',
@@ -7101,10 +7119,15 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         statusMessage: 'Runtime caches cleared',
       },
     })),
-  checkForAppUpdates: async () => {
+  checkForAppUpdates: async (options) => {
+    const silent = options?.silent === true
     const state = get()
 
     if (state.ui.networkStatus === 'offline') {
+      if (silent) {
+        return
+      }
+
       set((currentState) => ({
         appUpdateState: {
           ...currentState.appUpdateState,
@@ -7120,22 +7143,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       return
     }
 
-    if (!state.preferences.updateManifestUrl) {
-      set((currentState) => ({
-        appUpdateState: {
-          ...currentState.appUpdateState,
-          status: 'error',
-          downloadStatus: currentState.appUpdateState.downloadStatus,
-          errorMessage: 'Set an update manifest URL in Settings before checking for updates.',
-        },
-        ui: {
-          ...currentState.ui,
-          statusMessage: 'Update manifest URL is not configured',
-        },
-      }))
-      return
-    }
-
     set((currentState) => ({
       appUpdateState: {
         ...currentState.appUpdateState,
@@ -7143,11 +7150,80 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         downloadStatus: currentState.appUpdateState.downloadStatus,
         errorMessage: null,
       },
-      ui: {
-        ...currentState.ui,
-        statusMessage: 'Checking for updates...',
-      },
+      ui: silent ? currentState.ui : { ...currentState.ui, statusMessage: 'Checking for updates...' },
     }))
+
+    // Desktop-default path: the signed updater endpoint (tauri-plugin-updater). Falls through to
+    // the legacy manifest flow only when the plugin path is unavailable (browser mode) or fails
+    // AND a custom manifest URL is configured.
+    let nativeError: unknown = null
+    try {
+      const native = await checkNativeUpdate()
+
+      if (native !== 'unsupported') {
+        nativeUpdateHandle = native === null ? null : native
+        const checkedAt = new Date().toISOString()
+
+        set((currentState) => ({
+          appUpdateState: {
+            ...currentState.appUpdateState,
+            status: native === null ? 'up-to-date' : 'update-available',
+            source: 'updater-plugin',
+            installStatus: 'idle',
+            downloadProgressPct: null,
+            latestVersion: native === null ? currentState.appUpdateState.versionInfo.currentVersion : native.version,
+            downloadUrl: null,
+            sha256: null,
+            notes: native === null ? null : native.notes,
+            publishedAt: native === null ? null : native.date,
+            lastCheckedAt: checkedAt,
+            errorMessage: null,
+          },
+          ui:
+            native !== null
+              ? { ...currentState.ui, statusMessage: `Update ${native.version} is available` }
+              : silent
+                ? currentState.ui
+                : { ...currentState.ui, statusMessage: 'FluxNode is up to date' },
+        }))
+        return
+      }
+    } catch (error) {
+      nativeError = error
+    }
+
+    if (!state.preferences.updateManifestUrl) {
+      if (silent) {
+        // Startup check with no fallback manifest: stay quiet (e.g. dev build with no release
+        // published yet), but don't leave the drawer stuck on "checking".
+        set((currentState) => ({
+          appUpdateState: {
+            ...currentState.appUpdateState,
+            status: 'idle',
+            lastCheckedAt: new Date().toISOString(),
+          },
+        }))
+        return
+      }
+
+      set((currentState) => ({
+        appUpdateState: {
+          ...currentState.appUpdateState,
+          status: 'error',
+          downloadStatus: currentState.appUpdateState.downloadStatus,
+          lastCheckedAt: new Date().toISOString(),
+          errorMessage:
+            nativeError !== null
+              ? `Signed update check failed: ${nativeError instanceof Error ? nativeError.message : 'unknown error'}`
+              : 'Set an update manifest URL in Settings before checking for updates.',
+        },
+        ui: {
+          ...currentState.ui,
+          statusMessage: nativeError !== null ? 'Update check failed' : 'Update manifest URL is not configured',
+        },
+      }))
+      return
+    }
 
     try {
       const result = await checkForAppUpdate(state.preferences.updateManifestUrl)
@@ -7155,6 +7231,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         appUpdateState: {
           status: result.updateAvailable ? 'update-available' : 'up-to-date',
           downloadStatus: currentState.appUpdateState.downloadStatus,
+          source: 'manifest',
+          installStatus: 'idle',
+          downloadProgressPct: null,
           versionInfo: {
             currentVersion: result.currentVersion,
             backend: currentState.runtimeHealth.backend,
@@ -7169,12 +7248,15 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
           lastCheckedAt: result.checkedAt,
           errorMessage: null,
         },
-        ui: {
-          ...currentState.ui,
-          statusMessage: result.updateAvailable
-            ? `Update ${result.latestVersion} is available`
-            : 'FluxNode is up to date',
-        },
+        ui:
+          result.updateAvailable || !silent
+            ? {
+                ...currentState.ui,
+                statusMessage: result.updateAvailable
+                  ? `Update ${result.latestVersion} is available`
+                  : 'FluxNode is up to date',
+              }
+            : currentState.ui,
       }))
     } catch (error) {
       set((currentState) => ({
@@ -7185,12 +7267,62 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
           lastCheckedAt: new Date().toISOString(),
           errorMessage: error instanceof Error ? error.message : 'Update check failed.',
         },
-        ui: {
-          ...currentState.ui,
-          statusMessage: 'Update check failed',
-        },
+        ui: silent ? currentState.ui : { ...currentState.ui, statusMessage: 'Update check failed' },
       }))
     }
+  },
+  downloadAndInstallAppUpdate: async () => {
+    const handle = nativeUpdateHandle
+
+    if (!handle) {
+      return
+    }
+
+    set((currentState) => ({
+      appUpdateState: {
+        ...currentState.appUpdateState,
+        installStatus: 'downloading',
+        downloadProgressPct: 0,
+        errorMessage: null,
+      },
+      ui: { ...currentState.ui, statusMessage: `Downloading update ${handle.version}...` },
+    }))
+
+    try {
+      await handle.downloadAndInstall((pct) => {
+        set((currentState) => ({
+          appUpdateState: { ...currentState.appUpdateState, downloadProgressPct: pct },
+        }))
+      })
+
+      set((currentState) => ({
+        appUpdateState: {
+          ...currentState.appUpdateState,
+          installStatus: 'ready-to-restart',
+          downloadProgressPct: 100,
+        },
+        ui: { ...currentState.ui, statusMessage: `Update ${handle.version} staged — restart FluxNode to apply` },
+      }))
+    } catch (error) {
+      set((currentState) => ({
+        appUpdateState: {
+          ...currentState.appUpdateState,
+          installStatus: 'error',
+          errorMessage: error instanceof Error ? error.message : 'Update install failed.',
+        },
+        ui: { ...currentState.ui, statusMessage: 'Update install failed' },
+      }))
+    }
+  },
+  restartToApplyUpdate: async () => {
+    if (get().appUpdateState.installStatus !== 'ready-to-restart') {
+      return
+    }
+
+    set((currentState) => ({
+      ui: { ...currentState.ui, statusMessage: 'Restarting FluxNode to apply the update...' },
+    }))
+    await relaunchApp()
   },
   downloadAppUpdate: async () => {
     const state = get()

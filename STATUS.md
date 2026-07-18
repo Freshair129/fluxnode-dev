@@ -46,6 +46,18 @@ View menu; the Playwright e2e suite pins `workspaceLayout: 'strata'` in `e2e/fix
 because specs 03/05/07/09 assert strata-shell geometry. The old stacked-card `TimelineView`
 still serves the strata shell and detached timeline windows.
 
+## Auto-updates (2026-07-18)
+
+**Implemented (desktop).** Signed auto-updates via `tauri-plugin-updater`: silent check ~8s
+after launch + Check Now in the status bar's Updates drawer → one-click Download & Install
+(signature-verified against the compiled-in minisign public key, streamed progress) → Restart
+FluxNode (`tauri-plugin-process`). Endpoint:
+`https://github.com/Freshair129/fluxnode-dev/releases/latest/download/latest.json`, produced by
+`tauri-action` (`createUpdaterArtifacts` + `includeUpdaterJson`) on every tag build. The legacy
+sha256 manifest flow remains as the browser-mode / custom-manifest fallback. Key management and
+caveats: `SIGNING.md`. **Not yet proven end-to-end** — needs the first published (non-draft)
+release with the `TAURI_SIGNING_PRIVATE_KEY` secret set, then an install of vN updating to vN+1.
+
 **Known gap:** Section 11 (performance/system requirements) proof breadth across OS targets
 and hardware tiers beyond what's been directly benchmarked. See
 `masterplan-performance-evidence-audit.md`.

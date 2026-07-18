@@ -756,6 +756,14 @@ export interface AppUpdateManifest {
 export interface AppUpdateState {
   status: 'idle' | 'checking' | 'up-to-date' | 'update-available' | 'error'
   downloadStatus: 'idle' | 'downloading' | 'downloaded' | 'error'
+  /** Which pipeline produced the current result: the signed tauri-plugin-updater flow (desktop
+   *  default) or the legacy manifest-URL flow (browser mode / custom-manifest fallback). */
+  source: 'updater-plugin' | 'manifest' | null
+  /** Signed-updater install pipeline: download+verify+stage happen in one plugin call; the final
+   *  step is an explicit relaunch. Only meaningful when `source === 'updater-plugin'`. */
+  installStatus: 'idle' | 'downloading' | 'ready-to-restart' | 'error'
+  /** 0–100 while the signed updater streams its download; null when size is unknown/idle. */
+  downloadProgressPct: number | null
   versionInfo: AppVersionInfo
   latestVersion: string | null
   downloadUrl: string | null

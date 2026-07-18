@@ -29,8 +29,17 @@
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBNUIwMEM4MUU0NTI2MzYKUldRMkprVWV5QUJiMnY5L2paWDFUdzU3M0NHVHZWZDRCMWU3U1BPbUkzZkYyZzlROVBVcWVBdTAK",
+      "endpoints": [
+        "https://github.com/Freshair129/fluxnode-dev/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["nsis", "msi"],
     "icon": [
       "icons/32x32.png",
