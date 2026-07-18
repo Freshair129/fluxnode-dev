@@ -112,6 +112,8 @@ Bidirectional linking uses `clip.workflowNodeId` <-> `node.data.timelineClipId`.
 - `product-requirements-document.md` - PRD
 - `software-requirements-specification.md` - SRS
 - `fluxnode-design-guide.md` - visual identity guide
+- `RELEASING.md` - step-by-step release + signed auto-update procedure
+- `SIGNING.md` - Authenticode / SmartScreen code-signing guide
 
 ## Current Progress
 

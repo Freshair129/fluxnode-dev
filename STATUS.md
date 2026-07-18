@@ -54,9 +54,10 @@ after launch + Check Now in the status bar's Updates drawer → one-click Downlo
 FluxNode (`tauri-plugin-process`). Endpoint:
 `https://github.com/Freshair129/fluxnode-dev/releases/latest/download/latest.json`, produced by
 `tauri-action` (`createUpdaterArtifacts` + `includeUpdaterJson`) on every tag build. The legacy
-sha256 manifest flow remains as the browser-mode / custom-manifest fallback. Key management and
-caveats: `SIGNING.md`. **Not yet proven end-to-end** — needs the first published (non-draft)
-release with the `TAURI_SIGNING_PRIVATE_KEY` secret set, then an install of vN updating to vN+1.
+sha256 manifest flow remains as the browser-mode / custom-manifest fallback. Release steps:
+`RELEASING.md`. Signing key management and SmartScreen caveats: `SIGNING.md`. **Not yet proven
+end-to-end** — needs the first published (non-draft) release with the `TAURI_SIGNING_PRIVATE_KEY`
+secret set, then an install of vN updating to vN+1.
 
 **Known gap:** Section 11 (performance/system requirements) proof breadth across OS targets
 and hardware tiers beyond what's been directly benchmarked. See
