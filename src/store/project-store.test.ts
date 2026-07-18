@@ -232,6 +232,32 @@ describe('project-store: horizon ratio (MERIDIAN strata shell)', () => {
     expect(useProjectStore.getState().history.undoStack).toHaveLength(0)
   })
 
+  it('setStudioMediaWidth / setStudioInspectorWidth clamp and persist without touching history', () => {
+    useProjectStore.getState().setStudioMediaWidth(320)
+    expect(useProjectStore.getState().project.meta.studioLayout.mediaWidthPx).toBe(320)
+
+    useProjectStore.getState().setStudioMediaWidth(1)
+    expect(useProjectStore.getState().project.meta.studioLayout.mediaWidthPx).toBe(200)
+
+    useProjectStore.getState().setStudioInspectorWidth(360)
+    expect(useProjectStore.getState().project.meta.studioLayout.inspectorWidthPx).toBe(360)
+
+    useProjectStore.getState().setStudioInspectorWidth(9999)
+    expect(useProjectStore.getState().project.meta.studioLayout.inspectorWidthPx).toBe(520)
+
+    expect(useProjectStore.getState().history.undoStack).toHaveLength(0)
+  })
+
+  it('setTimelineScrollX persists into project.timeline outside undo history', () => {
+    useProjectStore.getState().setTimelineScrollX(742.4)
+    expect(useProjectStore.getState().project.timeline.scrollX).toBe(742)
+
+    useProjectStore.getState().setTimelineScrollX(-50)
+    expect(useProjectStore.getState().project.timeline.scrollX).toBe(0)
+
+    expect(useProjectStore.getState().history.undoStack).toHaveLength(0)
+  })
+
   it('toggleStudioMediaCollapse flips the persisted media rail flag without touching history', () => {
     expect(useProjectStore.getState().project.meta.studioLayout.mediaCollapsed).toBe(false)
 

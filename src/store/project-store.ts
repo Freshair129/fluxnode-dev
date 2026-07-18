@@ -27,7 +27,7 @@ import {
 import { nextId } from '../domain/id'
 import { createDefaultProject, createTemplateProject, type ProjectTemplateId } from '../domain/project/defaults'
 import { activeViewForRatio, clampHorizonRatio, DEFAULT_HORIZON_RATIO, defaultRatioForView } from '../domain/project/horizon'
-import { clampStudioTimelineHeight } from '../domain/project/studio-layout'
+import { clampStudioInspectorWidth, clampStudioMediaWidth, clampStudioTimelineHeight } from '../domain/project/studio-layout'
 import { DEFAULT_DENSITY_MODE, normalizeDensityMode, type DensityMode } from '../domain/project/density'
 import { validateProject, type ProjectValidationIssue } from '../domain/project/validators'
 import { applyProposalToTracks, isSupportedFrontendProposal, type Proposal } from '../domain/copilot/proposals'
@@ -146,6 +146,13 @@ interface ProjectStoreState {
   setStudioTimelineHeight: (heightPx: number) => void
   /** Studio shell: collapse/expand the media-bin rail, persisted per-project (no undo history). */
   toggleStudioMediaCollapse: () => void
+  /** Studio shell: persist the media-bin panel width (no undo history), clamped. */
+  setStudioMediaWidth: (widthPx: number) => void
+  /** Studio shell: persist the inspector panel width (no undo history), clamped. */
+  setStudioInspectorWidth: (widthPx: number) => void
+  /** Timeline horizontal scroll offset, persisted in project.timeline.scrollX OUTSIDE undo
+   *  history (scrolling is a view action, not an edit — same rationale as `setHorizonRatio`). */
+  setTimelineScrollX: (scrollX: number) => void
   toggleComputeMode: () => void
   toggleProxyMode: () => void
   dismissWelcome: () => void
@@ -2740,6 +2747,57 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         },
       },
     })),
+  setStudioMediaWidth: (widthPx) =>
+    set((state) => {
+      const clamped = clampStudioMediaWidth(widthPx)
+
+      if (clamped === state.project.meta.studioLayout.mediaWidthPx) {
+        return state
+      }
+
+      return {
+        project: {
+          ...state.project,
+          meta: {
+            ...state.project.meta,
+            studioLayout: { ...state.project.meta.studioLayout, mediaWidthPx: clamped },
+          },
+        },
+      }
+    }),
+  setStudioInspectorWidth: (widthPx) =>
+    set((state) => {
+      const clamped = clampStudioInspectorWidth(widthPx)
+
+      if (clamped === state.project.meta.studioLayout.inspectorWidthPx) {
+        return state
+      }
+
+      return {
+        project: {
+          ...state.project,
+          meta: {
+            ...state.project.meta,
+            studioLayout: { ...state.project.meta.studioLayout, inspectorWidthPx: clamped },
+          },
+        },
+      }
+    }),
+  setTimelineScrollX: (scrollX) =>
+    set((state) => {
+      const clamped = Math.max(0, Math.round(Number.isFinite(scrollX) ? scrollX : 0))
+
+      if (clamped === state.project.timeline.scrollX) {
+        return state
+      }
+
+      return {
+        project: {
+          ...state.project,
+          timeline: { ...state.project.timeline, scrollX: clamped },
+        },
+      }
+    }),
   recordViewSwitchMetric: (metric) =>
     set((state) => ({
       ui: {

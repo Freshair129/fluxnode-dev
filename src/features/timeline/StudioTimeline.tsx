@@ -140,6 +140,8 @@ export function StudioTimeline() {
   const showSelectedClipInWorkflow = useProjectStore((state) => state.showSelectedClipInWorkflow)
   const addClipFromAsset = useProjectStore((state) => state.addClipFromAsset)
   const importAssetFromPath = useProjectStore((state) => state.importAssetFromPath)
+  const setTimelineScrollX = useProjectStore((state) => state.setTimelineScrollX)
+  const projectId = useProjectStore((state) => state.project.meta.id)
 
   const [snapEnabled, setSnapEnabled] = useState(true)
   const [dragState, setDragState] = useState<DragState | null>(null)
@@ -150,6 +152,8 @@ export function StudioTimeline() {
   } | null>(null)
   const [confirmDeleteTrack, setConfirmDeleteTrack] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const lastWrittenScrollXRef = useRef<number | null>(null)
+  const scrollPersistTimerRef = useRef<number | null>(null)
 
   const pps = BASE_PPS * timeline.zoom
   const timelineEnd = useMemo(
@@ -219,6 +223,53 @@ export function StudioTimeline() {
     }
 
     return best?.delta ?? rawDelta
+  }
+
+  // Restore the persisted horizontal scroll (project.timeline.scrollX) on mount, on project
+  // switch, and on external writes (fitTimelineToWindow resets it to 0). Values this component
+  // just persisted itself are skipped via lastWrittenScrollXRef so the debounced writer below
+  // never fights live scrolling.
+  useEffect(() => {
+    const scroller = scrollRef.current
+
+    if (!scroller || lastWrittenScrollXRef.current === timeline.scrollX) {
+      return
+    }
+
+    scroller.scrollLeft = timeline.scrollX
+  }, [projectId, timeline.scrollX])
+
+  // Debounced scroll persistence (view state, outside undo history — see setTimelineScrollX).
+  // The trailing write also flushes on unmount so tab switches don't lose the last position.
+  useEffect(
+    () => () => {
+      if (scrollPersistTimerRef.current !== null) {
+        window.clearTimeout(scrollPersistTimerRef.current)
+        const scroller = scrollRef.current
+
+        if (scroller) {
+          lastWrittenScrollXRef.current = Math.round(scroller.scrollLeft)
+          setTimelineScrollX(scroller.scrollLeft)
+        }
+      }
+    },
+    [setTimelineScrollX],
+  )
+
+  function handleScrollPersist() {
+    if (scrollPersistTimerRef.current !== null) {
+      window.clearTimeout(scrollPersistTimerRef.current)
+    }
+
+    scrollPersistTimerRef.current = window.setTimeout(() => {
+      scrollPersistTimerRef.current = null
+      const scroller = scrollRef.current
+
+      if (scroller) {
+        lastWrittenScrollXRef.current = Math.round(scroller.scrollLeft)
+        setTimelineScrollX(scroller.scrollLeft)
+      }
+    }, 300)
   }
 
   // Ctrl+wheel zoom needs a NATIVE non-passive listener: React 17+ registers its root `wheel`
@@ -500,6 +551,7 @@ export function StudioTimeline() {
           fileDropZone.zoneRef.current = element
         }}
         {...fileDropZone.browserDragHandlers}
+        onScroll={handleScrollPersist}
         className={`relative min-h-0 flex-1 overflow-auto outline-2 -outline-offset-2 transition ${
           fileDropZone.isActive ? 'outline-accent/60' : 'outline-transparent'
         }`}
