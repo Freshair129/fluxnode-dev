@@ -505,7 +505,7 @@ export function StrataShell({ className }: StrataShellProps) {
         ) : (
           <ErrorBoundary label="Workflow">
             <Suspense fallback={<PanelFallback label="Loading workflow workspace" />}>
-              <WorkflowView />
+              <WorkflowView frame="flow" />
             </Suspense>
           </ErrorBoundary>
         )}
