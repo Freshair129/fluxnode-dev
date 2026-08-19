@@ -44,9 +44,15 @@ Corrected:
   `job.config.resolution`, but the retry goes through `render_retry` ->
   `restart_render_from_manifest`, which rebuilds from the manifest's *original* preset — so the
   retry re-runs the same ffmpeg invocation. Treat GPU-OOM fallback as **Pending**.
-- **Render progress is not polled automatically.** The backend maintains the status file in
-  real time; `refreshRenderStatuses` is wired only to manual buttons in `ExportSheet` and
-  `DiagnosticsPanel`. The queue UI does not advance on its own.
+- ~~**Render progress is not polled automatically.**~~ **Fixed.** The store now owns a 1 s
+  poller (`startRenderStatusPolling` / `stopRenderStatusPolling`): idempotent, guarded against
+  overlapping ticks, and it retires itself once no job is active, so an idle app holds no timer.
+  The app shell keys it on whether anything is in flight, so it also re-arms for a project
+  reopened with a job still running. `render.queue.refresh` moved onto a new
+  `applySystemMutation` — patches, validation and WAL, but no history command — because a
+  once-a-second poll on `applyMutation` would fill the 200-entry undo stack, let undo "revert" a
+  status readback, and clear the redo stack on every tick. Note `asset.rescan` still has that
+  problem and is untouched.
 - **`timeline<->workflow sync` is one pointer pair, not semantic parity.** Only
   `Clip.workflowNodeId` <-> `media_source` `node.data.timelineClipId` is shared. Effects,
   tracks, and output settings are represented independently on each side and are never
