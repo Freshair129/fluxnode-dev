@@ -11,11 +11,30 @@
 //!   is dispatched onto [`tokio::task::spawn_blocking`]; the MCP layer above stays fully async.
 //! * Errors cross the boundary as `String`s. A tool that fails is reported as a *tool-level* error
 //!   (`CallToolResult::error`, so the caller sees the message) rather than a protocol error.
-//! * Side-effect gating: all tools are exposed, but `Mutating` / `LongJob` actions get a
-//!   `[mutating]` / `[long job]` marker prefixed to their advertised description so clients can warn
-//!   before invoking. No auth layer yet.
+//! * Side-effect gating: all tools are exposed, but `Mutating` / `LongJob` / `FrontendEdit`
+//!   actions get a `[mutating]` / `[long job]` / `[proposes edit]` marker prefixed to their
+//!   advertised description so clients can warn before invoking. No auth layer yet.
+//!
+//! ## Known limitation: proposals have no approver over MCP
+//!
+//! This transport calls `Registry::invoke` with `allow_writes = false`, and since the
+//! approve-gate landed that no longer means "refuse". A gated action is **not executed**, but the
+//! registry returns a `__fluxnode_proposal__`-tagged value that this handler currently forwards as
+//! `CallToolResult::success`. There is no approval channel over stdio, so an MCP client sees a
+//! successful call for work that never happened, and the 6 `FrontendEdit` tools can never be
+//! executed by an external client at all (they are materialized by the FluxNode frontend store).
+//! Of the 36 advertised tools, 25 (14 `Mutating` + 5 `LongJob` + 6 `FrontendEdit`) can only ever
+//! return a proposal here; only the 11 `ReadOnly` tools actually do work over this transport.
+//!
+//! Fix direction (not yet implemented): return `CallToolResult::error` for a proposal with a
+//! "requires approval in the FluxNode app" message, and either hide `FrontendEdit` tools from
+//! `list_tools` or mark them clearly as unavailable over this transport.
 //!
 //! Targeted crate: `rmcp` 0.16.x with features `["server", "transport-io"]`.
+//!
+//! Runtime status: **compile-verified only** — no real MCP client has driven this. `run_mcp` in
+//! `lib.rs` also still builds the full Tauri context while `tauri.conf.json` declares a `main`
+//! window, so headless window suppression is unresolved.
 #![allow(dead_code)]
 
 use std::borrow::Cow;
@@ -139,8 +158,15 @@ impl ServerHandler for RegistryMcp {
         let name_for_task = name.clone();
 
         // The MCP server is read-only by design (no confirmation UI exists over this transport):
-        // `allow_writes = false` means `Registry::invoke` refuses every `Mutating`/`LongJob`
-        // action before it runs, regardless of what the tool schema might suggest.
+        // `allow_writes = false` means `Registry::invoke` never *runs* a `Mutating`/`LongJob`
+        // action, regardless of what the tool schema might suggest. `FrontendEdit` actions never
+        // run in Rust at all.
+        //
+        // NOTE: it does not *reject* them either. Since the approve-gate landed, `invoke` returns
+        // `Ok(json!({ "__fluxnode_proposal__": { .. } }))` for a gated call, which falls through
+        // to the `Ok(value)` arm below and reaches the client as a SUCCESS result. Callers must
+        // therefore inspect the payload for `__fluxnode_proposal__` to tell "done" from "queued
+        // for an approval this transport cannot deliver" — see the module docs.
         let result =
             tokio::task::spawn_blocking(move || registry.invoke(&app, &name_for_task, args, false))
                 .await

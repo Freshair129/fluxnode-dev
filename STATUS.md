@@ -5,7 +5,9 @@ Living source of truth for "what actually works today" in FluxNode. Everything e
 doc, or a point-in-time audit — this file is the one meant to stay current and honest, and it
 links out to those rather than duplicating them.
 
-> Last reconciled: 2026-07-09, against `HANDOFF.md` (updated 2026-07-06) and
+> Last reconciled: 2026-08-19, against the repo at `74866a1` (a read-only coherence audit of
+> editor state / timeline<->graph parity / Action Registry / agent+MCP+CLI / media / render /
+> proof). Supersedes the 2026-07-09 reconciliation against `HANDOFF.md` and
 > `masterplan-completion-audit.md`.
 
 ## How to read this
@@ -23,10 +25,75 @@ focuses on the areas most likely to surprise a new contributor.
 ## Core application
 
 **Implemented.** Timeline editing, node-based workflow graph editing, audio scheduling,
-export/render queue with resilience (auto-retry, GPU-OOM fallback), undo/redo, keyboard
-shortcuts, onboarding, workspace sharing, and timeline<->workflow sync are all implemented and
-covered by at least some Vitest coverage and/or browser verification. Dual runtime (Tauri
-desktop vs. browser/localStorage dev mode) both work.
+export/render queue, undo/redo, keyboard shortcuts, onboarding, and dual runtime (Tauri desktop
+vs. browser/localStorage dev mode) are all implemented and covered by at least some Vitest
+coverage and/or browser verification. Timeline export is real: `render_graph.rs` compiles the
+multi-track timeline into one `-filter_complex` ffmpeg argv and runs it with real progress
+streamed into a per-job status file.
+
+Four things in this area were previously described here more strongly than the code supports.
+Corrected:
+
+- **The workflow graph does not affect the exported artifact.** `render_start` /
+  `start_export_job` compile the timeline only (`render_graph.rs`). The graph has a separate
+  compiler (`workflow_graph.rs`) reachable from exactly one caller — `workflow_render_node` —
+  which renders to a temp file, decodes frame 0 as a node preview, and deletes it. No
+  transform / color_correct / compositor / shader / AI node reaches the render.
+- ~~**"Render resilience (auto-retry, GPU-OOM fallback)" overstates the GPU path.**~~ **Fixed
+  (G-05).** The GPU-OOM fallback writes a reduced resolution into `job.config.resolution`, but
+  `render_retry` -> `restart_render_from_manifest` used to always rebuild the plan from the
+  manifest's *original* preset, so the retry silently re-ran the identical, already-failing
+  ffmpeg invocation. `render_retry` now takes an optional `resolutionOverrideWidth`/`Height`,
+  merged into the preset for that pass only (never written back to the manifest, so a later
+  manual retry cleanly resets to the original size); `retryFailedRender` computes which
+  resolution this attempt should actually use — the job's current (already-reduced) resolution
+  for an automatic retry, the original for a manual one — and sends it through
+  `retryRenderJob`. Extracted the merge into a pure `apply_resolution_override` so it has real
+  unit coverage despite the AppHandle-dependent glue around it staying untested, matching this
+  file's existing pure/glue split (`render_graph.rs` vs. `render_start`).
+  **Rust verification history:** initially blocked by environment contention — `git stash`
+  showed even an unmodified checkout failing to build, and `wmic` found concurrent
+  `cargo`/`cargo-clippy`/`rustc` processes from an unrelated project (`genesis-block-native`,
+  not part of this repo) hitting the same `target/` directory across two toolchains. Once that
+  cleared, `cargo check` passed cleanly (3m53s, no errors), confirming the change is
+  type-correct. CI then caught a real, narrow issue this local pass hadn't: `cargo fmt --check`
+  failed on two `assert_eq!` lines exceeding the width limit in the new tests — fixed and
+  pushed (`f244073`), diff confirmed to exactly match what CI reported. `cargo test --lib` has
+  since completed a full clean run locally: **80 passed, 0 failed**, including all three new
+  `apply_resolution_override` tests (44.6s test time on top of a 5m53s from-scratch build).
+  PR #13's own "Rust (fmt / clippy / test)" CI job is the remaining confirmation to watch.
+- ~~**Render progress is not polled automatically.**~~ **Fixed.** The store now owns a 1 s
+  poller (`startRenderStatusPolling` / `stopRenderStatusPolling`): idempotent, guarded against
+  overlapping ticks, and it retires itself once no job is active, so an idle app holds no timer.
+  The app shell keys it on whether anything is in flight, so it also re-arms for a project
+  reopened with a job still running. `render.queue.refresh` moved onto a new
+  `applySystemMutation` — patches, validation and WAL, but no history command — because a
+  once-a-second poll on `applyMutation` would fill the 200-entry undo stack, let undo "revert" a
+  status readback, and clear the redo stack on every tick. `asset.rescan` had the identical
+  problem — it fires on every asset-watch tick, not just the manual "Rescan" buttons — and is
+  now on `applySystemMutation` too.
+- **`timeline<->workflow sync` is one pointer pair, not semantic parity.** Only
+  `Clip.workflowNodeId` <-> `media_source` `node.data.timelineClipId` is shared. Effects,
+  tracks, and output settings are represented independently on each side and are never
+  reconciled. `validateProject` reports a broken link as a *warning* and nothing blocks on it.
+- **Workspace sharing is local-only.** `createWorkspaceShareLink` mints a
+  `https://share.fluxnode.app/...` string; there is no server, upload, or receiver behind it,
+  and collaborators/invites/roles are local project state. Treat as **Pending**, not
+  Implemented.
+- ~~**Browser mode does not render.**~~ **Fixed (G-03).** `pollRenderJobStatus` used to return a
+  hard-coded `completed` / 100% / 1 MB result in browser mode regardless of whether anything ran,
+  so the queue reported a successful export that never happened. `startExportJob`,
+  `startRenderJob`, and `pollRenderJobStatus` now all refuse in browser mode instead of
+  fabricating a result, and `enqueueRender` checks `isTauriRuntime()` first and pushes a clear
+  "Rendering requires the FluxNode desktop app" error rather than queuing a job that can never
+  actually render. Project persistence, autosave, and the WAL still genuinely work against
+  localStorage — this was specifically about render/export, not the whole browser runtime. Any
+  prior "browser-verified" render evidence (including the Section 11 4K60 proof flow cited in
+  `masterplan-performance-evidence-audit.md`) was measuring that stub and has been retracted
+  there; a real proof still needs capturing on the desktop runtime. One known e2e consequence:
+  `e2e/04-jobchips.spec.ts` can no longer reach queued/rendering/failed/completed states from a
+  real browser tab (that fabrication was the only way it ever could) — the affected tests are
+  `test.skip` with the reason inline; see the file's header comment and `e2e/README.md`.
 
 ## Workspace layouts (2026-07-18 UX redesign)
 
@@ -65,12 +132,30 @@ and hardware tiers beyond what's been directly benchmarked. See
 
 ## AI Copilot / agent layer
 
-Source of truth for this section is `HANDOFF.md` (2026-07-06) — read it in full before working
+**Whisper update (2026-07-19):** the Windows x64 whisper.cpp sidecar is now staged by
+`scripts/fetch-whisper.ps1`, checksum-verified, and bundled with its runtime DLLs and English base
+model as Tauri resources. The package contents were inspected in a Windows NSIS/MSI build; updater
+signing still needs `TAURI_SIGNING_PRIVATE_KEY`. The detailed source/version contract is in
+`docs/whisper-sidecar-installation-spec.md`. Piper and stable-diffusion.cpp remain unbundled.
+
+> **Staging gap:** `src-tauri/binaries/` is gitignored and `scripts/fetch-whisper.ps1` is not
+> invoked by `.github/workflows/ci.yml` or `release.yml` (only `fetch-ffmpeg.ps1` is). Since
+> `tauri.conf.json` declares the seven `binaries/whisper/*` files as required `bundle.resources`,
+> a tag build has no path to a correct bundle until that step is wired up. The paths are also
+> Windows-specific (`.exe` / `.dll`), so the macOS and Linux legs of the release matrix cannot
+> satisfy them at all.
+
+Source of truth for this section is `HANDOFF.md` — read it in full before working
 in `src-tauri/src/action.rs`, `brain/`, `media/`, or `mcp.rs`.
 
 **Implemented and E2E-verified:**
-- Action registry (30 actions) — single source of truth for the LLM tool schema, MCP tool
-  list, and CLI.
+- Action registry (**36 actions**) — single source of truth for the LLM tool schema, MCP tool
+  list, and CLI. That is 27 wrappers over the 48 registered Tauri commands, plus 3 media actions
+  (`generate_image` / `transcribe` / `synthesize`) and 6 `FrontendEdit` timeline ops
+  (`timeline_remove_range` / `_split_clip` / `_trim_clip` / `_move_clip` / `_add_clip` /
+  `_set_clip_property`). By side effect: 11 ReadOnly, 14 Mutating, 5 LongJob, 6 FrontendEdit.
+  The other 21 commands have no Action wrapper — notably `workflow_render_node` and
+  `render_retry`, so no agent/MCP/CLI caller can preview a node or retry a render.
 - Agent loop (`brain/`) with write-gating (`allow_writes`) against a local Ollama backend
   (default model `qwen3.5:4b`).
 - Headless `--agent "<message>"` CLI path, verified end-to-end (agent -> `asset_probe` -> real
@@ -79,19 +164,52 @@ in `src-tauri/src/action.rs`, `brain/`, `media/`, or `mcp.rs`.
   ComfyUI backend works if a local ComfyUI server is running.
 
 **Partial / not verified:**
-- No in-app chat/voice UI panel yet — the brain is reachable only via command, CLI, or MCP,
-  with no UI surface in `src/features/`.
+- **In-app copilot panel — both proposal kinds are now approvable.** `CopilotPanel.tsx`
+  (lazy-loaded from `App.tsx`) calls `agent_chat` and hands the returned proposals to
+  `ProposalReview`, which splits them with `partitionProposals`:
+  - **timeline edits** — ghost preview (clip-count delta per track, computed with the same ops
+    the executor runs), then one "Approve & apply" that lands as a single undo step;
+  - **backend actions** — one **Run** control per action, each re-invoking the registry with
+    `allow_writes = true` (approve-gate step A5). Deliberately per-action: these are real,
+    non-undoable side effects, so there is no bulk approve and **no session-wide writes
+    toggle**. Executed sequentially; a failure is recorded and does not stop the rest;
+  - **unsupported** — a malformed or unknown frontend proposal is shown and never run.
+
+  Results appear as `copilotOutcomes` (applied / failed / unsupported, one per proposal). Backend
+  execution deliberately does **not** go through `applyMutation`: a backend effect is not
+  undoable, and putting it in history would let undo hide a job that is still running.
+
+  Remaining gaps: no streaming, no tool-activity trace, no conversation history, no cancel (a
+  hung Ollama blocks for up to 180s behind a "Thinking…" label), no reachability check, and the
+  panel is reachable only from a floating button — not the command palette, the shortcut
+  registry, or the header menus. There is also still no UI entry point for `generate_image` /
+  `synthesize` outside a copilot proposal, and their artifacts are still not registered as
+  project assets.
+- **Copilot timeline ops cannot maintain the workflow link.** The shared pure ops have the
+  signature `(tracks: Track[], op, makeId) => Track[]` and have no access to `project.workflow`,
+  so an approved `timeline_remove_range` that deletes a linked clip leaves
+  `node.data.timelineClipId` dangling — whereas the store's own `selection.delete` clears it.
+  The same user-visible operation keeps the invariant via the mouse and breaks it via the agent.
 - In-process llama.cpp (`brain/llama.rs`, behind `--features llama`) is a **stub**, not a real
   implementation. Building it locally also needs CMake + libclang, which are not guaranteed to
   be present (see `docs/AI Copilot Binary Setup.md`).
 - `--mcp` (the MCP stdio server) is compile-verified only — it has never been driven by a real
-  MCP client end-to-end.
-- Sidecar binaries for whisper / piper / stable-diffusion.cpp are **not bundled**;
-  `src-tauri/binaries/` currently only ships ffmpeg/ffprobe. The sidecar backends are wired but
-  registered opt-in via env vars pointing at binaries the operator supplies themselves.
-- `cargo test` / `cargo clippy` / the full `npm` gate had not been run against the agent-layer
-  changes as of the last handoff — the new CI workflow (`.github/workflows/ci.yml`) now runs
-  these on every push/PR, which will surface any regressions here going forward.
+  MCP client end-to-end. Note also that since the approve-gate landed, a gated call returns a
+  **success** result carrying a `__fluxnode_proposal__` value rather than an error, and MCP has
+  no approval channel — so 25 of the 36 advertised tools (every Mutating/LongJob/FrontendEdit
+  one) can only ever return a proposal an MCP client cannot act on; just the 11 ReadOnly tools
+  actually do work over that transport. `run_mcp` also still builds the full Tauri context, and
+  `tauri.conf.json` declares a `main` window, so headless window suppression is unresolved.
+- Sidecar binaries: **ffmpeg/ffprobe and whisper.cpp (Windows x64) are bundled** — see the
+  whisper update above, including its CI staging gap. Piper and stable-diffusion.cpp are **not
+  bundled**: those backends are wired but registered opt-in via env vars
+  (`FLUXNODE_SD_BIN`+`_MODEL`, `FLUXNODE_PIPER_BIN`+`_VOICE`) pointing at binaries the operator
+  supplies. Their CLI flags were cross-checked against upstream docs but never run.
+- CI (`.github/workflows/ci.yml`) now runs lint, typecheck, vitest, build, `cargo fmt --check`,
+  `cargo clippy` and `cargo test` on every push/PR — but **`cargo clippy` and
+  `npm run format:check` are `continue-on-error`**, so neither is a real gate yet, and the
+  Playwright e2e suite is not run in CI at all. The e2e suite also pins `workspaceLayout:
+  'strata'`, so the **default Studio layout has no e2e coverage**.
 
 ## Repository / infra hardening (this pass)
 
@@ -99,7 +217,11 @@ in `src-tauri/src/action.rs`, `brain/`, `media/`, or `mcp.rs`.
   (`.github/workflows/release.yml`, Windows/macOS/Linux matrix via `tauri-apps/tauri-action`)
   now exist. Only the Windows path has actually been proven by a real build; macOS/Linux
   bundle targets and a `fetch-ffmpeg.sh` equivalent for those OSes are still needed before the
-  release workflow can be trusted end-to-end there.
+  release workflow can be trusted end-to-end there — and the Windows-only whisper
+  `bundle.resources` entries now block those legs outright until they are made
+  platform-conditional. Neither workflow stages whisper (see the staging gap above).
+- Two CI steps are deliberately non-blocking today (`continue-on-error`): `cargo clippy` and
+  `npm run format:check`. The Playwright suite (`npm run test:e2e`) is not wired into CI.
 - `LICENSE` is **provisional** — proprietary/all-rights-reserved for now, pending an explicit
   business decision on final licensing (see the note at the top of `LICENSE`).
 - Root spec/audit docs with spaces in their filenames were renamed to kebab-case; see

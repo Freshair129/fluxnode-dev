@@ -18,6 +18,7 @@ import { checkNetworkConnectivity } from '../services/connectivity/check-network
 import { useTimelineAudio, type TimelineAudioClip } from '../services/audio'
 import { ErrorToasts } from '../features/notifications/ErrorToasts'
 import { useProjectStore } from '../store/project-store'
+import { hasActiveRenderJobs } from '../domain/project/jobLedger'
 import { focusShellRegion, resolveShellFocusTargets } from '../features/workspace/shellFocusTargets'
 import { StatusBar } from '../features/status/statusBar/StatusBar'
 import type { StatusBarAction, StatusDrawerId } from '../features/status/statusBar/segments'
@@ -94,6 +95,9 @@ export default function App() {
   const recordViewSwitchMetric = useProjectStore((state) => state.recordViewSwitchMetric)
   const rescanAssetStatuses = useProjectStore((state) => state.rescanAssetStatuses)
   const refreshRuntimeHealth = useProjectStore((state) => state.refreshRuntimeHealth)
+  const startRenderStatusPolling = useProjectStore((state) => state.startRenderStatusPolling)
+  const stopRenderStatusPolling = useProjectStore((state) => state.stopRenderStatusPolling)
+  const hasActiveRenders = useProjectStore((state) => hasActiveRenderJobs(state.project.output.queue))
   const syncResilienceState = useProjectStore((state) => state.syncResilienceState)
   const toggleComputeMode = useProjectStore((state) => state.toggleComputeMode)
   const loadAppPreferences = useProjectStore((state) => state.loadAppPreferences)
@@ -410,6 +414,20 @@ export default function App() {
 
     return () => window.clearInterval(timer)
   }, [detachedPanel, refreshRuntimeHealth])
+
+  // Watch in-flight renders. The backend streams ffmpeg progress into a per-job status file
+  // continuously; without this the queue only ever moved when someone pressed Refresh. Keyed on
+  // whether anything is actually in flight, so an idle app holds no timer — and it re-arms for a
+  // project reopened with a job still running, not just for one queued in this session.
+  useEffect(() => {
+    if (detachedPanel || !hasActiveRenders) {
+      return
+    }
+
+    startRenderStatusPolling()
+
+    return () => stopRenderStatusPolling()
+  }, [detachedPanel, hasActiveRenders, startRenderStatusPolling, stopRenderStatusPolling])
 
   useEffect(() => {
     if (detachedPanel) {

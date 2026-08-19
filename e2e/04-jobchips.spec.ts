@@ -8,28 +8,30 @@ import { bootFreshWithClock, dismissWelcomeModal, expect, freezeClock, openExpor
  * stubbing. Each test opens the sheet first via the status bar's "jobs" segment (`openExportSheet`
  * fixture helper) since, unlike the pre-item-9 SystemPanels layout, it is not visible by default.
  *
- * IMPORTANT — read before touching this file: one of the six spec-H job-ledger states this item
- * is supposed to cover (the `rendering` row: determinate meter + ETA + cancel) is IMPOSSIBLE to
- * reach from a real browser tab with no Tauri backend, and this is a fact about the app's code,
- * not a limitation of this harness. Traced end to end:
+ * IMPORTANT — read before touching this file: as of the G-03 fix (project-store.ts `enqueueRender`,
+ * services/ipc/render-job.ts, services/ipc/export-job.ts), "Queue Render" in a plain browser tab
+ * with no Tauri backend no longer creates a job at all — it pushes an accurate error instead. That
+ * closed a real correctness bug (browser mode used to silently fabricate `status: 'completed'` on
+ * every queued job the moment "Refresh Status" was clicked — see the git history around G-03 for the
+ * full trace — which was actively misleading and, per the project's own performance-evidence audit,
+ * had been cited as if it were real render proof). The consequence for THIS spec is large: FIVE of
+ * spec H's six job-ledger states — `queued`, `rendering`, `paused`, `failed`, `completed` — are now
+ * ALL unreachable from a real browser tab with no Tauri backend, not just `rendering`/`paused` as
+ * this file used to document. `getActiveRenderJob` (the target of "Simulate Failure" / "Simulate GPU
+ * OOM" / "Simulate Quota") requires an existing `queued` or `rendering` job in `project.output.queue`
+ * — with `enqueueRender` refusing outright in browser mode, that queue never gets a first entry, so
+ * none of the "Simulate *" debug buttons have anything to act on either.
  *
- *   - `enqueueRender` (project-store.ts) always pushes a NEW job with `status: 'queued'`.
- *   - "Refresh Status" calls `refreshRenderStatuses`, which calls `pollRenderJobStatus` per queued
- *     job (src/services/ipc/render-job.ts). That function's `!isTauriRuntime()` branch — the only
- *     branch reachable in a plain Chromium tab — unconditionally returns
- *     `{ status: 'completed', progress: 100, ... }`. There is no intermediate `'rendering'` status
- *     anywhere in the browser-fallback path; a queued job goes straight to completed the moment
- *     you click Refresh.
- *   - Grepping the whole `src/` tree for `status: 'rendering'` / `status = 'rendering'` turns up
- *     ONLY test fixtures (`jobLedger.test.ts`, `JobChip.test.tsx`) that construct a `RenderJob`
- *     object directly — never a real code path.
+ * Per the task brief this suite was authored under, it does not stub the store to fake these states
+ * (see fixtures.ts's header comment) — so, correctly, none of them can be exercised here any more.
+ * The tests below that verify them are `test.skip`, not deleted or rewritten to fake it, so a) the
+ * intended coverage stays visible and re-enablable, and b) nothing in this file quietly asserts
+ * behavior that no longer exists. Closing this for real needs a Tauri-backed e2e variant (drive the
+ * actual Rust render queue so a job genuinely reaches every state) — out of this item's scope, same
+ * conclusion the file already reached for `rendering`/`paused` before this fix widened it.
  *
- * So: `RenderingChip`'s determinate `role="progressbar"` meter, and `PausedChip` (which requires
- * an already-`rendering` job to pause), are asserted ONLY as "not producible in this browser
- * context" below, per the task brief's instruction not to stub the store to fake it. Everything
- * else in spec H's table — queued (no bare spinner, M.5), failed (danger + inline non-modal log),
- * and completed (accent flash -> success settle, 8s auto-clear, hover-pin) — IS reachable through
- * the real UI and is asserted for real.
+ * What DOES still have real coverage here: that clicking "Queue Render" in this environment tells
+ * the user the truth (no job appears; a clear "desktop app required" error does) rather than lying.
  */
 
 const EXPORT_QUEUE = () => 'section[aria-label="Export queue"]'
@@ -40,42 +42,31 @@ test.beforeEach(async ({ freshPage }) => {
 })
 
 test.describe('JobChip (item 4)', () => {
-  test('Queue Render produces a real queued RenderJob chip (no bare spinner)', async ({ freshPage: page }) => {
+  test('Queue Render in browser mode reports the truth: no job, a clear desktop-required error', async ({
+    freshPage: page,
+  }) => {
     const ledger = page.locator('[data-meridian-ledger]')
     await expect(ledger.getByText('No jobs. G regenerates the selected node.')).toBeVisible()
 
     await page.locator(`${EXPORT_QUEUE()} button`, { hasText: 'Queue Render' }).click()
 
-    const queuedChip = ledger.locator('[data-meridian-jobchip="queued"]')
-    await expect(queuedChip).toBeVisible()
-    // M.5: queued state must show queue position/elapsed text, never a bare/indeterminate spinner
-    // — and in particular must NOT render a Meter (role=progressbar) at all.
-    await expect(queuedChip.getByText(/queued/i)).toBeVisible()
-    await expect(queuedChip.locator('[role="progressbar"]')).toHaveCount(0)
-  })
-
-  test('confirms the browser-mode ceiling: a queued job never reaches "rendering"', async ({
-    freshPage: page,
-  }) => {
-    const ledger = page.locator('[data-meridian-ledger]')
-    await page.locator(`${EXPORT_QUEUE()} button`, { hasText: 'Queue Render' }).click()
-    await expect(ledger.locator('[data-meridian-jobchip="queued"]')).toBeVisible()
-
-    // "Refresh Status" is the only UI path that advances a queued job's status in this app. In a
-    // real Tauri build it would poll toward incremental `rendering` progress; in this plain
-    // browser tab (see file header) `pollRenderJobStatus`'s browser-fallback branch always
-    // returns `completed` immediately. This is the sanctioned way to reach a completed chip
-    // below, AND documents the exact ceiling: a determinate `rendering` meter can't be produced
-        // here without stubbing the store, which the task brief forbids.
-    await page.locator(`${EXPORT_QUEUE()} button`, { hasText: 'Refresh Status' }).click()
-
-    await expect(ledger.locator('[data-meridian-jobchip="rendering"]')).toHaveCount(0)
-    await expect(ledger.locator('[data-meridian-jobchip="completed"]')).toBeVisible()
+    // The bug this guards against: browser mode used to push a `status: 'queued'` job that then
+    // silently fabricated `'completed'` on refresh. Now nothing is queued at all.
+    await expect(ledger.locator('[data-meridian-jobchip]')).toHaveCount(0)
+    // ErrorToasts.tsx — the floating toast stack, not a form control, hence a raw selector rather
+    // than getByLabel (which targets labelled form controls).
+    await expect(page.locator('[aria-label="Error notifications"]')).toContainText(/desktop app/i)
   })
 
   test('Simulate Failure produces a danger-tone chip with an inline (non-modal) expandable log', async ({
     freshPage: page,
   }) => {
+    test.skip(
+      true,
+      'Requires an existing queued job in project.output.queue. As of the G-03 fix, "Queue Render" ' +
+        'never creates one in browser mode (see this file\'s header comment) — needs a Tauri-backed ' +
+        'e2e variant to seed a real job.',
+    )
     const ledger = page.locator('[data-meridian-ledger]')
     await page.locator(`${EXPORT_QUEUE()} button`, { hasText: 'Queue Render' }).click()
     await expect(ledger.locator('[data-meridian-jobchip="queued"]')).toBeVisible()
@@ -121,6 +112,11 @@ test.describe('JobChip (item 4)', () => {
   })
 
   test('a completed chip auto-clears after ~8s, but stays pinned while hovered', async ({ freshPage: page }) => {
+    test.skip(
+      true,
+      'Requires a real completed job. As of the G-03 fix, "Refresh Status" no longer fabricates ' +
+        '`completed` in browser mode (that fabrication was the bug) — needs a Tauri-backed e2e variant.',
+    )
     test.setTimeout(25_000)
     const ledger = page.locator('[data-meridian-ledger]')
 
@@ -144,6 +140,11 @@ test.describe('JobChip (item 4)', () => {
   })
 
   test('hovering a completed chip pins it past the 8s auto-clear window', async ({ freshPage: page }) => {
+    test.skip(
+      true,
+      'Requires a real completed job. As of the G-03 fix, "Refresh Status" no longer fabricates ' +
+        '`completed` in browser mode (that fabrication was the bug) — needs a Tauri-backed e2e variant.',
+    )
     test.setTimeout(25_000)
     const ledger = page.locator('[data-meridian-ledger]')
 
@@ -189,6 +190,11 @@ test.describe('JobChip (item 4)', () => {
  */
 test.describe('JobChip completed-chip flash (item 4, deterministic via page.clock)', () => {
   test('mounts in the accent flash tone, then settles to success after 400ms', async ({ page }) => {
+    test.skip(
+      true,
+      'Requires a real completed job. As of the G-03 fix, "Refresh Status" no longer fabricates ' +
+        '`completed` in browser mode (that fabrication was the bug) — needs a Tauri-backed e2e variant.',
+    )
     await bootFreshWithClock(page)
     await openExportSheet(page)
     const ledger = page.locator('[data-meridian-ledger]')

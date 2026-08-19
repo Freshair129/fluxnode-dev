@@ -30,7 +30,13 @@ import { activeViewForRatio, clampHorizonRatio, DEFAULT_HORIZON_RATIO, defaultRa
 import { clampStudioInspectorWidth, clampStudioMediaWidth, clampStudioTimelineHeight } from '../domain/project/studio-layout'
 import { DEFAULT_DENSITY_MODE, normalizeDensityMode, type DensityMode } from '../domain/project/density'
 import { validateProject, type ProjectValidationIssue } from '../domain/project/validators'
-import { applyProposalToTracks, isSupportedFrontendProposal, type Proposal } from '../domain/copilot/proposals'
+import {
+  applyProposalToTracks,
+  isSupportedFrontendProposal,
+  partitionProposals,
+  type Proposal,
+  type ProposalOutcome,
+} from '../domain/copilot/proposals'
 import type {
   AppPreferences,
   AppError,
@@ -83,7 +89,15 @@ import {
   type WorkflowValidationIssue,
 } from '../domain/workflow/validation'
 import { startExportJob } from '../services/ipc/export-job'
-import { cancelRenderJob, pauseRenderJob, pollRenderJobStatus, resumeRenderJob, retryRenderJob, startRenderJob } from '../services/ipc/render-job'
+import {
+  cancelRenderJob,
+  pauseRenderJob,
+  pollRenderJobStatus,
+  RENDER_UNAVAILABLE_IN_BROWSER_MESSAGE,
+  resumeRenderJob,
+  retryRenderJob,
+  startRenderJob,
+} from '../services/ipc/render-job'
 import { generateAssetProxy } from '../services/ipc/proxy'
 import { copyAssetIntoProject } from '../services/ipc/asset-copy'
 import { buildFallbackProbe, probeAssetMetadata } from '../services/ipc/asset-probe'
@@ -91,6 +105,8 @@ import { generateAssetThumbnail } from '../services/ipc/thumbnail'
 import { decodePreviewFrame } from '../services/ipc/video-preview'
 import { renderNodePreview } from '../services/ipc/node-preview'
 import { generateComfyNode, pingComfy } from '../services/ipc/comfy'
+import { invokeAction } from '../services/ipc/action-invoke'
+import { hasActiveRenderJobs, isActiveRenderJob } from '../domain/project/jobLedger'
 import { isTauriRuntime } from '../services/ipc/tauri-runtime'
 import { generateWaveformPeaks } from '../services/ipc/waveform'
 import { pickMediaFile, pickRelinkDirectory } from '../services/ipc/file-dialog'
@@ -138,7 +154,11 @@ interface ProjectStoreState {
   workflowExecutionOrder: string[]
   /** Pending copilot proposals awaiting approval — read by the timeline to render ghost edits. */
   copilotProposals: Proposal[]
+  /** What happened to the last approved batch, one entry per proposal. */
+  copilotOutcomes: ProposalOutcome[]
   setCopilotProposals: (proposals: Proposal[]) => void
+  /** Start a fresh copilot review cycle: drop pending proposals and the last batch's outcomes. */
+  resetCopilotSession: () => void
   setActiveView: (view: UserInterfaceState['activeView']) => void
   setHorizonRatio: (ratio: number) => void
   toggleStageRowCollapse: (side: StageRowSide) => void
@@ -324,6 +344,12 @@ interface ProjectStoreState {
   deleteSelected: () => void
   splitSelectedClip: () => void
   applyCopilotProposals: (proposals: Proposal[]) => void
+  /**
+   * Approve a batch of copilot proposals and execute each one the way its `site` requires:
+   * frontend edits through the store as one undoable step, backend actions through the Rust
+   * registry with writes allowed. Records one `ProposalOutcome` per proposal.
+   */
+  approveCopilotProposals: (proposals: Proposal[]) => Promise<void>
   connectSelectedNodeToOutput: () => void
   disconnectSelectedNodeEdges: () => void
   moveWorkflowNodes: (nodeIds: string[], deltaX: number, deltaY: number) => void
@@ -341,6 +367,13 @@ interface ProjectStoreState {
   clearWorkflowConnectionFeedback: () => void
   enqueueRender: () => Promise<void>
   refreshRenderStatuses: () => Promise<void>
+  /**
+   * Begin watching in-flight render jobs. Idempotent, and retires itself once no job is active,
+   * so an idle app holds no timer. `queueRender` restarts it; the app shell starts it on mount so
+   * a project reopened with a job still running picks it back up.
+   */
+  startRenderStatusPolling: () => void
+  stopRenderStatusPolling: () => void
   pauseActiveRender: () => Promise<void>
   resumePausedRender: (jobId?: string) => Promise<void>
   cancelActiveRender: () => Promise<void>
@@ -400,6 +433,15 @@ const recoveryTimers: Record<RecoveryKind, ReturnType<typeof window.setTimeout> 
   comfyConnection: null,
 }
 const renderRetryTimers = new Map<string, ReturnType<typeof window.setTimeout>>()
+/**
+ * How often to re-read the backend render status files while a job is in flight. The Rust side
+ * streams ffmpeg's `-progress` output into `{job}.status.json` continuously; 1 s is fast enough
+ * for a progress bar to feel live and slow enough that reading a few small JSON files is free.
+ */
+const RENDER_STATUS_POLL_MS = 1_000
+let renderStatusPollTimer: ReturnType<typeof window.setInterval> | null = null
+/** Guards against a slow poll overlapping the next tick. */
+let renderStatusPollInFlight = false
 const pendingPreviewFrameRequests = new Set<string>()
 const pendingNodePreviewRequests = new Set<string>()
 
@@ -2534,6 +2576,52 @@ function applyMutation(
   appendWalSafely(set, { id: commandId, timestamp: walTimestamp, type, label, project: after, patches })
 }
 
+/**
+ * Like `applyMutation`, but for project state the *machine* authored rather than the user —
+ * background render-status polls, asset-watcher results. It still produces patches, revalidates,
+ * and appends to the WAL (so crash recovery stays complete); it just never pushes a history
+ * command.
+ *
+ * That distinction matters three ways: a background write must not be undoable (undo would revert
+ * a *fact*, not an edit — e.g. dropping a queue row while ffmpeg keeps encoding), must not clear a
+ * pending redo, and must not evict the user's real edits from the bounded 200-entry history. It
+ * also leaves `ui.statusMessage` alone, so a 1 Hz poll cannot spam the status bar.
+ */
+function applySystemMutation(
+  set: StoreSetter,
+  get: () => ProjectStoreState,
+  type: string,
+  label: string,
+  mutate: (project: FluxNodeProject) => void,
+) {
+  const before = get().project
+  const [after, patches] = produceWithPatches(before, (draft) => {
+    mutate(draft as FluxNodeProject)
+    syncUpdatedAt(draft as FluxNodeProject)
+  })
+
+  if (patches.length === 0) {
+    return
+  }
+
+  const validationState = getValidationState(after)
+
+  set((state) => ({
+    project: after,
+    runtimeCacheMetrics: buildRuntimeCacheMetrics({ ...state, project: after }),
+    ...validationState,
+  }))
+
+  appendWalSafely(set, {
+    id: nextId(type),
+    timestamp: new Date().toISOString(),
+    type,
+    label,
+    project: after,
+    patches,
+  })
+}
+
 function applyGroupedMutations(
   set: StoreSetter,
   get: () => ProjectStoreState,
@@ -2662,6 +2750,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   comfyConnected: null,
   assetThumbnails: {},
   copilotProposals: [],
+  copilotOutcomes: [],
   ...getValidationState(createDefaultProject()),
   ui: {
     // Boot into the Edit workspace (studio layout's timeline-first grammar). Node-centric verbs
@@ -2693,7 +2782,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     timelineClipboard: [],
     workflowClipboard: createEmptyWorkflowClipboard(),
   },
+  // Purely the pending list — the panel narrows it as each proposal is approved, and the outcomes
+  // recorded so far must survive that. Use `resetCopilotSession` to start a fresh review cycle.
   setCopilotProposals: (proposals) => set({ copilotProposals: proposals }),
+  resetCopilotSession: () => set({ copilotProposals: [], copilotOutcomes: [] }),
   setActiveView: (view) =>
     set((state) => ({
       ui: { ...state.ui, ...computeActiveViewUiPatch(state.ui, view) },
@@ -3936,7 +4028,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       })),
     )
 
-    applyMutation(set, get, 'asset.rescan', 'Asset statuses rescanned', (project) => {
+    // Re-syncing status with the filesystem is a fact, not a user edit — see applySystemMutation's
+    // doc comment. It also fires on every asset-watch tick (App.tsx), not just the manual "Rescan"
+    // buttons, so leaving it on applyMutation would fill the undo stack from background activity.
+    applySystemMutation(set, get, 'asset.rescan', 'Asset statuses rescanned', (project) => {
       for (const { assetId, inspection } of inspections) {
         const asset = project.assets.assets[assetId]
 
@@ -6141,6 +6236,60 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       project.timeline.tracks = tracks
     })
   },
+  approveCopilotProposals: async (proposals) => {
+    const { frontend, backend, unsupported } = partitionProposals(proposals)
+    const outcomes: ProposalOutcome[] = []
+
+    // Frontend edits first, as ONE undoable step (approval == undo step), so the timeline is
+    // already in its approved shape if a backend action below reads project state.
+    if (frontend.length > 0) {
+      get().applyCopilotProposals(frontend)
+      for (const proposal of frontend) {
+        outcomes.push({
+          action: proposal.action,
+          site: 'frontend',
+          status: 'applied',
+          detail: 'Applied to the timeline as part of one undoable edit.',
+        })
+      }
+    }
+
+    // Backend actions run one at a time, in the order the user approved them: they are real side
+    // effects (files written, jobs started), so a failure must not cancel the rest and must not
+    // be retried automatically. Deliberately NOT wrapped in applyMutation — a backend effect is
+    // not undoable, and putting it in history would let undo hide a job that is still running.
+    for (const proposal of backend) {
+      try {
+        await invokeAction(proposal.action, proposal.args, { allowWrites: true })
+        outcomes.push({
+          action: proposal.action,
+          site: 'backend',
+          status: 'applied',
+          detail: `Ran ${proposal.action}.`,
+        })
+      } catch (error) {
+        outcomes.push({
+          action: proposal.action,
+          site: 'backend',
+          status: 'failed',
+          detail: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+
+    for (const proposal of unsupported) {
+      outcomes.push({
+        action: proposal.action,
+        site: proposal.site,
+        status: 'unsupported',
+        detail: 'This build cannot materialize that edit, so it was not run.',
+      })
+    }
+
+    // Append rather than replace: backend actions are approved one at a time, and the user needs
+    // to still see what the earlier ones did. `setCopilotProposals` resets the list.
+    set((state) => ({ copilotOutcomes: [...state.copilotOutcomes, ...outcomes] }))
+  },
   connectSelectedNodeToOutput: () =>
     applyMutation(set, get, 'edge.add', 'Selected node connected to output', (project) => {
       const selectedNodeId = get().ui.selectedNodeId
@@ -6364,6 +6513,25 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       },
     })),
   enqueueRender: async () => {
+    // Checked first, before validation: no amount of fixing the project makes rendering possible
+    // in browser preview mode, so lead with the real reason rather than a validation-shaped one.
+    // `startExportJob`/`startRenderJob` also refuse this on their own (defense in depth — nothing
+    // downstream can silently succeed even if this check is ever bypassed), but gating here means
+    // a browser-preview user never sees the generic "export handoff could not be created" wording,
+    // which would send them chasing a permissions problem that does not exist.
+    if (!isTauriRuntime()) {
+      pushAppError(set, {
+        id: `${nextId('error')}-render-browser-unavailable`,
+        category: 'render_failed',
+        message: RENDER_UNAVAILABLE_IN_BROWSER_MESSAGE,
+        userMessage: 'Rendering requires the FluxNode desktop app.',
+        recoverable: false,
+        suggestedAction: 'Open this project in the FluxNode desktop app to export.',
+        createdAt: new Date().toISOString(),
+      })
+      return
+    }
+
     const projectSnapshot = cloneProject(get().project)
     const renderBlockingIssues = collectRenderBlockingIssues(projectSnapshot)
     const activePreset =
@@ -6473,10 +6641,38 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       })
     })
   },
+  startRenderStatusPolling: () => {
+    if (renderStatusPollTimer !== null) {
+      return
+    }
+    renderStatusPollTimer = window.setInterval(() => {
+      // Skip a tick rather than stacking refreshes if the previous one is still in flight.
+      if (renderStatusPollInFlight) {
+        return
+      }
+      renderStatusPollInFlight = true
+      void (async () => {
+        try {
+          await get().refreshRenderStatuses()
+        } finally {
+          renderStatusPollInFlight = false
+        }
+        // Retire the timer as soon as nothing is in flight; `queueRender` restarts it.
+        if (!hasActiveRenderJobs(get().project.output.queue)) {
+          get().stopRenderStatusPolling()
+        }
+      })()
+    }, RENDER_STATUS_POLL_MS)
+  },
+  stopRenderStatusPolling: () => {
+    if (renderStatusPollTimer === null) {
+      return
+    }
+    window.clearInterval(renderStatusPollTimer)
+    renderStatusPollTimer = null
+  },
   refreshRenderStatuses: async () => {
-    const queuedJobs = get().project.output.queue.filter(
-      (job) => job.status === 'queued' || job.status === 'rendering' || job.status === 'paused',
-    )
+    const queuedJobs = get().project.output.queue.filter(isActiveRenderJob)
 
     if (queuedJobs.length === 0) {
       return
@@ -6526,7 +6722,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
           .filter((entry) => canOpenPathInShell(entry.outputPath))
       : []
 
-    applyMutation(set, get, 'render.queue.refresh', 'Render queue refreshed', (project) => {
+    applySystemMutation(set, get, 'render.queue.refresh', 'Render queue refreshed', (project) => {
       for (const entry of statuses) {
         const job = project.output.queue.find((item) => item.id === entry.jobId)
 
@@ -6881,8 +7077,20 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
     const automatic = options?.automatic === true
 
+    // What THIS attempt should render at — computed before the IPC call so the backend and the
+    // local state the mutation below sets never disagree. An automatic retry keeps the job's
+    // current config.resolution as-is (already reduced by scheduleRenderAutoRetry when this was a
+    // GPU-OOM fallback, unchanged otherwise). A manual retry always sends the ORIGINAL resolution,
+    // matching the reset the mutation below performs — read job.config.resolution here instead and
+    // a manual retry after a failed fallback would send the stale reduced size while the UI
+    // simultaneously displayed the original, a mismatch between what rendered and what the queue
+    // card claims.
+    const retryResolution = automatic
+      ? targetJob.config.resolution
+      : (targetJob.originalResolution ?? targetJob.config.resolution)
+
     try {
-      await retryRenderJob(targetJob.id, true)
+      await retryRenderJob(targetJob.id, true, retryResolution)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Render retry failed to re-arm.'
       pushAppError(set, {

@@ -24,7 +24,7 @@ Reason:
 - the repository now also contains on-demand preview prefetch around the playhead and a bounded concurrent decode pipeline
 - the app shell now lazy-loads heavy workspace views and modals so the entry bundle is smaller and the previous 500 kB warning is cleared
 - the Section 11 proof flow now captures large-canvas interaction timing for benchmark pan traversal and zoom sweep, not only fit-to-view and view-switch samples
-- the Section 11 audit panel now includes a browser-verified end-to-end `4K 60 Master` render proof flow, including queue completion, audit-card promotion to `Ready`, and browser-safe handling for `browser-local://...` outputs
+- ~~the Section 11 audit panel now includes a browser-verified end-to-end `4K 60 Master` render proof flow, including queue completion, audit-card promotion to `Ready`, and browser-safe handling for `browser-local://...` outputs~~ **Retracted (see 11.8b below).** The "browser-verified" completion this bullet described was `pollRenderJobStatus`'s browser-mode fallback unconditionally reporting `status: 'completed'` — no ffmpeg ever ran. That fabrication has been fixed (browser mode now refuses to queue a render at all, with an accurate error); the flow this bullet claims as evidence can no longer be reproduced, because it never proved anything to begin with.
 - the repository does not yet contain requirement-by-requirement benchmark proof for every numeric target in `MASTERPLAN.md`
 
 ## Evidence That Exists Now
@@ -221,15 +221,29 @@ Direct evidence:
 
 ### 11.8b 4K/60 Render Proof
 
-Status: `Implemented`
+Status: ~~`Implemented`~~ **`Invalid evidence` — see correction below.**
 
-Evidence:
+> **Correction:** every bullet under "Direct evidence" below describes running this proof flow in
+> browser runtime, where `pollRenderJobStatus` used to unconditionally return `status: 'completed'`
+> regardless of whether any render ran — which, in browser mode, none ever did (there is no ffmpeg
+> to run). "Browser-runtime verification confirmed a completed job" therefore verified nothing; it
+> replayed a hard-coded fake status back at the UI. That fabrication has since been fixed: browser
+> mode now refuses to queue a render at all, with an accurate "requires the desktop app" error, so
+> this exact flow can no longer even be attempted there. This status line is left struck through
+> rather than deleted so the mistake — self-assessed evidence built on an unverified fabrication —
+> stays visible per this document's own header warning. A real 4K/60 render proof still needs to be
+> captured, on the Tauri desktop runtime, before this requirement can be marked `Ready` again.
+> `src/features/status/SystemPanels.tsx` also no longer exists — this panel's functionality moved
+> to `src/features/diagnostics/DiagnosticsPanel.tsx` under the item-9 status-bar redesign — so the
+> evidence list below is stale on that point too, independent of the fabrication issue.
+
+Evidence (as originally written; see correction above):
 
 - `src/features/status/SystemPanels.tsx`
 - `src/store/project-store.ts`
 - `src/services/ipc/app-shell.ts`
 
-Direct evidence:
+Direct evidence (as originally written; see correction above):
 
 - the Section 11 audit panel can now run a dedicated `Run 4K/60 Render Proof` flow
 - the proof waits for queue polling and records the completed job's resolution, frame rate, compute mode, audio mode, output size, and output path
