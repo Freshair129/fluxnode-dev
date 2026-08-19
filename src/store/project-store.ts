@@ -4020,7 +4020,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       })),
     )
 
-    applyMutation(set, get, 'asset.rescan', 'Asset statuses rescanned', (project) => {
+    // Re-syncing status with the filesystem is a fact, not a user edit — see applySystemMutation's
+    // doc comment. It also fires on every asset-watch tick (App.tsx), not just the manual "Rescan"
+    // buttons, so leaving it on applyMutation would fill the undo stack from background activity.
+    applySystemMutation(set, get, 'asset.rescan', 'Asset statuses rescanned', (project) => {
       for (const { assetId, inspection } of inspections) {
         const asset = project.assets.assets[assetId]
 

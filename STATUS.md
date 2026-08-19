@@ -51,8 +51,9 @@ Corrected:
   reopened with a job still running. `render.queue.refresh` moved onto a new
   `applySystemMutation` — patches, validation and WAL, but no history command — because a
   once-a-second poll on `applyMutation` would fill the 200-entry undo stack, let undo "revert" a
-  status readback, and clear the redo stack on every tick. Note `asset.rescan` still has that
-  problem and is untouched.
+  status readback, and clear the redo stack on every tick. `asset.rescan` had the identical
+  problem — it fires on every asset-watch tick, not just the manual "Rescan" buttons — and is
+  now on `applySystemMutation` too.
 - **`timeline<->workflow sync` is one pointer pair, not semantic parity.** Only
   `Clip.workflowNodeId` <-> `media_source` `node.data.timelineClipId` is shared. Effects,
   tracks, and output settings are represented independently on each side and are never
