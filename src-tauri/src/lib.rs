@@ -3921,9 +3921,13 @@ mod tests {
 
     #[test]
     fn apply_resolution_override_replaces_a_concrete_resolution() {
-        let preset = serde_json::json!({ "id": "p1", "resolution": { "width": 3840, "height": 2160 } });
+        let preset =
+            serde_json::json!({ "id": "p1", "resolution": { "width": 3840, "height": 2160 } });
         let result = apply_resolution_override(preset, Some((1920, 1080)));
-        assert_eq!(result["resolution"], serde_json::json!({ "width": 1920, "height": 1080 }));
+        assert_eq!(
+            result["resolution"],
+            serde_json::json!({ "width": 1920, "height": 1080 })
+        );
         // Every other field survives untouched.
         assert_eq!(result["id"], serde_json::json!("p1"));
     }
@@ -3934,7 +3938,10 @@ mod tests {
         // an object — an override must win regardless of what it's replacing.
         let preset = serde_json::json!({ "resolution": "project" });
         let result = apply_resolution_override(preset, Some((1280, 720)));
-        assert_eq!(result["resolution"], serde_json::json!({ "width": 1280, "height": 720 }));
+        assert_eq!(
+            result["resolution"],
+            serde_json::json!({ "width": 1280, "height": 720 })
+        );
     }
 
     #[test]
