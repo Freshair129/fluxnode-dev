@@ -51,14 +51,17 @@ Corrected:
   `retryRenderJob`. Extracted the merge into a pure `apply_resolution_override` so it has real
   unit coverage despite the AppHandle-dependent glue around it staying untested, matching this
   file's existing pure/glue split (`render_graph.rs` vs. `render_start`).
-  **Rust compile/test verification could not be performed this session** — confirmed via
-  `git stash` that even an unmodified checkout fails to build right now, and `wmic` showed
-  concurrent `cargo`/`cargo-clippy`/`rustc` processes from an unrelated project
-  (`genesis-block-native`, not part of this repo) running against the same `target/` directory
-  across two different toolchains. That is environment contention, not a code defect, but it
-  means this specific change has only been verified by careful manual review plus a standalone
-  brace/paren balance check on the touched region — **run `cargo test` and `cargo clippy` in a
-  clean environment before merging**, since neither has actually compiled this change yet.
+  **Rust verification history:** initially blocked by environment contention — `git stash`
+  showed even an unmodified checkout failing to build, and `wmic` found concurrent
+  `cargo`/`cargo-clippy`/`rustc` processes from an unrelated project (`genesis-block-native`,
+  not part of this repo) hitting the same `target/` directory across two toolchains. Once that
+  cleared, `cargo check` passed cleanly (3m53s, no errors), confirming the change is
+  type-correct. CI then caught a real, narrow issue this local pass hadn't: `cargo fmt --check`
+  failed on two `assert_eq!` lines exceeding the width limit in the new tests — fixed and
+  pushed (`f244073`), diff confirmed to exactly match what CI reported. `cargo test --lib`
+  itself has not completed a clean run end-to-end in this environment (the same contention
+  returned mid-run); CI's `cargo test` step will give the authoritative signal once it runs
+  past the now-fixed fmt step.
 - ~~**Render progress is not polled automatically.**~~ **Fixed.** The store now owns a 1 s
   poller (`startRenderStatusPolling` / `stopRenderStatusPolling`): idempotent, guarded against
   overlapping ticks, and it retires itself once no job is active, so an idle app holds no timer.
