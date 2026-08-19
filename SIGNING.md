@@ -1,5 +1,12 @@
 # Code Signing & Windows SmartScreen
 
+> **Updater key rotation (2026-07-19):** the updater public key was rotated to the documented
+> local keypair after verifying that no GitHub release was published. The migration record is
+> [`docs/updater-key-rotation-2026-07-19.md`](docs/updater-key-rotation-2026-07-19.md).
+
+> The rotated updater key is password-protected. Set
+> `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` only in the local process environment or CI secret store.
+
 FluxNode ships as an unsigned installer today. Windows SmartScreen shows an
 "unknown publisher" warning for unsigned (and low-reputation) apps. This guide
 explains how to sign the build and what each option does to SmartScreen.

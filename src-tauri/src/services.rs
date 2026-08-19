@@ -6,6 +6,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
+use tauri::{AppHandle, Manager};
 
 use crate::brain::ollama::OllamaBrain;
 use crate::media::backends::comfy::ComfyBackend;
@@ -51,24 +52,33 @@ fn env_path(var: &str) -> Option<PathBuf> {
         .filter(|p| p.exists())
 }
 
-/// The bundled whisper model filename (whisper.cpp GGML format). Resolved next to the whisper-cli
-/// sidecar (the `binaries/` dir in dev, beside the app exe in release). Override the whole path
-/// with `FLUXNODE_WHISPER_MODEL`.
+/// The bundled whisper model filename (whisper.cpp GGML format). Override the whole path with
+/// `FLUXNODE_WHISPER_MODEL`.
 const WHISPER_MODEL_FILE: &str = "ggml-base.en.bin";
 
 /// Locate the bundled whisper backend: `whisper-cli` sidecar + the GGML model beside it. Returns
 /// the pair only when BOTH exist, so transcription auto-enables the moment the files are dropped
 /// into `binaries/` — no env vars needed. Env vars still override each path individually.
-fn bundled_whisper() -> Option<(PathBuf, PathBuf)> {
-    let bin = env_path("FLUXNODE_WHISPER_BIN").or_else(|| {
-        let path = crate::sidecar_path("whisper-cli");
-        path.exists().then_some(path)
-    })?;
-    let model = env_path("FLUXNODE_WHISPER_MODEL").or_else(|| {
-        let path = bin.parent()?.join(WHISPER_MODEL_FILE);
-        path.exists().then_some(path)
-    })?;
-    Some((bin, model))
+/// The upstream Windows release loads runtime DLLs from the executable directory, so the staged
+/// and bundled `whisper/` directory keeps the executable, model, and DLLs together.
+fn bundled_whisper(app: &AppHandle) -> Option<(PathBuf, PathBuf)> {
+    if let (Some(bin), Some(model)) = (
+        env_path("FLUXNODE_WHISPER_BIN"),
+        env_path("FLUXNODE_WHISPER_MODEL"),
+    ) {
+        return Some((bin, model));
+    }
+
+    let dev_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries/whisper");
+    let resource_dir = app.path().resource_dir().ok()?.join("whisper");
+    for dir in [dev_dir, resource_dir] {
+        let bin = dir.join(format!("whisper-cli{}", std::env::consts::EXE_SUFFIX));
+        let model = dir.join(WHISPER_MODEL_FILE);
+        if bin.is_file() && model.is_file() {
+            return Some((bin, model));
+        }
+    }
+    None
 }
 
 /// The shared media broker, wired to the GPU arbiter. ComfyUI (image) is always registered
@@ -77,7 +87,9 @@ fn bundled_whisper() -> Option<(PathBuf, PathBuf)> {
 /// since those binaries are not bundled yet:
 ///   FLUXNODE_SD_BIN + FLUXNODE_SD_MODEL, FLUXNODE_WHISPER_BIN + FLUXNODE_WHISPER_MODEL,
 ///   FLUXNODE_PIPER_BIN + FLUXNODE_PIPER_VOICE
-pub fn media_broker() -> &'static MediaBroker {
+/// Whisper auto-registers from its staged/bundled resource directory; sd.cpp and Piper remain
+/// explicit opt-ins via environment variables.
+pub fn media_broker(app: &AppHandle) -> &'static MediaBroker {
     static BROKER: OnceLock<MediaBroker> = OnceLock::new();
     BROKER.get_or_init(|| {
         let out_dir = std::env::temp_dir().join("fluxnode-media");
@@ -94,7 +106,7 @@ pub fn media_broker() -> &'static MediaBroker {
         }
         // whisper STT: auto-enabled when the bundled `whisper-cli` + model are present in
         // `binaries/` (or via env override). Falls back to no STT until they are.
-        if let Some((bin, model)) = bundled_whisper() {
+        if let Some((bin, model)) = bundled_whisper(app) {
             broker.set_stt(Arc::new(WhisperBackend::new(bin, model)));
         }
         if let (Some(bin), Some(voice)) = (
