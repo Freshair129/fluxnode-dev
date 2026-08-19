@@ -7077,8 +7077,20 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
     const automatic = options?.automatic === true
 
+    // What THIS attempt should render at — computed before the IPC call so the backend and the
+    // local state the mutation below sets never disagree. An automatic retry keeps the job's
+    // current config.resolution as-is (already reduced by scheduleRenderAutoRetry when this was a
+    // GPU-OOM fallback, unchanged otherwise). A manual retry always sends the ORIGINAL resolution,
+    // matching the reset the mutation below performs — read job.config.resolution here instead and
+    // a manual retry after a failed fallback would send the stale reduced size while the UI
+    // simultaneously displayed the original, a mismatch between what rendered and what the queue
+    // card claims.
+    const retryResolution = automatic
+      ? targetJob.config.resolution
+      : (targetJob.originalResolution ?? targetJob.config.resolution)
+
     try {
-      await retryRenderJob(targetJob.id, true)
+      await retryRenderJob(targetJob.id, true, retryResolution)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Render retry failed to re-arm.'
       pushAppError(set, {

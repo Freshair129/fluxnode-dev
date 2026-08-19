@@ -2564,10 +2564,38 @@ fn spawn_ffmpeg_render(
     Ok(())
 }
 
-/// Rebuilds the render plan from a job's manifest and re-runs ffmpeg from the
-/// start. Used by resume/retry (a single ffmpeg encode cannot truly resume
-/// mid-stream, so we re-render — correctness over efficiency for the MVP).
-fn restart_render_from_manifest(app: &AppHandle, job_id: &str) -> Result<(), String> {
+/// Merges an explicit `{width,height}` resolution into a preset JSON value, replacing whatever
+/// `resolution` held before — a concrete object, or the `"project"` sentinel string
+/// (`RenderPreset.resolution: {width,height} | 'project'` on the TS side) — with the override.
+/// A `None` override leaves the preset untouched. Pure and independent of any AppHandle/filesystem
+/// state, unlike `restart_render_from_manifest`, so it is unit-testable on its own (see the
+/// `apply_resolution_override_*` tests below) even though nothing else in this render-retry path
+/// currently has direct test coverage.
+fn apply_resolution_override(mut preset: Value, resolution_override: Option<(u32, u32)>) -> Value {
+    if let Some((width, height)) = resolution_override {
+        if let Some(obj) = preset.as_object_mut() {
+            obj.insert(
+                "resolution".to_string(),
+                serde_json::json!({ "width": width, "height": height }),
+            );
+        }
+    }
+    preset
+}
+
+/// Rebuilds and re-runs a job's render plan from its manifest — used by resume and retry, neither
+/// of which can truly resume mid-stream (a single ffmpeg encode can't), so both re-render from the
+/// start. `resolution_override`, when given, replaces the manifest's ORIGINAL preset resolution for
+/// this pass only — it is never written back to the manifest file. That is what makes the GPU-OOM
+/// fallback (`scheduleRenderAutoRetry` in project-store.ts, which halves `job.config.resolution`
+/// and schedules an automatic retry) actually take effect: without it, this function always
+/// rebuilt the plan from the untouched original manifest, so a "reduced resolution" retry silently
+/// re-ran the identical, already-failing ffmpeg invocation.
+fn restart_render_from_manifest(
+    app: &AppHandle,
+    job_id: &str,
+    resolution_override: Option<(u32, u32)>,
+) -> Result<(), String> {
     let project_dir = get_current_project_dir(app)?
         .ok_or_else(|| "No active project directory is available".to_string())?;
     let render_cache_dir = project_dir.join("cache").join("renders");
@@ -2585,6 +2613,7 @@ fn restart_render_from_manifest(app: &AppHandle, job_id: &str) -> Result<(), Str
         .get("preset")
         .cloned()
         .ok_or_else(|| "Render manifest is missing preset".to_string())?;
+    let preset_value = apply_resolution_override(preset_value, resolution_override);
     let output_path = manifest
         .get("outputPath")
         .and_then(|v| v.as_str())
@@ -2771,19 +2800,30 @@ fn render_pause(app: AppHandle, job_id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn render_resume(app: AppHandle, job_id: String) -> Result<(), String> {
-    // A single ffmpeg encode cannot resume mid-stream, so re-render from the start.
-    restart_render_from_manifest(&app, &job_id)
+    // A single ffmpeg encode cannot resume mid-stream, so re-render from the start. Resuming a
+    // paused job is unrelated to the GPU-OOM fallback path — no resolution override here.
+    restart_render_from_manifest(&app, &job_id, None)
 }
 
+/// `resolution_override_width`/`_height` are set together or not at all — the frontend always
+/// sends both from a single `{width,height}` job config (`services/ipc/render-job.ts`), so
+/// `(Some, None)`/`(None, Some)` should not occur in practice; treated as "no override" here
+/// rather than an error, since a partial/malformed override should not block a retry outright.
 #[tauri::command]
 fn render_retry(
     app: AppHandle,
     job_id: String,
     resume_from_current_frame: bool,
+    resolution_override_width: Option<u32>,
+    resolution_override_height: Option<u32>,
 ) -> Result<(), String> {
     // ffmpeg cannot resume a partial encode; always re-render from frame 0.
     let _ = resume_from_current_frame;
-    restart_render_from_manifest(&app, &job_id)
+    let resolution_override = match (resolution_override_width, resolution_override_height) {
+        (Some(width), Some(height)) => Some((width, height)),
+        _ => None,
+    };
+    restart_render_from_manifest(&app, &job_id, resolution_override)
 }
 
 #[tauri::command]
@@ -3878,6 +3918,31 @@ fn run_agent_cli(message: &str, allow_writes: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apply_resolution_override_replaces_a_concrete_resolution() {
+        let preset = serde_json::json!({ "id": "p1", "resolution": { "width": 3840, "height": 2160 } });
+        let result = apply_resolution_override(preset, Some((1920, 1080)));
+        assert_eq!(result["resolution"], serde_json::json!({ "width": 1920, "height": 1080 }));
+        // Every other field survives untouched.
+        assert_eq!(result["id"], serde_json::json!("p1"));
+    }
+
+    #[test]
+    fn apply_resolution_override_replaces_the_project_sentinel() {
+        // A preset can defer resolution to project settings via the string "project" instead of
+        // an object — an override must win regardless of what it's replacing.
+        let preset = serde_json::json!({ "resolution": "project" });
+        let result = apply_resolution_override(preset, Some((1280, 720)));
+        assert_eq!(result["resolution"], serde_json::json!({ "width": 1280, "height": 720 }));
+    }
+
+    #[test]
+    fn apply_resolution_override_is_a_no_op_when_none() {
+        let preset = serde_json::json!({ "resolution": { "width": 3840, "height": 2160 } });
+        let result = apply_resolution_override(preset.clone(), None);
+        assert_eq!(result, preset);
+    }
 
     #[test]
     fn url_encode_svg_passes_unreserved_and_escapes_the_rest() {

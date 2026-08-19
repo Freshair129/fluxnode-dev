@@ -72,7 +72,20 @@ export async function resumeRenderJob(jobId: string): Promise<void> {
   await invokeCommand('render_resume', { jobId })
 }
 
-export async function retryRenderJob(jobId: string, resumeFromCurrentFrame = true): Promise<void> {
+/**
+ * `resolutionOverride`, when given, is what this retry attempt should ACTUALLY render at —
+ * distinct from whatever resolution the job's original manifest was submitted with. Without it,
+ * `render_retry` rebuilds the plan from that untouched original manifest every time, so a
+ * GPU-OOM fallback that reduces `job.config.resolution` in the store (see
+ * `scheduleRenderAutoRetry` in project-store.ts) would silently re-run the identical,
+ * already-failing ffmpeg invocation. Sent as `null`, not omitted, when there is no override —
+ * matches this codebase's `Option<T>` IPC convention (see e.g. `panel_window_open`'s `x`/`y`).
+ */
+export async function retryRenderJob(
+  jobId: string,
+  resumeFromCurrentFrame = true,
+  resolutionOverride: { width: number; height: number } | null = null,
+): Promise<void> {
   if (!isTauriRuntime()) {
     return
   }
@@ -80,5 +93,7 @@ export async function retryRenderJob(jobId: string, resumeFromCurrentFrame = tru
   await invokeCommand('render_retry', {
     jobId,
     resumeFromCurrentFrame,
+    resolutionOverrideWidth: resolutionOverride?.width ?? null,
+    resolutionOverrideHeight: resolutionOverride?.height ?? null,
   })
 }

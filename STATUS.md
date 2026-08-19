@@ -39,11 +39,26 @@ Corrected:
   compiler (`workflow_graph.rs`) reachable from exactly one caller — `workflow_render_node` —
   which renders to a temp file, decodes frame 0 as a node preview, and deletes it. No
   transform / color_correct / compositor / shader / AI node reaches the render.
-- **"Render resilience (auto-retry, GPU-OOM fallback)" overstates the GPU path.** Auto-retry
-  and the cloud-network backoff are real. The GPU-OOM fallback writes a reduced resolution into
-  `job.config.resolution`, but the retry goes through `render_retry` ->
-  `restart_render_from_manifest`, which rebuilds from the manifest's *original* preset — so the
-  retry re-runs the same ffmpeg invocation. Treat GPU-OOM fallback as **Pending**.
+- ~~**"Render resilience (auto-retry, GPU-OOM fallback)" overstates the GPU path.**~~ **Fixed
+  (G-05).** The GPU-OOM fallback writes a reduced resolution into `job.config.resolution`, but
+  `render_retry` -> `restart_render_from_manifest` used to always rebuild the plan from the
+  manifest's *original* preset, so the retry silently re-ran the identical, already-failing
+  ffmpeg invocation. `render_retry` now takes an optional `resolutionOverrideWidth`/`Height`,
+  merged into the preset for that pass only (never written back to the manifest, so a later
+  manual retry cleanly resets to the original size); `retryFailedRender` computes which
+  resolution this attempt should actually use — the job's current (already-reduced) resolution
+  for an automatic retry, the original for a manual one — and sends it through
+  `retryRenderJob`. Extracted the merge into a pure `apply_resolution_override` so it has real
+  unit coverage despite the AppHandle-dependent glue around it staying untested, matching this
+  file's existing pure/glue split (`render_graph.rs` vs. `render_start`).
+  **Rust compile/test verification could not be performed this session** — confirmed via
+  `git stash` that even an unmodified checkout fails to build right now, and `wmic` showed
+  concurrent `cargo`/`cargo-clippy`/`rustc` processes from an unrelated project
+  (`genesis-block-native`, not part of this repo) running against the same `target/` directory
+  across two different toolchains. That is environment contention, not a code defect, but it
+  means this specific change has only been verified by careful manual review plus a standalone
+  brace/paren balance check on the touched region — **run `cargo test` and `cargo clippy` in a
+  clean environment before merging**, since neither has actually compiled this change yet.
 - ~~**Render progress is not polled automatically.**~~ **Fixed.** The store now owns a 1 s
   poller (`startRenderStatusPolling` / `stopRenderStatusPolling`): idempotent, guarded against
   overlapping ticks, and it retires itself once no job is active, so an idle app holds no timer.
