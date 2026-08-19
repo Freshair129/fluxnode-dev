@@ -11,6 +11,10 @@
 
 ---
 
+> **Updater key rotation (2026-07-19):** the configured updater public key now matches the local
+> keypair. See [`docs/updater-key-rotation-2026-07-19.md`](docs/updater-key-rotation-2026-07-19.md)
+> before changing the updater trust root again.
+
 ## ครั้งแรกครั้งเดียว: ตั้งค่า signing secrets
 
 Auto-update จะทำงานก็ต่อเมื่อ artifact ถูกเซ็นด้วย private key ที่คู่กับ public key

@@ -1,61 +1,46 @@
-# AI Copilot — Sidecar Binary Setup & Verification
+# AI Copilot - Sidecar Binary Setup and Verification
 
-The media/voice backends shell out to sidecar binaries, mirroring the existing ffmpeg/ffprobe
-pattern. As of this commit the repo bundles **only** `ffmpeg` / `ffprobe`
-(`src-tauri/binaries/`); whisper / piper / sd are **not present**, so their CLI flags below are
-**best-effort assumptions cross-checked against each tool's documented CLI** — not yet runtime
-verified. Obtain each binary, drop it in `src-tauri/binaries/` with the platform-triple name
-(e.g. `sd-x86_64-pc-windows-msvc.exe`, matching `ffmpeg-x86_64-pc-windows-msvc.exe`), then run the
-verify command and reconcile any flag drift in the noted file.
+The media/voice backends use local sidecars. Whisper is installed by
+`scripts/fetch-whisper.ps1` into `src-tauri/binaries/whisper/` with the executable, its runtime
+DLLs, and the `ggml-base.en.bin` English model. The directory is bundled as a colocated Tauri
+resource so the upstream executable can load its DLLs. The inputs, checksums, and release
+acceptance criteria are frozen in
+[`whisper-sidecar-installation-spec.md`](whisper-sidecar-installation-spec.md).
+
+Piper and stable-diffusion.cpp are still operator-supplied. Their CLI shapes below are
+documentation-checked, not runtime-verified.
 
 ## Flag cross-check status
 
-| Backend | Binary | Assumed flags | vs. documented CLI | Fix location if drift |
+| Backend | Binary | Assumed flags | Status | Fix location if drift |
 |---|---|---|---|---|
-| whisper.rs | `whisper-cli` (whisper.cpp) | `-m <model> -f <audio> -oj` → reads `<audio>.json` | ✅ matches (`-oj` = `--output-json`; JSON has `transcription[].offsets{from,to}` ms + `text`) | `parse_whisper_json` |
-| piper.rs | `piper` | `--model <voice.onnx> --output_file <wav>`, text on **stdin** | ✅ matches; also needs sibling `<voice>.onnx.json` | `PiperBackend::synth` |
-| sdcpp.rs | `sd` (stable-diffusion.cpp) | `-M txt2img\|img2img -m -p [-n] -W -H --steps [-s] -o [-i] [--mask]` | ✅ matches (`-M/-m/-p/-n/-W/-H/--steps/-s/-o/-i` are real; `--mask` for inpaint) | `SdCppBackend::generate` |
-| comfy.rs | (HTTP, no binary) | ComfyUI `/prompt`,`/history`,`/view` | ✅ existing client, unchanged | `crate::comfy` |
+| whisper.rs | `whisper-cli` (whisper.cpp) | `-m <model> -f <audio> -oj` -> reads `<audio>.json` | staged Windows binary checked with `--help`; runtime smoke test when staged | `parse_whisper_json` |
+| piper.rs | `piper` | `--model <voice.onnx> --output_file <wav>`, text on stdin | docs checked | `PiperBackend::synth` |
+| sdcpp.rs | `sd` | `-M txt2img\|img2img -m -p [-n] -W -H --steps [-s] -o [-i] [--mask]` | docs checked | `SdCppBackend::generate` |
+| comfy.rs | HTTP | ComfyUI `/prompt`, `/history`, `/view` | existing client | `crate::comfy` |
 
-Confidence: flags align with each project's published CLI. The remaining unknowns are
-**build-specific**: some `sd` builds default to txt2img and reject an explicit `-M txt2img`, and
-older builds used `--width/--height` instead of `-W/-H`. Confirm against the shipped binary's
-`--help`.
+## Windows Whisper setup
 
-## Verify commands (run once the binary is in place)
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/fetch-whisper.ps1
 
-```sh
-# whisper — expect a <sample>.json next to the input with transcription[].offsets + text
-whisper-cli -m ggml-base.en.bin -f sample.wav -oj && cat sample.wav.json
-
-# piper — expect out.wav to play the spoken text
-echo "nerf crystal maiden again" | piper --model en_US-amy-medium.onnx --output_file out.wav
-
-# sd — expect out.png at 768x512
-sd -M txt2img -m model.gguf -p "a ice wizard" -W 768 -H 512 --steps 20 -o out.png
+# Expect a sample.wav.json containing transcription[].offsets and text.
+src-tauri/binaries/whisper/whisper-cli.exe `
+  -m src-tauri/binaries/whisper/ggml-base.en.bin `
+  -f sample.wav -oj
 ```
 
-If any command's real flags differ, update only the noted backend file — the trait contract and
-broker routing are unaffected.
+The script rejects an unexpected SHA-256, stages all runtime dependencies, then verifies
+`whisper-cli.exe --help`. The staged artifacts remain untracked by Git.
+
+## Input conversion
+
+whisper.cpp requires 16 kHz mono 16-bit PCM WAV. `whisper.rs` already converts arbitrary
+audio/video through the bundled ffmpeg sidecar with `-ar 16000 -ac 1 -c:a pcm_s16le`; its
+integration test verifies those stream properties when ffmpeg/ffprobe are staged.
 
 ## In-process llama.cpp brain (`--features llama`)
 
-The default brain backend is **Ollama** (`brain/ollama.rs`, runtime-verified) — no build toolchain
-needed. The optional in-process backend (`brain/llama.rs`, behind the `llama` feature) is a
-**stub** until built on a machine with a C++ toolchain, because `llama-cpp-2` compiles llama.cpp
-from source.
-
-Prerequisites to implement/enable it:
-- **cmake**, a **C++ compiler** (MSVC `cl` / clang), and **libclang** (LLVM) for bindgen.
-- A **GGUF model** (e.g. `qwen3-4b-instruct-q4_k_m.gguf`) — reuse an Ollama blob or download.
-
-Then: add `llama-cpp-2 = { version = "…", optional = true }`, switch the feature to
-`llama = ["dep:llama-cpp-2"]`, flesh out `LlamaBrain` (load model → generate under a GBNF grammar
-that forces text-or-tool-call JSON → map to `BrainReply`), and build with `cargo build --features
-llama`. The `Brain` trait means no other code changes.
-
-## whisper input caveat
-
-whisper.cpp accepts only 16 kHz mono 16-bit PCM WAV. `whisper.rs` has a `TODO(ffmpeg pre-convert)`
-for `ffmpeg -i <in> -ar 16000 -ac 1 -c:a pcm_s16le <tmp>.wav` using the already-bundled ffmpeg
-sidecar; wire it before transcribing arbitrary audio.
+The default brain backend is Ollama (`brain/ollama.rs`) and needs no C++ toolchain. The optional
+in-process backend is a stub until a machine has CMake, a C++ compiler, libclang for bindgen, and a
+GGUF model. See `src-tauri/Cargo.toml` for the current feature boundary.

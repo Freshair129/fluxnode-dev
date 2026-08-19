@@ -301,4 +301,48 @@ mod tests {
         assert!(report.contains("sample_rate=16000"), "report: {report}");
         assert!(report.contains("channels=1"), "report: {report}");
     }
+
+    /// Runtime smoke test for the staged sidecar. It is conditional so ordinary CI without the
+    /// large ignored model retains fast, deterministic unit coverage.
+    #[test]
+    fn staged_sidecar_emits_json() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries/whisper");
+        let cli = dir.join(format!("whisper-cli{}", std::env::consts::EXE_SUFFIX));
+        let model = dir.join("ggml-base.en.bin");
+        let ffmpeg = crate::sidecar_path("ffmpeg");
+        if !cli.exists() || !model.exists() || !ffmpeg.exists() {
+            eprintln!("skipping whisper sidecar smoke test: sidecar, model, or ffmpeg not staged");
+            return;
+        }
+
+        let wav = whisper_tmp_wav();
+        let wav_str = wav.to_string_lossy().to_string();
+        let generated = no_window(&mut Command::new(&ffmpeg))
+            .args([
+                "-y",
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:sample_rate=16000",
+                "-ac",
+                "1",
+                "-t",
+                "1",
+                &wav_str,
+            ])
+            .output()
+            .expect("create whisper smoke WAV");
+        assert!(
+            generated.status.success(),
+            "ffmpeg source generation failed"
+        );
+
+        let backend = WhisperBackend::new(cli, model);
+        let result = backend.run_whisper(&wav_str);
+        let _ = std::fs::remove_file(&wav);
+        let _ = std::fs::remove_file(format!("{wav_str}.json"));
+        assert!(result.is_ok(), "whisper sidecar smoke failed: {result:?}");
+    }
 }

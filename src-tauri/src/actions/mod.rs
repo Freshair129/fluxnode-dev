@@ -1203,7 +1203,7 @@ impl Action for GenerateImage {
             input: None,
             mask: None,
         };
-        let art = crate::services::media_broker().generate_image(app, req)?;
+        let art = crate::services::media_broker(app).generate_image(app, req)?;
         Ok(json!({ "asset_id": art.asset_id, "path": art.path, "kind": art.kind }))
     }
 }
@@ -1224,12 +1224,12 @@ impl Action for Transcribe {
         })
     }
 
-    fn run(&self, _app: &AppHandle, args: Value) -> ActionResult {
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
         let audio_path = args
             .get("audio_path")
             .and_then(Value::as_str)
             .ok_or_else(|| "Missing or invalid 'audio_path'".to_string())?;
-        let transcript = crate::services::media_broker().transcribe(audio_path)?;
+        let transcript = crate::services::media_broker(app).transcribe(audio_path)?;
         serde_json::to_value(transcript).map_err(|e| format!("serialize transcript: {e}"))
     }
 }
@@ -1253,7 +1253,7 @@ impl Action for Synthesize {
         })
     }
 
-    fn run(&self, _app: &AppHandle, args: Value) -> ActionResult {
+    fn run(&self, app: &AppHandle, args: Value) -> ActionResult {
         let text = args
             .get("text")
             .and_then(Value::as_str)
@@ -1262,7 +1262,7 @@ impl Action for Synthesize {
             .get("voice")
             .and_then(Value::as_str)
             .unwrap_or("default");
-        let art = crate::services::media_broker().synth(text, voice)?;
+        let art = crate::services::media_broker(app).synth(text, voice)?;
         Ok(json!({ "asset_id": art.asset_id, "path": art.path, "kind": art.kind }))
     }
 }
