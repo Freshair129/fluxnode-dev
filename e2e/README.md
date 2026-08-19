@@ -66,21 +66,14 @@ guard against). On a failure, the printed trace path is a `.zip` you can open wi
   sizes are proportional to the horizon ratio (62/38 default, mirrors to 38/62 after `Tab`); the
   stage row's height never changes while the horizon splitter is actively being dragged.
 - **`04-jobchips.spec.ts`** (item 4, spec H job-ledger states) — drives the real "Export Queue"
-  panel (`SystemPanels.tsx`): Queue Render produces a real queued `RenderJob` with no bare
-  spinner; Simulate Failure produces a danger-tone chip with an inline, non-modal, expandable log;
-  completed chips auto-clear ~8s after landing unless hovered, in which case they're pinned. A
-  separate describe — **`JobChip completed-chip flash (deterministic via page.clock)`** — proves
-  the 400ms accent-flash-then-settle one-shot (spec H Success / M.10): it **freezes time**
-  (`page.clock`) at the queued→completed transition and HARD-asserts the chip is in the accent
-  flash tone (`data-meridian-jobchip-flashing="true"` + accent icon + `border-accent`) at that
-  frozen instant, then steps the clock 400ms and asserts the settle to success. This is deliberate:
-  the item-4 review's own defect was a *dead flash* (a chip that never flashed, straight into the
-  settled success tone), and a test that only checks the settled end-state passes identically on
-  that bug — so the flash presence must be asserted red-or-green at a frozen point where the timer
-  provably hasn't fired. **Read the file's header comment** for why the `rendering` state's
-  determinate meter cannot be produced through any real browser-only user action in this app (a
-  traced, code-level fact — see the Tauri-only gap section below), and the bugs this spec's
-  authoring uncovered (see "Bugs found" below).
+  panel (`SystemPanels.tsx`). **As of the G-03 fix** (see the Tauri-only gap section below), the
+  only state a plain browser tab can genuinely reach is the empty ledger and the "browser mode
+  refused, here's why" error — `enqueueRender` no longer fabricates a queued/completed job here,
+  because that fabrication was itself a real bug (it used to report a render as successfully
+  completed when nothing had actually run). Queued/failed/completed/the 400ms accent-flash-then-
+  settle (spec H Success / M.10) all remain written out in this file but `test.skip`, each with an
+  inline reason, pending a Tauri-backed e2e variant. **Read the file's header comment** for the
+  full trace, and the bugs this spec's authoring uncovered (see "Bugs found" below).
 - **`05-lineage.spec.ts`** (item 5, spec L.3) — selecting the demo project's linked clip
   (`clip-video-01` -> `node-media-01`) draws a `path[data-meridian-thread-edge]`; its
   `stroke-dashoffset` animates from full length to 0 within the draw window (asserted against
@@ -255,34 +248,46 @@ inspector) — a stacking/visual-design call, not a mechanical one.
   frozen-clock, hard, red-or-green. Do NOT "fix" a future flake in these by loosening a bound or
   downgrading to a warning — freeze the relevant moment instead.
 
-## Known Tauri-only gap (item 4 `rendering`/`paused`; spec M.5 anti-spinner rule has ZERO real-browser coverage)
+## Known Tauri-only gap (item 4 job-ledger states; spec M.5 anti-spinner rule has ZERO real-browser coverage)
 
-Spec H's job-ledger table has six rows; this suite covers five of them for real
-(empty/queued/failed/completed via the visibility rules, "no bare spinner" for queued). The sixth
-— `rendering` (determinate meter + ETA + cancel) and, by extension, `paused` (which requires an
-already-`rendering` job) — **cannot be produced by any real user action in a plain browser tab
-with no Tauri runtime**, traced end to end in `04-jobchips.spec.ts`'s header comment:
-`pollRenderJobStatus`'s browser-fallback branch (`src/services/ipc/render-job.ts`) unconditionally
-returns `status: 'completed'`, and `pauseRenderJob`/`resumeRenderJob` are no-ops in that branch —
-there is no code path, anywhere, that puts a job into `'rendering'` outside of a real Tauri backend
-or a unit-test fixture that constructs a `RenderJob` object directly.
+> **Widened by the G-03 fix (see git history / STATUS.md).** This section originally said only
+> `rendering`/`paused` were unreachable in a plain browser tab; `queued`, `failed`, and `completed`
+> were verified for real by clicking "Queue Render" and "Refresh Status". That relied on a real bug:
+> `pollRenderJobStatus`'s browser-fallback branch used to unconditionally fabricate
+> `status: 'completed'` the moment a queued job was refreshed — no ffmpeg ever ran. Once that was
+> fixed (browser mode now correctly refuses to queue a render at all, with a clear error, matching
+> how ComfyUI generation and the copilot already behaved), the states this file could reach through
+> that fabrication became unreachable too. The paragraphs below are the ORIGINAL, narrower version
+> of this gap, kept for its still-accurate reasoning about `rendering`/`paused`; read it as "at
+> minimum these two, now joined by `queued`/`failed`/`completed`/the flash as well."
+
+Spec H's job-ledger table has six rows. Before the G-03 fix this suite covered five of them for real
+(empty/queued/failed/completed via the visibility rules, "no bare spinner" for queued); as of the
+fix it covers two (empty, and the accurate "browser mode refuses" error state). The rest —
+`rendering` (determinate meter + ETA + cancel), `paused` (requires an already-`rendering` job), and
+now also `queued`/`failed`/`completed`/the completion flash (all of which required a job to exist in
+`project.output.queue` in the first place, which `enqueueRender` no longer allows in browser mode) —
+**cannot be produced by any real user action in a plain browser tab with no Tauri runtime**, traced
+end to end in `04-jobchips.spec.ts`'s header comment. There is no code path, anywhere, that puts a
+job into any of these states outside of a real Tauri backend or a unit-test fixture that constructs
+a `RenderJob` object directly.
 
 **The load-bearing consequence, called out explicitly:** spec **M.5** ("No indeterminate-only
-spinners: JobChip must show determinate progress or queue position + elapsed") is verified in this
-suite ONLY for the queued state (which shows position/elapsed and mounts no `role="progressbar"`).
-Its harder half — that the *live rendering* chip shows a **determinate** meter with a real
-`aria-valuenow` and never an indeterminate-only spinner — has **no real-browser coverage here**,
-because that chip can't be reached in-browser. `RenderingChip`'s determinate `Meter`
-(`role="progressbar"` + real `aria-valuenow`) is exercised only by the vitest component test
-(`JobChip.test.tsx`, which hand-builds a `status:'rendering'` job) — SSR, no layout, no live
-progress. Closing this gap for real needs a **Tauri-backed e2e variant** (drive the actual Rust
-render queue so a job genuinely transitions queued→rendering→completed with incremental
+spinners: JobChip must show determinate progress or queue position + elapsed") now has **no
+real-browser coverage at all** — not even for the queued state, since a queued job itself can't be
+produced here any more. `RenderingChip`'s determinate `Meter` (`role="progressbar"` + real
+`aria-valuenow`), `QueuedChip`'s position/elapsed text, and `CompletedChip`'s flash are exercised
+only by the vitest component test (`JobChip.test.tsx`, hand-built `RenderJob` objects) — SSR, no
+layout, no live progress. Closing this gap for real needs a **Tauri-backed e2e variant** (drive the
+actual Rust render queue so a job genuinely transitions queued→rendering→completed with incremental
 `aria-valuenow`), which is out of item 10's scope.
 
-Per the task brief, this suite does not stub the store to fake `rendering`; `04-jobchips.spec.ts`
-instead asserts the ceiling itself (a queued job, refreshed, goes straight to `completed`, never
-`rendering`) so a future regression toward "browser mode CAN now reach rendering" is caught and
-that Tauri-backed variant can be added at the right layer.
+Per the task brief, this suite does not stub the store to fake any of these states. Before the fix,
+`04-jobchips.spec.ts` asserted the `rendering` ceiling by driving a real (fabricated) `completed`
+job; that technique is no longer available or appropriate, since driving it now means asserting a
+lie. The affected tests are `test.skip`, each with the specific reason inline, rather than deleted
+or rewritten to fake it — so the intended coverage stays visible and re-enablable once a Tauri-backed
+variant exists.
 
 ## Known harness-only gap (item 9 command palette: `Ctrl+K` cannot be exercised in headed Chrome)
 

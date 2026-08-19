@@ -62,11 +62,20 @@ Corrected:
   `https://share.fluxnode.app/...` string; there is no server, upload, or receiver behind it,
   and collaborators/invites/roles are local project state. Treat as **Pending**, not
   Implemented.
-- **Browser mode does not render.** Project persistence, autosave, and the WAL genuinely work
-  against localStorage, but `pollRenderJobStatus` returns a hard-coded `completed` / 100% /
-  1 MB result in browser mode, so the queue reports a successful export that never happened.
-  Any "browser-verified" render evidence (including the Section 11 4K60 proof flow) is
-  measuring that stub and must be re-taken on the desktop runtime.
+- ~~**Browser mode does not render.**~~ **Fixed (G-03).** `pollRenderJobStatus` used to return a
+  hard-coded `completed` / 100% / 1 MB result in browser mode regardless of whether anything ran,
+  so the queue reported a successful export that never happened. `startExportJob`,
+  `startRenderJob`, and `pollRenderJobStatus` now all refuse in browser mode instead of
+  fabricating a result, and `enqueueRender` checks `isTauriRuntime()` first and pushes a clear
+  "Rendering requires the FluxNode desktop app" error rather than queuing a job that can never
+  actually render. Project persistence, autosave, and the WAL still genuinely work against
+  localStorage — this was specifically about render/export, not the whole browser runtime. Any
+  prior "browser-verified" render evidence (including the Section 11 4K60 proof flow cited in
+  `masterplan-performance-evidence-audit.md`) was measuring that stub and has been retracted
+  there; a real proof still needs capturing on the desktop runtime. One known e2e consequence:
+  `e2e/04-jobchips.spec.ts` can no longer reach queued/rendering/failed/completed states from a
+  real browser tab (that fabrication was the only way it ever could) — the affected tests are
+  `test.skip` with the reason inline; see the file's header comment and `e2e/README.md`.
 
 ## Workspace layouts (2026-07-18 UX redesign)
 

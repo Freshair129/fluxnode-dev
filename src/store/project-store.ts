@@ -89,7 +89,15 @@ import {
   type WorkflowValidationIssue,
 } from '../domain/workflow/validation'
 import { startExportJob } from '../services/ipc/export-job'
-import { cancelRenderJob, pauseRenderJob, pollRenderJobStatus, resumeRenderJob, retryRenderJob, startRenderJob } from '../services/ipc/render-job'
+import {
+  cancelRenderJob,
+  pauseRenderJob,
+  pollRenderJobStatus,
+  RENDER_UNAVAILABLE_IN_BROWSER_MESSAGE,
+  resumeRenderJob,
+  retryRenderJob,
+  startRenderJob,
+} from '../services/ipc/render-job'
 import { generateAssetProxy } from '../services/ipc/proxy'
 import { copyAssetIntoProject } from '../services/ipc/asset-copy'
 import { buildFallbackProbe, probeAssetMetadata } from '../services/ipc/asset-probe'
@@ -6505,6 +6513,25 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       },
     })),
   enqueueRender: async () => {
+    // Checked first, before validation: no amount of fixing the project makes rendering possible
+    // in browser preview mode, so lead with the real reason rather than a validation-shaped one.
+    // `startExportJob`/`startRenderJob` also refuse this on their own (defense in depth — nothing
+    // downstream can silently succeed even if this check is ever bypassed), but gating here means
+    // a browser-preview user never sees the generic "export handoff could not be created" wording,
+    // which would send them chasing a permissions problem that does not exist.
+    if (!isTauriRuntime()) {
+      pushAppError(set, {
+        id: `${nextId('error')}-render-browser-unavailable`,
+        category: 'render_failed',
+        message: RENDER_UNAVAILABLE_IN_BROWSER_MESSAGE,
+        userMessage: 'Rendering requires the FluxNode desktop app.',
+        recoverable: false,
+        suggestedAction: 'Open this project in the FluxNode desktop app to export.',
+        createdAt: new Date().toISOString(),
+      })
+      return
+    }
+
     const projectSnapshot = cloneProject(get().project)
     const renderBlockingIssues = collectRenderBlockingIssues(projectSnapshot)
     const activePreset =
