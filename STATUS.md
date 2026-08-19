@@ -130,18 +130,27 @@ in `src-tauri/src/action.rs`, `brain/`, `media/`, or `mcp.rs`.
   ComfyUI backend works if a local ComfyUI server is running.
 
 **Partial / not verified:**
-- **In-app copilot panel exists but is half-inert.** `src/features/copilot/CopilotPanel.tsx`
-  (lazy-loaded from `App.tsx`) calls `agent_chat`, renders returned proposals as a ghost
-  preview, and applies approved timeline edits as one undo step via `applyCopilotProposals`.
-  It also has a deterministic "Rough-cut silences" path (transcribe -> `planSilenceCuts` ->
-  proposals). **But only `FrontendEdit` proposals can be approved.** The approve-gate design
-  (`docs/copilot-approve-gate-and-timeline-edits-scope.md`, step A5) specifies that a
-  `site: 'backend'` proposal is executed by re-invoking the registry with
-  `allow_writes = true` — that path is not implemented (`allowWrites: true` appears nowhere in
-  `src/`), so the panel lists those 19 Mutating/LongJob proposals under "aren't materializable
-  in this build yet" with no control. The copilot is effectively read-only plus six timeline
-  edits. The panel is also reachable only from a floating button — not from the command
-  palette, the shortcut registry, or the header menus.
+- **In-app copilot panel — both proposal kinds are now approvable.** `CopilotPanel.tsx`
+  (lazy-loaded from `App.tsx`) calls `agent_chat` and hands the returned proposals to
+  `ProposalReview`, which splits them with `partitionProposals`:
+  - **timeline edits** — ghost preview (clip-count delta per track, computed with the same ops
+    the executor runs), then one "Approve & apply" that lands as a single undo step;
+  - **backend actions** — one **Run** control per action, each re-invoking the registry with
+    `allow_writes = true` (approve-gate step A5). Deliberately per-action: these are real,
+    non-undoable side effects, so there is no bulk approve and **no session-wide writes
+    toggle**. Executed sequentially; a failure is recorded and does not stop the rest;
+  - **unsupported** — a malformed or unknown frontend proposal is shown and never run.
+
+  Results appear as `copilotOutcomes` (applied / failed / unsupported, one per proposal). Backend
+  execution deliberately does **not** go through `applyMutation`: a backend effect is not
+  undoable, and putting it in history would let undo hide a job that is still running.
+
+  Remaining gaps: no streaming, no tool-activity trace, no conversation history, no cancel (a
+  hung Ollama blocks for up to 180s behind a "Thinking…" label), no reachability check, and the
+  panel is reachable only from a floating button — not the command palette, the shortcut
+  registry, or the header menus. There is also still no UI entry point for `generate_image` /
+  `synthesize` outside a copilot proposal, and their artifacts are still not registered as
+  project assets.
 - **Copilot timeline ops cannot maintain the workflow link.** The shared pure ops have the
   signature `(tracks: Track[], op, makeId) => Track[]` and have no access to `project.workflow`,
   so an approved `timeline_remove_range` that deletes a linked clip leaves

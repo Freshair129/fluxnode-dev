@@ -30,7 +30,13 @@ import { activeViewForRatio, clampHorizonRatio, DEFAULT_HORIZON_RATIO, defaultRa
 import { clampStudioInspectorWidth, clampStudioMediaWidth, clampStudioTimelineHeight } from '../domain/project/studio-layout'
 import { DEFAULT_DENSITY_MODE, normalizeDensityMode, type DensityMode } from '../domain/project/density'
 import { validateProject, type ProjectValidationIssue } from '../domain/project/validators'
-import { applyProposalToTracks, isSupportedFrontendProposal, type Proposal } from '../domain/copilot/proposals'
+import {
+  applyProposalToTracks,
+  isSupportedFrontendProposal,
+  partitionProposals,
+  type Proposal,
+  type ProposalOutcome,
+} from '../domain/copilot/proposals'
 import type {
   AppPreferences,
   AppError,
@@ -91,6 +97,7 @@ import { generateAssetThumbnail } from '../services/ipc/thumbnail'
 import { decodePreviewFrame } from '../services/ipc/video-preview'
 import { renderNodePreview } from '../services/ipc/node-preview'
 import { generateComfyNode, pingComfy } from '../services/ipc/comfy'
+import { invokeAction } from '../services/ipc/action-invoke'
 import { isTauriRuntime } from '../services/ipc/tauri-runtime'
 import { generateWaveformPeaks } from '../services/ipc/waveform'
 import { pickMediaFile, pickRelinkDirectory } from '../services/ipc/file-dialog'
@@ -138,7 +145,11 @@ interface ProjectStoreState {
   workflowExecutionOrder: string[]
   /** Pending copilot proposals awaiting approval — read by the timeline to render ghost edits. */
   copilotProposals: Proposal[]
+  /** What happened to the last approved batch, one entry per proposal. */
+  copilotOutcomes: ProposalOutcome[]
   setCopilotProposals: (proposals: Proposal[]) => void
+  /** Start a fresh copilot review cycle: drop pending proposals and the last batch's outcomes. */
+  resetCopilotSession: () => void
   setActiveView: (view: UserInterfaceState['activeView']) => void
   setHorizonRatio: (ratio: number) => void
   toggleStageRowCollapse: (side: StageRowSide) => void
@@ -324,6 +335,12 @@ interface ProjectStoreState {
   deleteSelected: () => void
   splitSelectedClip: () => void
   applyCopilotProposals: (proposals: Proposal[]) => void
+  /**
+   * Approve a batch of copilot proposals and execute each one the way its `site` requires:
+   * frontend edits through the store as one undoable step, backend actions through the Rust
+   * registry with writes allowed. Records one `ProposalOutcome` per proposal.
+   */
+  approveCopilotProposals: (proposals: Proposal[]) => Promise<void>
   connectSelectedNodeToOutput: () => void
   disconnectSelectedNodeEdges: () => void
   moveWorkflowNodes: (nodeIds: string[], deltaX: number, deltaY: number) => void
@@ -2662,6 +2679,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   comfyConnected: null,
   assetThumbnails: {},
   copilotProposals: [],
+  copilotOutcomes: [],
   ...getValidationState(createDefaultProject()),
   ui: {
     // Boot into the Edit workspace (studio layout's timeline-first grammar). Node-centric verbs
@@ -2693,7 +2711,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     timelineClipboard: [],
     workflowClipboard: createEmptyWorkflowClipboard(),
   },
+  // Purely the pending list — the panel narrows it as each proposal is approved, and the outcomes
+  // recorded so far must survive that. Use `resetCopilotSession` to start a fresh review cycle.
   setCopilotProposals: (proposals) => set({ copilotProposals: proposals }),
+  resetCopilotSession: () => set({ copilotProposals: [], copilotOutcomes: [] }),
   setActiveView: (view) =>
     set((state) => ({
       ui: { ...state.ui, ...computeActiveViewUiPatch(state.ui, view) },
@@ -6140,6 +6161,60 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     applyMutation(set, get, 'copilot.timeline.edit', `Copilot: ${count} timeline edit${count === 1 ? '' : 's'}`, (project) => {
       project.timeline.tracks = tracks
     })
+  },
+  approveCopilotProposals: async (proposals) => {
+    const { frontend, backend, unsupported } = partitionProposals(proposals)
+    const outcomes: ProposalOutcome[] = []
+
+    // Frontend edits first, as ONE undoable step (approval == undo step), so the timeline is
+    // already in its approved shape if a backend action below reads project state.
+    if (frontend.length > 0) {
+      get().applyCopilotProposals(frontend)
+      for (const proposal of frontend) {
+        outcomes.push({
+          action: proposal.action,
+          site: 'frontend',
+          status: 'applied',
+          detail: 'Applied to the timeline as part of one undoable edit.',
+        })
+      }
+    }
+
+    // Backend actions run one at a time, in the order the user approved them: they are real side
+    // effects (files written, jobs started), so a failure must not cancel the rest and must not
+    // be retried automatically. Deliberately NOT wrapped in applyMutation — a backend effect is
+    // not undoable, and putting it in history would let undo hide a job that is still running.
+    for (const proposal of backend) {
+      try {
+        await invokeAction(proposal.action, proposal.args, { allowWrites: true })
+        outcomes.push({
+          action: proposal.action,
+          site: 'backend',
+          status: 'applied',
+          detail: `Ran ${proposal.action}.`,
+        })
+      } catch (error) {
+        outcomes.push({
+          action: proposal.action,
+          site: 'backend',
+          status: 'failed',
+          detail: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+
+    for (const proposal of unsupported) {
+      outcomes.push({
+        action: proposal.action,
+        site: proposal.site,
+        status: 'unsupported',
+        detail: 'This build cannot materialize that edit, so it was not run.',
+      })
+    }
+
+    // Append rather than replace: backend actions are approved one at a time, and the user needs
+    // to still see what the earlier ones did. `setCopilotProposals` resets the list.
+    set((state) => ({ copilotOutcomes: [...state.copilotOutcomes, ...outcomes] }))
   },
   connectSelectedNodeToOutput: () =>
     applyMutation(set, get, 'edge.add', 'Selected node connected to output', (project) => {

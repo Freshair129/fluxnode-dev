@@ -25,6 +25,15 @@ export interface Proposal {
   summary: string
 }
 
+/** What happened to one proposal after the user approved the batch it was in. */
+export interface ProposalOutcome {
+  action: string
+  site: 'frontend' | 'backend'
+  /** `unsupported` = a frontend proposal this build cannot materialize; never executed. */
+  status: 'applied' | 'failed' | 'unsupported'
+  detail: string
+}
+
 export function isRemoveRangeArgs(args: unknown): args is RemoveRangeOp {
   const a = asObject(args)
   return (
@@ -132,6 +141,39 @@ export function isSupportedFrontendProposal(p: Proposal): boolean {
     default:
       return false
   }
+}
+
+/**
+ * Split a batch of proposals by how approval must execute them:
+ *
+ * - `frontend` — materialized through the store as one undoable edit (`applyCopilotProposals`).
+ * - `backend`  — re-invoked against the Rust registry with `allow_writes = true`, per the
+ *   approve-gate scope doc (step A5). Deliberately NOT filtered against a frontend allowlist:
+ *   `Registry::invoke` already validated the schema when it produced the proposal and validates
+ *   again on execution, so a second list here would silently drop newly added actions.
+ * - `unsupported` — a `site: 'frontend'` proposal this build cannot materialize (unknown action
+ *   or malformed args). Surfaced to the user rather than executed.
+ */
+export function partitionProposals(proposals: Proposal[]): {
+  frontend: Proposal[]
+  backend: Proposal[]
+  unsupported: Proposal[]
+} {
+  const frontend: Proposal[] = []
+  const backend: Proposal[] = []
+  const unsupported: Proposal[] = []
+
+  for (const proposal of proposals) {
+    if (proposal.site === 'backend') {
+      backend.push(proposal)
+    } else if (isSupportedFrontendProposal(proposal)) {
+      frontend.push(proposal)
+    } else {
+      unsupported.push(proposal)
+    }
+  }
+
+  return { frontend, backend, unsupported }
 }
 
 /** Human-readable one-liner, richer than the Rust-side summary (has project context). */

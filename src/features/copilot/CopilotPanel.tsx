@@ -1,25 +1,26 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useProjectStore } from '../../store/project-store'
 import { runAgentChat } from '../../services/ipc/agent'
-import {
-  applyProposalsToProject,
-  isSupportedFrontendProposal,
-  summarizeProposal,
-} from '../../domain/copilot/proposals'
+import { partitionProposals, type Proposal } from '../../domain/copilot/proposals'
 import { isRoughCutIntent, planSilenceCuts } from '../../domain/copilot/rough-cut'
 import { transcribeAudio } from '../../services/ipc/transcribe'
+import { ProposalReview } from './ProposalReview'
 
 /**
- * Slice-1 copilot surface: send a message to the agent, review the gated proposals it returns as
- * ghost edits, and approve them into the timeline as one undoable step (`applyCopilotProposals`).
- * The agent never mutates the project directly — it can only propose (see the approve-gate scope).
+ * Copilot surface: send a message to the agent, review the gated proposals it returns, and
+ * approve them — timeline edits into the store as one undoable step, backend actions back through
+ * the registry with writes allowed (approve-gate step A5). The agent never mutates anything
+ * directly: `Registry::invoke` only ever hands back a proposal, and nothing here runs without an
+ * explicit per-batch (frontend) or per-action (backend) approval.
  */
 export function CopilotPanel({ onClose }: { onClose: () => void }) {
   const project = useProjectStore((state) => state.project)
-  const applyCopilotProposals = useProjectStore((state) => state.applyCopilotProposals)
+  const approveCopilotProposals = useProjectStore((state) => state.approveCopilotProposals)
   // Proposals live in the store so the timeline can render ghost edits from them.
   const proposals = useProjectStore((state) => state.copilotProposals)
   const setProposals = useProjectStore((state) => state.setCopilotProposals)
+  const outcomes = useProjectStore((state) => state.copilotOutcomes)
+  const resetCopilotSession = useProjectStore((state) => state.resetCopilotSession)
 
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -28,24 +29,7 @@ export function CopilotPanel({ onClose }: { onClose: () => void }) {
   const [note, setNote] = useState<string | null>(null)
 
   // Clear the ghost preview when the copilot closes.
-  useEffect(() => () => setProposals([]), [setProposals])
-
-  const supported = useMemo(() => proposals.filter(isSupportedFrontendProposal), [proposals])
-  const unsupported = useMemo(() => proposals.filter((p) => !isSupportedFrontendProposal(p)), [proposals])
-
-  // Textual ghost preview: the clip-count delta per affected track, computed with the SAME op logic
-  // the executor uses, so what you see is exactly what approval produces.
-  const ghost = useMemo(() => {
-    if (supported.length === 0) return []
-    const after = applyProposalsToProject(project, supported)
-    return project.timeline.tracks
-      .map((before) => {
-        const a = after.timeline.tracks.find((t) => t.id === before.id)
-        if (!a || a.clips.length === before.clips.length) return null
-        return { name: before.name, before: before.clips.length, after: a.clips.length }
-      })
-      .filter((x): x is { name: string; before: number; after: number } => x !== null)
-  }, [project, supported])
+  useEffect(() => () => resetCopilotSession(), [resetCopilotSession])
 
   async function send() {
     const message = input.trim()
@@ -72,15 +56,39 @@ export function CopilotPanel({ onClose }: { onClose: () => void }) {
     }
   }
 
-  function approve() {
-    if (supported.length === 0) return
-    applyCopilotProposals(supported)
-    setNote(`Applied ${supported.length} edit${supported.length === 1 ? '' : 's'} as one undo step.`)
-    setProposals([])
+  /** Approve every timeline edit at once — one approval, one undo step. Backend actions and
+   *  unsupported proposals stay pending so they can be dealt with individually. */
+  async function approveFrontend() {
+    const { frontend, backend, unsupported } = partitionProposals(proposals)
+    if (frontend.length === 0 || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      await approveCopilotProposals(frontend)
+      setNote(`Applied ${frontend.length} edit${frontend.length === 1 ? '' : 's'} as one undo step.`)
+      setProposals([...backend, ...unsupported])
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Run ONE approved backend action. Deliberately per-action: these are real, non-undoable
+   *  side effects, so there is no bulk approve and no session-wide writes toggle. */
+  async function runBackend(proposal: Proposal) {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    setNote(null)
+    try {
+      await approveCopilotProposals([proposal])
+      setProposals(proposals.filter((pending) => pending !== proposal))
+    } finally {
+      setBusy(false)
+    }
   }
 
   function reject() {
-    setProposals([])
+    resetCopilotSession()
     setNote('Proposals dismissed.')
   }
 
@@ -141,57 +149,15 @@ export function CopilotPanel({ onClose }: { onClose: () => void }) {
         {error ? <p className="rounded-lg bg-red-500/10 px-3 py-2 text-red-300">{error}</p> : null}
         {note ? <p className="rounded-lg bg-[#e0ff00]/10 px-3 py-2 text-[#e0ff00]">{note}</p> : null}
 
-        {supported.length > 0 ? (
-          <div className="rounded-xl border border-[#e0ff00]/30 bg-black/30 p-3">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#e0ff00]">
-              {supported.length} proposed edit{supported.length === 1 ? '' : 's'}
-            </p>
-            <ul className="space-y-1.5">
-              {supported.map((p, i) => (
-                <li key={i} className="text-[#d1d5db]">
-                  • {summarizeProposal(p, project)}
-                </li>
-              ))}
-            </ul>
-            {ghost.length > 0 ? (
-              <div className="mt-2 border-t border-white/10 pt-2 text-xs text-[#9ca3af]">
-                {ghost.map((g) => (
-                  <div key={g.name}>
-                    {g.name}: {g.before} → {g.after} clips
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                onClick={approve}
-                className="rounded-lg bg-[#e0ff00] px-3 py-1.5 text-xs font-semibold text-black transition hover:brightness-110"
-              >
-                Approve &amp; apply
-              </button>
-              <button
-                type="button"
-                onClick={reject}
-                className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-[#d1d5db] transition hover:bg-white/5"
-              >
-                Reject
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {unsupported.length > 0 ? (
-          <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-[#9ca3af]">
-            {unsupported.length} other proposal{unsupported.length === 1 ? '' : 's'} require approval but
-            aren’t materializable in this build yet:
-            <ul className="mt-1 space-y-1">
-              {unsupported.map((p, i) => (
-                <li key={i}>• {summarizeProposal(p, project)}</li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
+        <ProposalReview
+          proposals={proposals}
+          project={project}
+          outcomes={outcomes}
+          busy={busy}
+          onApproveFrontend={() => void approveFrontend()}
+          onRunBackend={(proposal) => void runBackend(proposal)}
+          onReject={reject}
+        />
       </div>
 
       <div className="border-t border-white/10 p-3">

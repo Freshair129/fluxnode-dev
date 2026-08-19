@@ -112,12 +112,16 @@ Whisper no longer needs env vars — `services::bundled_whisper` auto-registers 
    cancel (a hung Ollama blocks for up to 180s behind a "Thinking…" label), no reachability
    check, and it is reachable only from a floating button — not the command palette, the
    shortcut registry, or the header menus.
-2. **Backend-proposal executor** — *now the highest-leverage item.* The approve-gate is built and
-   correct, but only for `site: 'frontend'` proposals. Step A5 of
-   `docs/copilot-approve-gate-and-timeline-edits-scope.md` specifies that approving a
-   `site: 'backend'` proposal re-invokes the registry with `allow_writes = true`; that code does
-   not exist (`allowWrites: true` appears nowhere in `src/`). Until it does, all 19
-   Mutating/LongJob actions are advertised to the model, proposed to the user, and inert.
+2. ~~**Backend-proposal executor**~~ — **DONE.** Approving a `site: 'backend'` proposal now
+   re-invokes the registry with `allow_writes = true` (approve-gate step A5). New pieces:
+   `services/ipc/action-invoke.ts` (`invokeAction`), `domain/copilot/proposals.ts`
+   (`partitionProposals`, `ProposalOutcome`), store `approveCopilotProposals` /
+   `copilotOutcomes` / `resetCopilotSession`, and `features/copilot/ProposalReview.tsx` (pure,
+   props-driven so it is testable under SSR — same split as JobChip / JobLedger).
+   Approval is **per action** for backend proposals and per batch for timeline edits; there is
+   no session-wide writes toggle, and backend execution is kept out of undo history on purpose.
+   Covered by `project-store.copilot.test.ts` (15 tests), `ProposalReview.test.tsx` (6), and
+   `domain/copilot/proposals.test.ts` (4).
 3. **Reconcile the timeline<->workflow link in `applyCopilotProposals`** — the shared ops take
    `Track[]` and cannot clear a vanished clip's `node.data.timelineClipId`, so an agent-approved
    removal breaks an invariant the mouse path maintains.
