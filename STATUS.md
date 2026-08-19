@@ -58,10 +58,10 @@ Corrected:
   cleared, `cargo check` passed cleanly (3m53s, no errors), confirming the change is
   type-correct. CI then caught a real, narrow issue this local pass hadn't: `cargo fmt --check`
   failed on two `assert_eq!` lines exceeding the width limit in the new tests — fixed and
-  pushed (`f244073`), diff confirmed to exactly match what CI reported. `cargo test --lib`
-  itself has not completed a clean run end-to-end in this environment (the same contention
-  returned mid-run); CI's `cargo test` step will give the authoritative signal once it runs
-  past the now-fixed fmt step.
+  pushed (`f244073`), diff confirmed to exactly match what CI reported. `cargo test --lib` has
+  since completed a full clean run locally: **80 passed, 0 failed**, including all three new
+  `apply_resolution_override` tests (44.6s test time on top of a 5m53s from-scratch build).
+  PR #13's own "Rust (fmt / clippy / test)" CI job is the remaining confirmation to watch.
 - ~~**Render progress is not polled automatically.**~~ **Fixed.** The store now owns a 1 s
   poller (`startRenderStatusPolling` / `stopRenderStatusPolling`): idempotent, guarded against
   overlapping ticks, and it retires itself once no job is active, so an idle app holds no timer.
