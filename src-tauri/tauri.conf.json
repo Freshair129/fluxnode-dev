@@ -51,6 +51,15 @@
     "externalBin": [
       "binaries/ffmpeg",
       "binaries/ffprobe"
-    ]
+    ],
+    "resources": {
+      "binaries/whisper/whisper-cli.exe": "whisper/whisper-cli.exe",
+      "binaries/whisper/ggml.dll": "whisper/ggml.dll",
+      "binaries/whisper/ggml-base.dll": "whisper/ggml-base.dll",
+      "binaries/whisper/ggml-cpu.dll": "whisper/ggml-cpu.dll",
+      "binaries/whisper/whisper.dll": "whisper/whisper.dll",
+      "binaries/whisper/SDL2.dll": "whisper/SDL2.dll",
+      "binaries/whisper/ggml-base.en.bin": "whisper/ggml-base.en.bin"
+    }
   }
 }
