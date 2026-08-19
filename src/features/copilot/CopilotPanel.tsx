@@ -44,7 +44,7 @@ export function CopilotPanel({ onClose }: { onClose: () => void }) {
     setError(null)
     setNote(null)
     setAnswer(null)
-    setProposals([])
+    resetCopilotSession()
     try {
       const outcome = await runAgentChat(message)
       setAnswer(outcome.answer)
@@ -101,7 +101,7 @@ export function CopilotPanel({ onClose }: { onClose: () => void }) {
     setError(null)
     setNote(null)
     setAnswer(null)
-    setProposals([])
+    resetCopilotSession()
     try {
       const track = project.timeline.tracks.find((t) => t.clips.length > 0)
       if (!track) {
