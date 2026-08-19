@@ -33,6 +33,25 @@ const STATUS_PRIORITY: Record<RenderJob['status'], number> = {
  * (stable) so `computeQueuePosition`, which reads off the *unsorted* queue, always agrees with
  * what the sorted, on-screen queued chips display.
  */
+/**
+ * Statuses that mean the backend may still change this job, so its status file is worth re-reading.
+ * `paused` counts: the job can be resumed, and a resume re-renders from the manifest.
+ */
+const ACTIVE_RENDER_STATUSES = new Set<RenderJob['status']>(['queued', 'rendering', 'paused'])
+
+/**
+ * Whether any job still needs watching. Drives which jobs `refreshRenderStatuses` polls and when
+ * the status poller retires itself, so an idle app holds no timer.
+ */
+export function hasActiveRenderJobs(queue: readonly RenderJob[]): boolean {
+  return queue.some((job) => ACTIVE_RENDER_STATUSES.has(job.status))
+}
+
+/** Whether this one job still needs watching. */
+export function isActiveRenderJob(job: RenderJob): boolean {
+  return ACTIVE_RENDER_STATUSES.has(job.status)
+}
+
 export function sortLedgerJobs(jobs: readonly RenderJob[]): RenderJob[] {
   return jobs
     .map((job, index) => ({ job, index }))

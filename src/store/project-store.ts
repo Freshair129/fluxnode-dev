@@ -98,6 +98,7 @@ import { decodePreviewFrame } from '../services/ipc/video-preview'
 import { renderNodePreview } from '../services/ipc/node-preview'
 import { generateComfyNode, pingComfy } from '../services/ipc/comfy'
 import { invokeAction } from '../services/ipc/action-invoke'
+import { hasActiveRenderJobs, isActiveRenderJob } from '../domain/project/jobLedger'
 import { isTauriRuntime } from '../services/ipc/tauri-runtime'
 import { generateWaveformPeaks } from '../services/ipc/waveform'
 import { pickMediaFile, pickRelinkDirectory } from '../services/ipc/file-dialog'
@@ -358,6 +359,13 @@ interface ProjectStoreState {
   clearWorkflowConnectionFeedback: () => void
   enqueueRender: () => Promise<void>
   refreshRenderStatuses: () => Promise<void>
+  /**
+   * Begin watching in-flight render jobs. Idempotent, and retires itself once no job is active,
+   * so an idle app holds no timer. `queueRender` restarts it; the app shell starts it on mount so
+   * a project reopened with a job still running picks it back up.
+   */
+  startRenderStatusPolling: () => void
+  stopRenderStatusPolling: () => void
   pauseActiveRender: () => Promise<void>
   resumePausedRender: (jobId?: string) => Promise<void>
   cancelActiveRender: () => Promise<void>
@@ -417,6 +425,15 @@ const recoveryTimers: Record<RecoveryKind, ReturnType<typeof window.setTimeout> 
   comfyConnection: null,
 }
 const renderRetryTimers = new Map<string, ReturnType<typeof window.setTimeout>>()
+/**
+ * How often to re-read the backend render status files while a job is in flight. The Rust side
+ * streams ffmpeg's `-progress` output into `{job}.status.json` continuously; 1 s is fast enough
+ * for a progress bar to feel live and slow enough that reading a few small JSON files is free.
+ */
+const RENDER_STATUS_POLL_MS = 1_000
+let renderStatusPollTimer: ReturnType<typeof window.setInterval> | null = null
+/** Guards against a slow poll overlapping the next tick. */
+let renderStatusPollInFlight = false
 const pendingPreviewFrameRequests = new Set<string>()
 const pendingNodePreviewRequests = new Set<string>()
 
@@ -2549,6 +2566,52 @@ function applyMutation(
   }))
 
   appendWalSafely(set, { id: commandId, timestamp: walTimestamp, type, label, project: after, patches })
+}
+
+/**
+ * Like `applyMutation`, but for project state the *machine* authored rather than the user —
+ * background render-status polls, asset-watcher results. It still produces patches, revalidates,
+ * and appends to the WAL (so crash recovery stays complete); it just never pushes a history
+ * command.
+ *
+ * That distinction matters three ways: a background write must not be undoable (undo would revert
+ * a *fact*, not an edit — e.g. dropping a queue row while ffmpeg keeps encoding), must not clear a
+ * pending redo, and must not evict the user's real edits from the bounded 200-entry history. It
+ * also leaves `ui.statusMessage` alone, so a 1 Hz poll cannot spam the status bar.
+ */
+function applySystemMutation(
+  set: StoreSetter,
+  get: () => ProjectStoreState,
+  type: string,
+  label: string,
+  mutate: (project: FluxNodeProject) => void,
+) {
+  const before = get().project
+  const [after, patches] = produceWithPatches(before, (draft) => {
+    mutate(draft as FluxNodeProject)
+    syncUpdatedAt(draft as FluxNodeProject)
+  })
+
+  if (patches.length === 0) {
+    return
+  }
+
+  const validationState = getValidationState(after)
+
+  set((state) => ({
+    project: after,
+    runtimeCacheMetrics: buildRuntimeCacheMetrics({ ...state, project: after }),
+    ...validationState,
+  }))
+
+  appendWalSafely(set, {
+    id: nextId(type),
+    timestamp: new Date().toISOString(),
+    type,
+    label,
+    project: after,
+    patches,
+  })
 }
 
 function applyGroupedMutations(
@@ -6548,10 +6611,38 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       })
     })
   },
+  startRenderStatusPolling: () => {
+    if (renderStatusPollTimer !== null) {
+      return
+    }
+    renderStatusPollTimer = window.setInterval(() => {
+      // Skip a tick rather than stacking refreshes if the previous one is still in flight.
+      if (renderStatusPollInFlight) {
+        return
+      }
+      renderStatusPollInFlight = true
+      void (async () => {
+        try {
+          await get().refreshRenderStatuses()
+        } finally {
+          renderStatusPollInFlight = false
+        }
+        // Retire the timer as soon as nothing is in flight; `queueRender` restarts it.
+        if (!hasActiveRenderJobs(get().project.output.queue)) {
+          get().stopRenderStatusPolling()
+        }
+      })()
+    }, RENDER_STATUS_POLL_MS)
+  },
+  stopRenderStatusPolling: () => {
+    if (renderStatusPollTimer === null) {
+      return
+    }
+    window.clearInterval(renderStatusPollTimer)
+    renderStatusPollTimer = null
+  },
   refreshRenderStatuses: async () => {
-    const queuedJobs = get().project.output.queue.filter(
-      (job) => job.status === 'queued' || job.status === 'rendering' || job.status === 'paused',
-    )
+    const queuedJobs = get().project.output.queue.filter(isActiveRenderJob)
 
     if (queuedJobs.length === 0) {
       return
@@ -6601,7 +6692,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
           .filter((entry) => canOpenPathInShell(entry.outputPath))
       : []
 
-    applyMutation(set, get, 'render.queue.refresh', 'Render queue refreshed', (project) => {
+    applySystemMutation(set, get, 'render.queue.refresh', 'Render queue refreshed', (project) => {
       for (const entry of statuses) {
         const job = project.output.queue.find((item) => item.id === entry.jobId)
 

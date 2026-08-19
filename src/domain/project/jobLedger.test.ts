@@ -8,6 +8,7 @@ import {
   formatElapsedSince,
   formatEtaRemaining,
   formatOrdinal,
+  hasActiveRenderJobs,
   selectVisibleLedgerJobs,
   sortLedgerJobs,
 } from './jobLedger'
@@ -259,5 +260,25 @@ describe('jobLedger: selectVisibleLedgerJobs', () => {
       hoveredJobIds: new Set(['a']),
     })
     expect(pinned).toHaveLength(1)
+  })
+})
+
+describe('hasActiveRenderJobs', () => {
+  it.each(['queued', 'rendering', 'paused'] as const)('treats a %s job as still needing watching', (status) => {
+    expect(hasActiveRenderJobs([makeJob({ id: 'a', status })])).toBe(true)
+  })
+
+  it.each(['completed', 'failed', 'cancelled'] as const)('treats a %s job as finished', (status) => {
+    expect(hasActiveRenderJobs([makeJob({ id: 'a', status })])).toBe(false)
+  })
+
+  it('is false for an empty queue', () => {
+    expect(hasActiveRenderJobs([])).toBe(false)
+  })
+
+  it('is true when any one job in a mixed queue is still active', () => {
+    expect(
+      hasActiveRenderJobs([makeJob({ id: 'a', status: 'completed' }), makeJob({ id: 'b', status: 'queued' })]),
+    ).toBe(true)
   })
 })
