@@ -25,7 +25,7 @@ import {
   type HistoryState,
 } from '../domain/history/history-manager'
 import { nextId } from '../domain/id'
-import { createDefaultProject, createTemplateProject, type ProjectTemplateId } from '../domain/project/defaults'
+import { createDefaultProject, createNarratedSceneCpuPreset, createTemplateProject, type ProjectTemplateId } from '../domain/project/defaults'
 import { hasMaterializedWorkflowResult } from '../domain/project/workflow-results'
 import { activeViewForRatio, clampHorizonRatio, DEFAULT_HORIZON_RATIO, defaultRatioForView } from '../domain/project/horizon'
 import { clampStudioInspectorWidth, clampStudioMediaWidth, clampStudioTimelineHeight } from '../domain/project/studio-layout'
@@ -108,6 +108,7 @@ import { decodePreviewFrame } from '../services/ipc/video-preview'
 import { renderNodePreview } from '../services/ipc/node-preview'
 import { generateComfyNode, pingComfy } from '../services/ipc/comfy'
 import { materializeGeneratedWorkflowImage } from '../services/ipc/workflow-result'
+import type { NarratedSceneResult } from '../services/ipc/narrated-scene'
 import { invokeAction } from '../services/ipc/action-invoke'
 import { hasActiveRenderJobs, isActiveRenderJob } from '../domain/project/jobLedger'
 import { isTauriRuntime } from '../services/ipc/tauri-runtime'
@@ -258,6 +259,7 @@ interface ProjectStoreState {
   requestNodePreview: (nodeId: string, width?: number, height?: number) => Promise<void>
   runAiNode: (nodeId: string) => Promise<void>
   materializeGeneratedWorkflowResult: (nodeId: string) => Promise<void>
+  materializeNarratedScene: (scene: NarratedSceneResult, expectedProjectId: string) => Promise<string | null>
   pingComfyConnection: () => Promise<boolean>
   unlinkSelectedMedia: () => void
   showSelectedClipInWorkflow: () => void
@@ -369,7 +371,7 @@ interface ProjectStoreState {
   validateWorkflow: () => void
   showWorkflowConnectionFeedback: (feedback: Omit<WorkflowConnectionFeedback, 'shakeKey'>) => void
   clearWorkflowConnectionFeedback: () => void
-  enqueueRender: () => Promise<void>
+  enqueueRender: (presetId?: string) => Promise<void>
   refreshRenderStatuses: () => Promise<void>
   /**
    * Begin watching in-flight render jobs. Idempotent, and retires itself once no job is active,
@@ -4870,6 +4872,154 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       pendingWorkflowResultMaterializations.delete(pendingKey)
     }
   },
+  materializeNarratedScene: async (scene, expectedProjectId) => {
+    if (!isTauriRuntime()) {
+      throw new Error('Narrated scenes can only be saved in the FluxNode desktop app.')
+    }
+
+    const initialState = get()
+    if (initialState.project.meta.id !== expectedProjectId) {
+      throw new Error('The active project changed while the narrated scene was generating.')
+    }
+    if (!initialState.ui.currentProjectPath) {
+      throw new Error('Save this project before generating a narrated scene.')
+    }
+
+    const imageAssetId = nextId('asset')
+    const audioAssetId = nextId('asset')
+    const [imageCopy, audioCopy] = await Promise.all([
+      copyAssetIntoProject(imageAssetId, scene.imagePath),
+      copyAssetIntoProject(audioAssetId, scene.audioPath),
+    ])
+    const [imageInspection, audioInspection] = await Promise.all([
+      inspectAssetPath(imageCopy.absolutePath),
+      inspectAssetPath(audioCopy.absolutePath),
+    ])
+    if (!imageInspection.exists || !imageInspection.isFile || !audioInspection.exists || !audioInspection.isFile) {
+      throw new Error('The generated image or narration was not found after copying into the project.')
+    }
+    const [imageProbe, audioProbe] = await Promise.all([
+      probeAssetMetadata(imageCopy.absolutePath),
+      probeAssetMetadata(audioCopy.absolutePath),
+    ])
+    const imageAsset = buildAssetFromInspection(imageAssetId, imageInspection, imageProbe)
+    imageAsset.sourcePath = imageCopy.absolutePath
+    imageAsset.relativePath = imageCopy.relativePath
+    imageAsset.status = 'linked'
+    const audioAsset = buildAssetFromInspection(audioAssetId, audioInspection, audioProbe)
+    audioAsset.sourcePath = audioCopy.absolutePath
+    audioAsset.relativePath = audioCopy.relativePath
+    audioAsset.status = 'linked'
+    const audioDuration = audioAsset.duration
+    if (!audioDuration || !Number.isFinite(audioDuration) || audioDuration <= 0) {
+      throw new Error('Lalin narration duration could not be read from the generated WAV.')
+    }
+
+    let createdImageClipId: string | null = null
+    let createdImageTrackId: string | null = null
+    let sceneStartTime = 0
+    applyMutation(set, get, 'narrated_scene.materialize', 'Narrated scene added to timeline', (project) => {
+      if (project.meta.id !== expectedProjectId) {
+        throw new Error('The active project changed while the generated media was being saved.')
+      }
+      if (project.assets.assets[imageAsset.id] || project.assets.assets[audioAsset.id]) {
+        throw new Error('A generated scene asset id was already in use.')
+      }
+
+      project.assets.assets[imageAsset.id] = structuredClone(imageAsset)
+      project.assets.assets[audioAsset.id] = structuredClone(audioAsset)
+      if (!project.output.presets.some((preset) => preset.id === 'preset-narrated-scene-cpu')) {
+        project.output.presets.push(createNarratedSceneCpuPreset())
+      }
+      const videoTrack = getOrCreateTrack(project, 'video')
+      const audioTrack = getOrCreateTrack(project, 'audio')
+      const clips = getAllTimelineClips(project)
+      const startTime = Number(
+        (clips.reduce((end, clip) => Math.max(end, clip.startTime + clip.duration), 0) + (clips.length ? 0.4 : 0)).toFixed(2),
+      )
+      sceneStartTime = startTime
+      const imageClipId = nextId('clip')
+      const audioClipId = nextId('clip')
+      const imageNode = createMediaSourceNode(project, imageClipId, imageAsset.id, imageInspection.fileName)
+      const audioNode = createMediaSourceNode(project, audioClipId, audioAsset.id, audioInspection.fileName)
+      const clipDuration = Number(audioDuration.toFixed(3))
+      const transform = {
+        x: 0,
+        y: 0,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: 0,
+        anchorX: 0.5,
+        anchorY: 0.5,
+      }
+
+      videoTrack.clips.push({
+        id: imageClipId,
+        assetId: imageAsset.id,
+        trackId: videoTrack.id,
+        startTime,
+        duration: clipDuration,
+        inPoint: 0,
+        outPoint: clipDuration,
+        speed: 1,
+        volume: 1,
+        opacity: 1,
+        transform,
+        keyframes: [],
+        linkedClipId: audioClipId,
+        workflowNodeId: imageNode.id,
+      })
+      audioTrack.clips.push({
+        id: audioClipId,
+        assetId: audioAsset.id,
+        trackId: audioTrack.id,
+        startTime,
+        duration: clipDuration,
+        inPoint: 0,
+        outPoint: clipDuration,
+        speed: 1,
+        volume: 1,
+        opacity: 1,
+        transform,
+        keyframes: [],
+        linkedClipId: imageClipId,
+        workflowNodeId: audioNode.id,
+      })
+      project.workflow.nodes.push(imageNode, audioNode)
+      createdImageClipId = imageClipId
+      createdImageTrackId = videoTrack.id
+    })
+
+    if (!createdImageClipId || !createdImageTrackId) {
+      throw new Error('The narrated scene could not be added to the project timeline.')
+    }
+    const selectedImageClipId = createdImageClipId
+    const selectedImageTrackId = createdImageTrackId
+    set((currentState) => ({
+      ui: {
+        ...currentState.ui,
+        activeView: 'timeline',
+        selectedClipId: selectedImageClipId,
+        selectedClipIds: [selectedImageClipId],
+        selectedTrackId: selectedImageTrackId,
+        selectedNodeId: null,
+        selectedNodeIds: [],
+        statusMessage: `Narrated scene added at ${sceneStartTime.toFixed(2)}s`,
+      },
+    }))
+
+    await get().autoSaveProject()
+    const queueLengthBefore = get().project.output.queue.length
+    await get().enqueueRender('preset-narrated-scene-cpu')
+    const latestJob = get().project.output.queue.at(-1)
+    const renderJobId = get().project.output.queue.length > queueLengthBefore ? latestJob?.id ?? null : null
+    if (renderJobId) {
+      get().startRenderStatusPolling()
+    }
+    await generateThumbnailForAssetRecord(set, get, imageAsset.id)
+    await get().generateWaveformForAsset(audioAsset.id)
+    return renderJobId
+  },
   pingComfyConnection: async () => {
     const endpoint = get().preferences.comfyUiEndpoint
     const connected = await pingComfy(endpoint)
@@ -6715,7 +6865,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         },
       },
     })),
-  enqueueRender: async () => {
+  enqueueRender: async (presetId) => {
     // Checked first, before validation: no amount of fixing the project makes rendering possible
     // in browser preview mode, so lead with the real reason rather than a validation-shaped one.
     // `startExportJob`/`startRenderJob` also refuse this on their own (defense in depth — nothing
@@ -6738,8 +6888,8 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     const projectSnapshot = cloneProject(get().project)
     const renderBlockingIssues = collectRenderBlockingIssues(projectSnapshot)
     const activePreset =
-      projectSnapshot.output.presets.find((preset) => preset.id === projectSnapshot.output.activePresetId) ??
-      projectSnapshot.output.presets[0]
+      projectSnapshot.output.presets.find((preset) => preset.id === (presetId ?? projectSnapshot.output.activePresetId)) ??
+      (presetId ? undefined : projectSnapshot.output.presets[0])
 
     if (renderBlockingIssues.length > 0) {
       const detail = renderBlockingIssues.slice(0, 4).join(' ')

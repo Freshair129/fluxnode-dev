@@ -56,6 +56,9 @@ const CommandPalette = lazy(() =>
 const CopilotPanel = lazy(() =>
   import('../features/copilot/CopilotPanel').then((module) => ({ default: module.CopilotPanel })),
 )
+const NarratedSceneModal = lazy(() =>
+  import('../features/workflow/NarratedSceneModal').then((module) => ({ default: module.NarratedSceneModal })),
+)
 
 export default function App() {
   const detachedPanel = useMemo(() => getDetachedPanelFromLocation(), [])
@@ -113,6 +116,7 @@ export default function App() {
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
   const [showCopilot, setShowCopilot] = useState(false)
+  const [showNarratedScene, setShowNarratedScene] = useState(false)
   // MERIDIAN item 9: the status bar's secondary surfaces (export sheet + the four drawers) are
   // UI-local state, same as showShortcutsHelp/showCommandPalette above — not store state, per the
   // item-9 hard constraint ("do not change the store contract... adding UI-state fields... is
@@ -627,6 +631,7 @@ export default function App() {
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:80px_80px] opacity-20" />
         <ErrorBoundary label="Header" compact>
           <Header
+            onNarratedScene={() => setShowNarratedScene(true)}
             onExport={() => {
               setOpenStatusDrawer(null)
               setShowExportSheet(true)
@@ -726,6 +731,13 @@ export default function App() {
             />
           </Suspense>
         </ErrorBoundary>
+        {showNarratedScene ? (
+          <ErrorBoundary label="Narrated scene workflow" compact>
+            <Suspense fallback={<ModalFallback label="Loading narrated scene workflow" />}>
+              <NarratedSceneModal onClose={() => setShowNarratedScene(false)} />
+            </Suspense>
+          </ErrorBoundary>
+        ) : null}
         <ErrorBoundary label="Notifications" compact>
           <ErrorToasts />
         </ErrorBoundary>

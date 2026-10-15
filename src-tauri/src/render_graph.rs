@@ -185,6 +185,7 @@ pub fn select_video_encoder(preset: &Value) -> &'static str {
 
     match codec.as_str() {
         "h264" | "avc" => return "h264_nvenc",
+        "h264_software" => return "libx264",
         "h265" | "hevc" => return "hevc_nvenc",
         "vp9" => return "libvpx-vp9",
         "prores" => return "prores_ks",
@@ -212,6 +213,21 @@ fn quality_args(encoder: &str, preset: &Value) -> Vec<String> {
                 _ => "20",
             };
             vec!["-cq".to_string(), cq.to_string()]
+        }
+        "libx264" => {
+            let crf = match quality {
+                "draft" => "32",
+                "medium" => "26",
+                "high" => "22",
+                "lossless" => "0",
+                _ => "26",
+            };
+            vec![
+                "-preset".to_string(),
+                "ultrafast".to_string(),
+                "-crf".to_string(),
+                crf.to_string(),
+            ]
         }
         "libvpx-vp9" => {
             let crf = match quality {
@@ -854,6 +870,10 @@ mod tests {
             "h264_nvenc"
         );
         assert_eq!(
+            select_video_encoder(&json!({ "videoCodec": "h264_software", "format": "mp4" })),
+            "libx264"
+        );
+        assert_eq!(
             select_video_encoder(&json!({ "videoCodec": "h265", "format": "mp4" })),
             "hevc_nvenc"
         );
@@ -905,6 +925,36 @@ mod tests {
             arg_after(&plan.args, "-b:a").map(|s| s.as_str()),
             Some("320k")
         );
+    }
+
+    #[test]
+    fn narrated_scene_cpu_preset_uses_software_h264_and_keeps_audio() {
+        let mut preset = h264_preset();
+        preset["videoCodec"] = json!("h264_software");
+        preset["quality"] = json!("medium");
+        let plan = build_render_plan(&sample_project(), &preset, "narrated-scene.mp4").unwrap();
+
+        assert_eq!(
+            arg_after(&plan.args, "-c:v").map(String::as_str),
+            Some("libx264")
+        );
+        assert_eq!(
+            arg_after(&plan.args, "-preset").map(String::as_str),
+            Some("ultrafast")
+        );
+        assert_eq!(
+            arg_after(&plan.args, "-crf").map(String::as_str),
+            Some("26")
+        );
+        assert_eq!(
+            arg_after(&plan.args, "-c:a").map(String::as_str),
+            Some("aac")
+        );
+        assert!(plan.args.iter().any(|argument| argument == "[aout]"));
+        assert!(!plan
+            .args
+            .iter()
+            .any(|argument| argument.ends_with("_nvenc")));
     }
 
     #[test]

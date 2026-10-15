@@ -1,4 +1,4 @@
-import { Cloud, Cpu, Download, FileVideo, Menu as MenuIcon, PanelsTopLeft, Redo2, Settings2, Undo2, WifiOff } from 'lucide-react'
+import { Clapperboard, Cloud, Cpu, Download, FileVideo, Menu as MenuIcon, PanelsTopLeft, Redo2, Settings2, Undo2, WifiOff } from 'lucide-react'
 import {
   createProjectWithPicker,
   openProjectWithPicker,
@@ -11,6 +11,8 @@ import { Menu, MenuItem } from '../../components/Menu'
 export interface HeaderProps {
   /** Opens the export sheet (owned by App, same surface the status bar toggles). */
   onExport?: () => void
+  /** Opens the one-step local ComfyUI + Lalin narrated-scene workflow. */
+  onNarratedScene?: () => void
 }
 
 /**
@@ -19,7 +21,7 @@ export interface HeaderProps {
  * right. Everything that used to be a labeled pill here now lives in the File and View menus; the
  * status rows moved to the status bar, keeping only the aria-live status message.
  */
-export function Header({ onExport }: HeaderProps = {}) {
+export function Header({ onExport, onNarratedScene }: HeaderProps = {}) {
   const projectName = useProjectStore((state) => state.project.meta.name)
   const activeView = useProjectStore((state) => state.ui.activeView)
   const computeMode = useProjectStore((state) => state.project.workflow.computeMode)
@@ -204,6 +206,17 @@ export function Header({ onExport }: HeaderProps = {}) {
         <IconButton size="sm" label="Open settings" onClick={openSettings}>
           <Settings2 size={14} />
         </IconButton>
+
+        <button
+          type="button"
+          onClick={() => onNarratedScene?.()}
+          aria-label="Create narrated scene"
+          title="Generate an image and narration, then export an MP4"
+          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[#e0ff00]/30 bg-[#e0ff00]/8 px-3 text-xs font-medium text-[#e8f68a] transition hover:border-[#e0ff00]/60 hover:bg-[#e0ff00]/15"
+        >
+          <Clapperboard size={14} aria-hidden="true" />
+          <span className="hidden sm:inline">Narrated scene</span>
+        </button>
 
         <button
           type="button"

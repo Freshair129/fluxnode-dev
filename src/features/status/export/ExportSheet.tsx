@@ -41,7 +41,7 @@ export function ExportSheet({ onClose, onInspect }: { onClose: () => void; onIns
             {queue.length === 0 ? 'No render jobs yet. Use Queue Render below.' : `${queue.length} render job(s) tracked in the project queue.`}
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <button type="button" onClick={enqueueRender} className="rounded-full bg-[#e0ff00] px-4 py-2 text-sm font-semibold text-black">
+            <button type="button" onClick={() => void enqueueRender()} className="rounded-full bg-[#e0ff00] px-4 py-2 text-sm font-semibold text-black">
               Queue Render
             </button>
             <button type="button" onClick={() => void refreshRenderStatuses()} className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white">

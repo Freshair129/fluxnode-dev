@@ -9,6 +9,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- A Narrated scene workflow connects FluxNode to local Comfy Desktop, local-llm-hub, and Lalin: it generates a Qwen image and voice audio, verifies each provider's GPU release before moving to the next stage, adds both outputs to the saved project, and exports a CPU-rendered H.264/AAC MP4. The workflow UI reports stage failures and output paths; `docs/narrated-scene-workflow.md` documents setup, cooperative GPU limits, and the separate live hardware acceptance requirements.
 - MCP now defaults to read-only access; Rust-backed writes require `--allow-writes`, while
   frontend-only timeline actions are not advertised over stdio. Proposal responses are returned
   as errors instead of successful tool executions.

@@ -17,6 +17,7 @@ mod brain;
 mod comfy;
 mod mcp;
 mod media;
+mod narrated_scene;
 mod render_graph;
 mod security;
 mod services;
@@ -2372,6 +2373,27 @@ async fn comfy_generate(
     .map_err(|error| error.to_string())?
 }
 
+/// Lists the saved voice profiles available from the loopback Lalin API.
+#[tauri::command]
+async fn narrated_scene_list_voices() -> Result<Vec<narrated_scene::VoiceOption>, String> {
+    tokio::task::spawn_blocking(narrated_scene::list_voices)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+/// Runs one GPU-coordinated Qwen image + Lalin TTS scene workflow.
+#[tauri::command]
+async fn narrated_scene_run(
+    app: AppHandle,
+    image_prompt: String,
+    narration: String,
+    voice_id: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || narrated_scene::run(app, image_prompt, narration, voice_id))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
 fn is_local_comfy_endpoint(endpoint: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(endpoint) else {
         return false;
@@ -4146,6 +4168,8 @@ pub fn run() {
             start_export_job,
             comfy_ping,
             comfy_generate,
+            narrated_scene_list_voices,
+            narrated_scene_run,
             video_decode_frame,
             video_seek,
             workflow_render_node,
@@ -4496,6 +4520,10 @@ mod render_pipeline_tests {
         assert!(ffmpeg_plan_uses_gpu_encoder(&[
             "-c:v".to_string(),
             "hevc_nvenc".to_string(),
+        ]));
+        assert!(!ffmpeg_plan_uses_gpu_encoder(&[
+            "-c:v".to_string(),
+            "libx264".to_string(),
         ]));
     }
 

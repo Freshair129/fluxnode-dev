@@ -6,12 +6,28 @@ import type {
   Clip,
   DetachedPanelKind,
   FluxNodeProject,
+  RenderPreset,
   Track,
   WorkflowEdge,
   WorkflowNode,
 } from './types'
 
 export type ProjectTemplateId = 'quick-edit' | 'ai-workflow' | 'shader-fx'
+
+export function createNarratedSceneCpuPreset(): RenderPreset {
+  return {
+    id: 'preset-narrated-scene-cpu',
+    name: 'Narrated Scene MP4 (CPU)',
+    format: 'mp4',
+    videoCodec: 'h264_software',
+    audioCodec: 'aac',
+    quality: 'medium',
+    resolution: { width: 960, height: 540 },
+    frameRate: 24,
+    videoBitrateMbps: 4,
+    audioBitrateKbps: 192,
+  }
+}
 
 function nowIso() {
   return new Date().toISOString()
@@ -508,6 +524,7 @@ export function createTemplateProject(templateId: ProjectTemplateId): FluxNodePr
           videoBitrateMbps: 18,
           audioBitrateKbps: 320,
         },
+        createNarratedSceneCpuPreset(),
         {
           id: 'preset-review-webm',
           name: 'Review WebM',
