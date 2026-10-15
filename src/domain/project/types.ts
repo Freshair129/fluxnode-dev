@@ -223,6 +223,8 @@ export interface WorkflowClipboard {
 export interface MediaSourceData {
   assetId: string | null
   timelineClipId: string | null
+  sourceWorkflowNodeId?: string
+  sourceWorkflowResultId?: string
 }
 
 export interface CameraData {
@@ -499,7 +501,7 @@ export interface WorkflowConnectionFeedback {
 }
 
 export type OutputContainer = 'mp4' | 'mov' | 'webm' | 'mkv' | 'gif' | 'png_sequence'
-export type OutputVideoCodec = 'h264' | 'h265' | 'prores' | 'vp9' | 'av1' | null
+export type OutputVideoCodec = 'h264' | 'h264_software' | 'h265' | 'prores' | 'vp9' | 'av1' | null
 export type OutputAudioCodec = 'aac' | 'pcm' | 'opus' | 'mp3' | null
 export type OutputQuality = 'draft' | 'medium' | 'high' | 'lossless'
 export type OutputFormat = OutputContainer
@@ -849,6 +851,8 @@ export interface WaveformCacheEntry {
 export interface PreviewFrameData {
   assetId: string
   sourcePath: string
+  sourceFileName?: string | null
+  sourceResultId?: string | null
   requestedTime: number
   width: number
   height: number

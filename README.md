@@ -42,6 +42,10 @@ npm run test:watch
 
 Current automated coverage is still targeted rather than exhaustive. The existing suite covers workflow node-definition invariants and audio clip scheduling logic. The repo is not yet a full TDD codebase, but the preferred direction is to add or update tests alongside domain and state changes.
 
+## Narrated-scene workflow
+
+The desktop includes one local workflow that generates a scene image with the installed Qwen models in Comfy Desktop, creates narration with a saved Lalin voice, adds both assets to the open FluxNode project, and exports an H.264/AAC MP4 using the CPU renderer. It coordinates the GPU through local-llm-hub and verifies provider release before moving between GPU stages. See [the narrated-scene runbook](docs/narrated-scene-workflow.md) for prerequisites, startup, release behavior, and limits.
+
 ## Architecture
 
 ### Dual runtime

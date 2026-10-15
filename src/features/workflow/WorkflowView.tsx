@@ -3,6 +3,7 @@ import { ArrowRight, CheckCircle2, ClipboardPaste, Cloud, Copy, CopyPlus, Cpu, L
 import { NODE_PORT_DEFINITIONS } from '../../domain/workflow/node-definitions'
 import { validateConnectionAttempt } from '../../domain/workflow/validation'
 import type { NodeType, WorkflowNode, WorkflowState } from '../../domain/project/types'
+import { hasMaterializedWorkflowResult } from '../../domain/project/workflow-results'
 import { buildNodePreviewSource, useProjectStore } from '../../store/project-store'
 import { isTauriRuntime } from '../../services/ipc/tauri-runtime'
 import { useModalA11y } from '../settings/useModalA11y'
@@ -137,6 +138,7 @@ function WorkflowViewImpl({ frame = 'contained' }: WorkflowViewProps = {}) {
   const loadPreviewFrameForSelectedNode = useProjectStore((state) => state.loadPreviewFrameForSelectedNode)
   const requestNodePreview = useProjectStore((state) => state.requestNodePreview)
   const runAiNode = useProjectStore((state) => state.runAiNode)
+  const materializeGeneratedWorkflowResult = useProjectStore((state) => state.materializeGeneratedWorkflowResult)
   const aiNodeGenerationInFlight = useProjectStore((state) => state.aiNodeGenerationInFlight)
   const nodePreviewFrames = useProjectStore((state) => state.nodePreviewFrames)
   const isTauri = isTauriRuntime()
@@ -172,6 +174,7 @@ function WorkflowViewImpl({ frame = 'contained' }: WorkflowViewProps = {}) {
   // "next", so document order is the pragmatic, still fully keyboard-operable
   // choice here).
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
+  const [materializingNodeId, setMaterializingNodeId] = useState<string | null>(null)
   const nodeElementRefs = useRef(new Map<string, HTMLElement>())
   const filteredNodeTypes = useMemo(
     () =>
@@ -1195,6 +1198,69 @@ function WorkflowViewImpl({ frame = 'contained' }: WorkflowViewProps = {}) {
                             draggable={false}
                           />
                         </div>
+                      ) : null}
+
+                      {!compact &&
+                      selectedNodeIds[0] === node.id &&
+                      node.type === 'ai_generate' &&
+                      selectedNodePreviewFrame?.mimeType === 'image/png' ? (
+                        (() => {
+                          const resultId = selectedNodePreviewFrame.sourceResultId?.trim() ?? ''
+                          const generatedOutputAdded = hasMaterializedWorkflowResult(
+                            workflow.nodes,
+                            node.id,
+                            resultId,
+                          )
+                          const materializing = materializingNodeId === node.id
+                          const missingResultId = !resultId
+                          const disabled = !isTauri || materializing || generatedOutputAdded || missingResultId
+
+                          return (
+                            <button
+                              type="button"
+                              disabled={disabled}
+                              title={
+                                !isTauri
+                                  ? 'Saving generated media requires the desktop app.'
+                                  : missingResultId
+                                    ? 'Run this node again to get a result identity that can be saved safely.'
+                                  : generatedOutputAdded
+                                    ? 'This result is already on the timeline.'
+                                    : 'Save this PNG in the project and add it to the timeline.'
+                              }
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                if (disabled) return
+                                setMaterializingNodeId(node.id)
+                                void materializeGeneratedWorkflowResult(node.id).finally(() => {
+                                  setMaterializingNodeId((current) => (current === node.id ? null : current))
+                                })
+                              }}
+                              className={`mt-3 inline-flex w-full items-center justify-center gap-2 rounded-[1rem] border px-4 py-2 text-sm font-semibold transition ${
+                                disabled
+                                  ? 'cursor-not-allowed border-white/10 bg-white/5 text-text-secondary opacity-60'
+                                  : 'border-accent/40 bg-accent text-black hover:bg-[#eaff4d]'
+                              }`}
+                            >
+                              {materializing ? (
+                                <>
+                                  <Loader2 size={16} className="animate-spin" />
+                                  Saving to project…
+                                </>
+                              ) : generatedOutputAdded ? (
+                                <>
+                                  <CheckCircle2 size={16} />
+                                  Added to timeline
+                                </>
+                              ) : (
+                                <>
+                                  <Plus size={16} />
+                                  Add to timeline
+                                </>
+                              )}
+                            </button>
+                          )
+                        })()
                       ) : null}
                     </article>
                   )

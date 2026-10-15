@@ -352,7 +352,7 @@ fn color_correct_chain(data: &Value) -> Vec<String> {
     let saturation = obj_f64(data, "saturation").unwrap_or(1.0);
     let gamma = obj_f64(data, "gamma").unwrap_or(1.0);
 
-    let parts = vec![
+    let parts = [
         format!("brightness={}", num(brightness)),
         format!("contrast={}", num(contrast)),
         format!("saturation={}", num(saturation)),
@@ -927,7 +927,7 @@ mod tests {
                 "nodes": [
                     { "id": "src", "type": "media_source", "bypassed": false, "data": { "assetId": "a" } },
                     { "id": "xf", "type": "transform", "bypassed": false,
-                      "data": { "x": 100.0, "y": 50.0, "rotation": 1.5708, "opacity": 0.5 } }
+                      "data": { "x": 100.0, "y": 50.0, "rotation": std::f64::consts::FRAC_PI_2, "opacity": 0.5 } }
                 ],
                 "edges": [
                     { "id": "e1", "source": "src", "target": "xf", "targetHandle": "input" }
@@ -937,7 +937,7 @@ mod tests {
         let plan = build_workflow_plan(&project, "xf", "out.mp4").unwrap();
         let g = filter_graph(&plan);
         assert!(g.contains("pad=1920:1080:100:50"), "pad translation: {g}");
-        assert!(g.contains("rotate=1.5708"), "rotate: {g}");
+        assert!(g.contains("rotate=1.570796"), "rotate: {g}");
         assert!(g.contains("colorchannelmixer=aa=0.5"), "opacity: {g}");
     }
 

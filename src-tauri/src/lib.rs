@@ -2,11 +2,11 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs;
-use std::io::{BufRead, BufReader};
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Mutex, Once, OnceLock};
+use std::sync::{Arc, Mutex, Once, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sysinfo::{Disks, System};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -17,6 +17,7 @@ mod brain;
 mod comfy;
 mod mcp;
 mod media;
+mod narrated_scene;
 mod render_graph;
 mod security;
 mod services;
@@ -83,6 +84,8 @@ struct WaveformCacheResult {
 struct PreviewFrameData {
     asset_id: String,
     source_path: String,
+    source_file_name: Option<String>,
+    source_result_id: Option<String>,
     requested_time: f64,
     width: u32,
     height: u32,
@@ -478,7 +481,7 @@ fn build_bounded_wal_lines(existing: Vec<String>, entry_json: &str) -> Result<Ve
 
     let has_snapshot = entry
         .get("projectSnapshot")
-        .map_or(false, |value| !value.is_null());
+        .is_some_and(|value| !value.is_null());
     let embed_snapshot =
         has_snapshot && (!found_snapshot || since_snapshot >= WAL_SNAPSHOT_INTERVAL);
 
@@ -896,7 +899,7 @@ fn asset_generate_waveform_blocking(
 ) -> Result<String, String> {
     let project_dir = get_current_project_dir(app)?
         .or_else(|| {
-            ensure_app_dir(&app)
+            ensure_app_dir(app)
                 .ok()
                 .map(|dir| dir.join("workspace").join("unsaved.fluxnode"))
         })
@@ -966,6 +969,148 @@ fn base64_encode(input: &[u8]) -> String {
         }
     }
     out
+}
+
+/// Strict decoder for the standard padded base64 emitted by FluxNode and ComfyUI.
+fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
+    fn value(byte: u8) -> Result<u32, String> {
+        match byte {
+            b'A'..=b'Z' => Ok((byte - b'A') as u32),
+            b'a'..=b'z' => Ok((byte - b'a' + 26) as u32),
+            b'0'..=b'9' => Ok((byte - b'0' + 52) as u32),
+            b'+' => Ok(62),
+            b'/' => Ok(63),
+            _ => Err(format!("invalid base64 byte: {byte}")),
+        }
+    }
+
+    if !input.len().is_multiple_of(4) {
+        return Err("base64 input must use complete padded groups".to_string());
+    }
+    let mut output = Vec::with_capacity(input.len() / 4 * 3);
+    let group_count = input.len() / 4;
+    for (index, group) in input.as_bytes().chunks_exact(4).enumerate() {
+        let last_group = index + 1 == group_count;
+        let third_padded = group[2] == b'=';
+        let fourth_padded = group[3] == b'=';
+        if group[0] == b'=' || group[1] == b'=' {
+            return Err("invalid base64 padding position".to_string());
+        }
+        if (third_padded || fourth_padded) && !last_group {
+            return Err("base64 padding is only valid in the final group".to_string());
+        }
+        if third_padded && !fourth_padded {
+            return Err("invalid base64 padding sequence".to_string());
+        }
+
+        let first = value(group[0])?;
+        let second = value(group[1])?;
+        let third = if third_padded { 0 } else { value(group[2])? };
+        let fourth = if fourth_padded { 0 } else { value(group[3])? };
+        if third_padded && (second & 0x0f) != 0 {
+            return Err("non-canonical base64 padding bits".to_string());
+        }
+        if fourth_padded && !third_padded && (third & 0x03) != 0 {
+            return Err("non-canonical base64 padding bits".to_string());
+        }
+
+        let triple = (first << 18) | (second << 12) | (third << 6) | fourth;
+        output.push(((triple >> 16) & 0xff) as u8);
+        if !third_padded {
+            output.push(((triple >> 8) & 0xff) as u8);
+        }
+        if !fourth_padded {
+            output.push((triple & 0xff) as u8);
+        }
+    }
+    Ok(output)
+}
+
+const MAX_GENERATED_PNG_BYTES: usize = 64 * 1024 * 1024;
+const PNG_MAGIC: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
+fn is_safe_asset_id(asset_id: &str) -> bool {
+    !asset_id.is_empty()
+        && asset_id.len() <= 100
+        && asset_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn generated_png_file_name(asset_id: &str, source_file_name: &str) -> String {
+    let source_path = source_file_name.replace('\\', "/");
+    let safe_source = security::sanitize_download_filename(
+        &format!("https://fluxnode.invalid/{source_path}"),
+        "generated.png",
+    );
+    let stem = Path::new(&safe_source)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("generated");
+    format!("{asset_id}-{stem}.png")
+}
+
+fn decode_generated_png(data_url: &str) -> Result<Vec<u8>, String> {
+    const PREFIX: &str = "data:image/png;base64,";
+    let payload = data_url
+        .strip_prefix(PREFIX)
+        .ok_or_else(|| "Generated result must be an image/png data URL".to_string())?;
+    let max_encoded_bytes = MAX_GENERATED_PNG_BYTES.div_ceil(3) * 4;
+    if payload.len() > max_encoded_bytes {
+        return Err(format!(
+            "Generated PNG exceeds the {} MiB limit",
+            MAX_GENERATED_PNG_BYTES / (1024 * 1024)
+        ));
+    }
+    let bytes = decode_base64(payload)?;
+    if bytes.is_empty() || bytes.len() > MAX_GENERATED_PNG_BYTES {
+        return Err("Generated PNG is empty or exceeds the size limit".to_string());
+    }
+    if !bytes.starts_with(&PNG_MAGIC) {
+        return Err("Generated result does not contain a valid PNG signature".to_string());
+    }
+    Ok(bytes)
+}
+
+fn validate_generated_png_with_ffprobe(bytes: &[u8], asset_id: &str) -> Result<(), String> {
+    let probe_path = std::env::temp_dir().join(format!(
+        "fluxnode-generated-check-{}-{}-{asset_id}.png",
+        std::process::id(),
+        current_timestamp().replace([':', '.', '-'], "")
+    ));
+    let validation = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&probe_path)
+            .map_err(|error| {
+                format!("could not create generated-image validation file: {error}")
+            })?;
+        file.write_all(bytes)
+            .map_err(|error| format!("could not write generated-image validation file: {error}"))?;
+        drop(file);
+
+        let report = run_ffprobe(&probe_path.to_string_lossy())
+            .map_err(|error| format!("generated result is not a decodable PNG: {error}"))?;
+        let has_video_stream =
+            report
+                .get("streams")
+                .and_then(Value::as_array)
+                .is_some_and(|streams| {
+                    streams.iter().any(|stream| {
+                        stream.get("codec_type").and_then(Value::as_str) == Some("video")
+                            && stream.get("width").and_then(Value::as_u64).unwrap_or(0) > 0
+                            && stream.get("height").and_then(Value::as_u64).unwrap_or(0) > 0
+                    })
+                });
+        if !has_video_stream {
+            return Err("generated PNG has no decodable image dimensions".to_string());
+        }
+        Ok(())
+    })();
+    let _ = fs::remove_file(probe_path);
+    validation
 }
 
 /// Extracts a single video frame at `time` (seconds) into `dest` (a PNG path)
@@ -1120,7 +1265,7 @@ fn asset_generate_thumbnail_blocking(
 ) -> Result<String, String> {
     let project_dir = get_current_project_dir(app)?
         .or_else(|| {
-            ensure_app_dir(&app)
+            ensure_app_dir(app)
                 .ok()
                 .map(|dir| dir.join("workspace").join("unsaved.fluxnode"))
         })
@@ -1198,6 +1343,23 @@ mod thumbnail_tests {
         assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
         assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
         assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn generated_png_payload_requires_png_data_url_signature_and_safe_name() {
+        let bytes = [PNG_MAGIC.as_slice(), b"fixture"].concat();
+        let data_url = format!("data:image/png;base64,{}", base64_encode(&bytes));
+        assert_eq!(decode_generated_png(&data_url).expect("png payload"), bytes);
+        assert!(decode_generated_png("data:image/svg+xml;base64,AA==").is_err());
+        assert!(decode_generated_png("data:image/png;base64,AA==").is_err());
+        assert!(decode_base64("AA=A").is_err());
+        assert!(decode_base64("A").is_err());
+
+        let file_name = generated_png_file_name("asset-42", r"..\..\unsafe\render final.png");
+        assert_eq!(file_name, "asset-42-renderfinal.png");
+        assert!(!file_name.contains('/') && !file_name.contains('\\'));
+        assert!(!is_safe_asset_id("../outside"));
+        assert!(is_safe_asset_id("asset-42_abc"));
     }
 
     #[test]
@@ -1289,6 +1451,64 @@ fn asset_copy_into_project(
 
     serde_json::to_string(&AssetCopyResult {
         asset_id,
+        relative_path: format!("media/{destination_name}"),
+        absolute_path: destination.to_string_lossy().to_string(),
+        copied_at: current_timestamp(),
+    })
+    .map_err(|error| error.to_string())
+}
+
+/// Materialize a successful ComfyUI PNG into the current project's media folder. This is invoked
+/// only after the user clicks the workflow's explicit "Add to timeline" control.
+#[tauri::command]
+async fn workflow_materialize_generated_image(
+    app: AppHandle,
+    project_json: String,
+    asset_id: String,
+    source_file_name: String,
+    data_url: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        workflow_materialize_generated_image_blocking(
+            &app,
+            &project_json,
+            &asset_id,
+            &source_file_name,
+            &data_url,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn workflow_materialize_generated_image_blocking(
+    app: &AppHandle,
+    project_json: &str,
+    asset_id: &str,
+    source_file_name: &str,
+    data_url: &str,
+) -> Result<String, String> {
+    if !is_safe_asset_id(asset_id) {
+        return Err("Generated asset id contains unsupported characters".to_string());
+    }
+    let bytes = decode_generated_png(data_url)?;
+    validate_generated_png_with_ffprobe(&bytes, asset_id)?;
+    let project_dir = get_or_create_current_project_dir(app, project_json)?;
+    let media_dir = security::ensure_allowed_path(app, &project_dir.join("media"))?;
+    ensure_project_structure(&project_dir)?;
+    fs::create_dir_all(&media_dir).map_err(|error| error.to_string())?;
+    let destination_name = generated_png_file_name(asset_id, source_file_name);
+    let destination = media_dir.join(&destination_name);
+    if destination.exists() {
+        return Err(format!(
+            "Generated asset already exists: {}",
+            destination.display()
+        ));
+    }
+    security::atomic_write(&destination, &bytes).map_err(|error| error.to_string())?;
+
+    serde_json::to_string(&AssetCopyResult {
+        asset_id: asset_id.to_string(),
         relative_path: format!("media/{destination_name}"),
         absolute_path: destination.to_string_lossy().to_string(),
         copied_at: current_timestamp(),
@@ -1812,7 +2032,7 @@ fn asset_generate_proxy_blocking(
 ) -> Result<String, String> {
     let project_dir = get_current_project_dir(app)?
         .or_else(|| {
-            ensure_app_dir(&app)
+            ensure_app_dir(app)
                 .ok()
                 .map(|dir| dir.join("workspace").join("unsaved.fluxnode"))
         })
@@ -1997,6 +2217,8 @@ fn decode_preview_frame(
             PreviewFrameData {
                 asset_id,
                 source_path,
+                source_file_name: None,
+                source_result_id: None,
                 requested_time,
                 width,
                 height,
@@ -2051,24 +2273,28 @@ fn workflow_render_node_blocking(
             return Err("ffmpeg sidecar not found".to_string());
         }
         let plan = workflow_graph::build_workflow_plan(&project_value, &node_id, &temp_out_str)?;
-        let output = Command::new(&bin)
-            .args(&plan.args)
-            .output()
-            .map_err(|e| format!("failed to launch ffmpeg: {e}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "ffmpeg failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
-        }
-        // Grab the first frame of the node's rendered output as the preview.
-        Ok(decode_preview_frame(
-            node_id.clone(),
-            temp_out_str.clone(),
-            0.0,
-            width,
-            height,
-        ))
+        let lease = acquire_ffmpeg_gpu_lease(&plan.args)?;
+        let operation = (|| {
+            let output = Command::new(&bin)
+                .args(&plan.args)
+                .output()
+                .map_err(|e| format!("failed to launch ffmpeg: {e}"))?;
+            if !output.status.success() {
+                return Err(format!(
+                    "ffmpeg failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            // Grab the first frame of the node's rendered output as the preview.
+            Ok(decode_preview_frame(
+                node_id.clone(),
+                temp_out_str.clone(),
+                0.0,
+                width,
+                height,
+            ))
+        })();
+        finish_ffmpeg_gpu_operation(lease, operation)
     })();
 
     let _ = fs::remove_file(&temp_out);
@@ -2128,11 +2354,59 @@ async fn comfy_generate(
     timeout_secs: u64,
 ) -> Result<String, String> {
     let allow_remote = read_allow_remote_comfy(&app);
+    let use_local_gpu = is_local_comfy_endpoint(&endpoint);
     tokio::task::spawn_blocking(move || {
-        comfy_generate_blocking(project_json, node_id, endpoint, timeout_secs, allow_remote)
+        // Validate before requesting a brain unload; rejected endpoints must have no side effects.
+        security::ensure_safe_comfy_endpoint(&endpoint, allow_remote)?;
+        let operation =
+            || comfy_generate_blocking(project_json, node_id, endpoint, timeout_secs, allow_remote);
+        if use_local_gpu {
+            let lease = services::gpu_arbiter().acquire(media::gpu::GpuNeed::Heavy)?;
+            lease.finish_with(operation())
+        } else {
+            // A private-LAN ComfyUI server uses its own machine's GPU. Do not unload the local
+            // Ollama model for work that does not share FluxNode's local GPU.
+            operation()
+        }
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+/// Lists the saved voice profiles available from the loopback Lalin API.
+#[tauri::command]
+async fn narrated_scene_list_voices() -> Result<Vec<narrated_scene::VoiceOption>, String> {
+    tokio::task::spawn_blocking(narrated_scene::list_voices)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+/// Runs one GPU-coordinated Qwen image + Lalin TTS scene workflow.
+#[tauri::command]
+async fn narrated_scene_run(
+    app: AppHandle,
+    image_prompt: String,
+    narration: String,
+    voice_id: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || narrated_scene::run(app, image_prompt, narration, voice_id))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn is_local_comfy_endpoint(endpoint: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(endpoint) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.trim_matches(['[', ']'])
+        .parse::<std::net::IpAddr>()
+        .is_ok_and(|address| address.is_loopback())
 }
 
 fn comfy_generate_blocking(
@@ -2176,6 +2450,10 @@ fn comfy_generate_blocking(
     let frame = PreviewFrameData {
         asset_id: node_id,
         source_path: String::new(),
+        source_file_name: Some(image_ref.filename),
+        // ComfyUI assigns a distinct prompt id for each generation. Keep it with
+        // the preview so repeated clicks remain idempotent without blocking later runs.
+        source_result_id: Some(prompt_id),
         requested_time: 0.0,
         width: 0,
         height: 0,
@@ -2303,48 +2581,8 @@ mod preview_decode_tests {
         let _ = fs::remove_file(&clip);
     }
 
-    /// Minimal standard-base64 decoder for the test (no padding tolerance needed
-    /// beyond the standard `=` scheme produced by `base64_encode`).
     fn base64_decode_str(input: &str) -> Result<Vec<u8>, String> {
-        fn val(c: u8) -> Result<u32, String> {
-            match c {
-                b'A'..=b'Z' => Ok((c - b'A') as u32),
-                b'a'..=b'z' => Ok((c - b'a' + 26) as u32),
-                b'0'..=b'9' => Ok((c - b'0' + 52) as u32),
-                b'+' => Ok(62),
-                b'/' => Ok(63),
-                _ => Err(format!("invalid base64 byte: {c}")),
-            }
-        }
-        let bytes: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-        let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
-        for chunk in bytes.chunks(4) {
-            if chunk.len() < 2 {
-                return Err("truncated base64 input".to_string());
-            }
-            let pad = chunk.iter().filter(|&&b| b == b'=').count();
-            let c0 = val(chunk[0])?;
-            let c1 = val(chunk[1])?;
-            let c2 = if chunk.len() > 2 && chunk[2] != b'=' {
-                val(chunk[2])?
-            } else {
-                0
-            };
-            let c3 = if chunk.len() > 3 && chunk[3] != b'=' {
-                val(chunk[3])?
-            } else {
-                0
-            };
-            let triple = (c0 << 18) | (c1 << 12) | (c2 << 6) | c3;
-            out.push(((triple >> 16) & 0xff) as u8);
-            if pad < 2 {
-                out.push(((triple >> 8) & 0xff) as u8);
-            }
-            if pad < 1 {
-                out.push((triple & 0xff) as u8);
-            }
-        }
-        Ok(out)
+        decode_base64(input)
     }
 }
 
@@ -2454,6 +2692,32 @@ fn kill_render_process(job_id: &str) {
     }
 }
 
+fn ffmpeg_plan_uses_gpu_encoder(plan_args: &[String]) -> bool {
+    plan_args
+        .iter()
+        .any(|argument| argument.ends_with("_nvenc"))
+}
+
+fn acquire_ffmpeg_gpu_lease(plan_args: &[String]) -> Result<Option<media::gpu::GpuLease>, String> {
+    if ffmpeg_plan_uses_gpu_encoder(plan_args) {
+        services::gpu_arbiter()
+            .acquire(media::gpu::GpuNeed::Heavy)
+            .map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+fn finish_ffmpeg_gpu_operation<T>(
+    lease: Option<media::gpu::GpuLease>,
+    operation: Result<T, String>,
+) -> Result<T, String> {
+    match lease {
+        Some(lease) => lease.finish_with(operation),
+        None => operation,
+    }
+}
+
 /// Spawns ffmpeg for a compiled render plan and a monitor thread that streams
 /// real `-progress` output into the status file. The status file must already
 /// read `rendering` before this is called.
@@ -2462,17 +2726,36 @@ fn spawn_ffmpeg_render(
     plan_args: Vec<String>,
     status_path: PathBuf,
 ) -> Result<(), String> {
+    let gpu_lease = match acquire_ffmpeg_gpu_lease(&plan_args) {
+        Ok(lease) => lease,
+        Err(error) => {
+            if let Ok(mut status) = read_render_status(&status_path) {
+                status.status = "failed".to_string();
+                status.completed_at = Some(current_timestamp());
+                status.updated_at = current_timestamp();
+                status.error = Some(error.clone());
+                let _ = write_render_status(&status_path, &status);
+            }
+            return Err(error);
+        }
+    };
     let ffmpeg = sidecar_path("ffmpeg");
     let mut args: Vec<String> = vec!["-nostats".into(), "-progress".into(), "pipe:1".into()];
     args.extend(plan_args);
 
-    let mut child = Command::new(&ffmpeg)
+    let mut child = match Command::new(&ffmpeg)
         .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| format!("failed to launch ffmpeg ({}): {error}", ffmpeg.display()))?;
+    {
+        Ok(child) => child,
+        Err(error) => {
+            let message = format!("failed to launch ffmpeg ({}): {error}", ffmpeg.display());
+            return finish_ffmpeg_gpu_operation(gpu_lease, Err(message));
+        }
+    };
 
     let pid = child.id();
     if let Ok(mut map) = render_pids().lock() {
@@ -2524,40 +2807,63 @@ fn spawn_ffmpeg_render(
             map.remove(&job_id);
         }
 
-        if let Ok(mut status) = read_render_status(&status_path) {
-            // Respect a cancel/pause that already finalized the status.
-            if status.status == "cancelled" || status.status == "paused" {
+        let stderr_log = stderr_handle.and_then(|handle| handle.join().ok());
+        let stderr_tail = stderr_log
+            .as_deref()
+            .map(|log| {
+                let tail: Vec<&str> = log.lines().filter(|line| !line.trim().is_empty()).collect();
+                let start = tail.len().saturating_sub(4);
+                tail[start..].join(" ")
+            })
+            .unwrap_or_default();
+        let mut status = read_render_status(&status_path).ok();
+        let was_stopped = status
+            .as_ref()
+            .is_some_and(|status| status.status == "cancelled" || status.status == "paused");
+        let ffmpeg_succeeded = matches!(&exit, Ok(code) if code.success());
+        let operation = if was_stopped || ffmpeg_succeeded {
+            Ok(())
+        } else if !stderr_tail.is_empty() {
+            Err(stderr_tail)
+        } else if let Err(error) = &exit {
+            Err(format!("ffmpeg render wait failed: {error}"))
+        } else {
+            Err("ffmpeg render failed".to_string())
+        };
+        let completion = finish_ffmpeg_gpu_operation(gpu_lease, operation);
+
+        if let Some(status) = status.as_mut() {
+            // Cancellation and pause remain the user's chosen final states, but a failed
+            // brain restore still needs to be visible in the persisted job status.
+            if was_stopped {
+                if let Err(error) = completion {
+                    status.error = Some(error);
+                    status.updated_at = current_timestamp();
+                    let _ = write_render_status(&status_path, status);
+                }
                 return;
             }
-            let success = matches!(&exit, Ok(code) if code.success());
-            if success {
-                status.status = "completed".to_string();
-                status.current_frame = status.total_frames;
-                status.progress = 100;
-                status.completed_at = Some(current_timestamp());
-                status.estimated_time_remaining = Some(0);
-                status.output_file_size = fs::metadata(&status.output_path).ok().map(|m| m.len());
-                status.error = None;
-            } else {
-                let detail = stderr_handle
-                    .and_then(|handle| handle.join().ok())
-                    .map(|log| {
-                        let tail: Vec<&str> =
-                            log.lines().filter(|l| !l.trim().is_empty()).collect();
-                        let start = tail.len().saturating_sub(4);
-                        tail[start..].join(" ")
-                    })
-                    .unwrap_or_default();
-                status.status = "failed".to_string();
-                status.completed_at = Some(current_timestamp());
-                status.error = Some(if detail.is_empty() {
-                    "ffmpeg render failed".to_string()
-                } else {
-                    detail
-                });
+            match completion {
+                Ok(()) => {
+                    status.status = "completed".to_string();
+                    status.current_frame = status.total_frames;
+                    status.progress = 100;
+                    status.completed_at = Some(current_timestamp());
+                    status.estimated_time_remaining = Some(0);
+                    status.output_file_size =
+                        fs::metadata(&status.output_path).ok().map(|m| m.len());
+                    status.error = None;
+                }
+                Err(error) => {
+                    status.status = "failed".to_string();
+                    status.completed_at = Some(current_timestamp());
+                    status.error = Some(error);
+                }
             }
             status.updated_at = current_timestamp();
-            let _ = write_render_status(&status_path, &status);
+            let _ = write_render_status(&status_path, status);
+        } else if let Err(error) = completion {
+            eprintln!("FluxNode render job {job_id} completed without status file: {error}");
         }
     });
 
@@ -2832,7 +3138,7 @@ fn mark_project_opened(app: AppHandle, project_json: String) -> Result<(), Strin
     mark_project_opened_at_path(&app, &project_json, &project_dir)
 }
 
-fn load_project_from_dir(app: &AppHandle, project_dir: &PathBuf) -> Result<Option<String>, String> {
+fn load_project_from_dir(app: &AppHandle, project_dir: &Path) -> Result<Option<String>, String> {
     let project_path = project_dir.join("project.json");
 
     if !project_path.exists() {
@@ -2856,7 +3162,7 @@ fn load_project_from_dir(app: &AppHandle, project_dir: &PathBuf) -> Result<Optio
 
 fn write_project_state_to_dir(
     app: &AppHandle,
-    project_dir: &PathBuf,
+    project_dir: &Path,
     project_json: &str,
     clear_wal: bool,
 ) -> Result<(), String> {
@@ -2976,7 +3282,7 @@ fn reconstruct_project_from_wal(project_dir: &Path) -> Result<Option<String>, St
     let Some(base_index) = entries.iter().rposition(|entry| {
         entry
             .get("projectSnapshot")
-            .map_or(false, |value| !value.is_null())
+            .is_some_and(|value| !value.is_null())
     }) else {
         return Ok(None);
     };
@@ -3443,6 +3749,8 @@ fn build_preview_frame(
     PreviewFrameData {
         asset_id,
         source_path,
+        source_file_name: None,
+        source_result_id: None,
         requested_time,
         width,
         height,
@@ -3754,20 +4062,33 @@ fn agent_chat_blocking(
     // Default: the shared brain (wired to the GPU arbiter). A custom model spins up a one-off.
     let allow_writes = allow_writes.unwrap_or(false); // gate write/long tools unless opted in
     match model {
-        None => brain::run_agent(
-            &app,
-            actions::registry(),
-            services::brain().as_ref(),
-            &message,
-            8,
-            allow_writes,
-        ),
-        Some(model) => {
-            let engine = brain::ollama::OllamaBrain::local(model);
+        None => {
+            let engine = services::brain();
+            let coordinated = brain::GpuCoordinatedBrain::new(
+                engine.as_ref(),
+                engine.clone(),
+                services::gpu_arbiter(),
+            );
             brain::run_agent(
                 &app,
                 actions::registry(),
-                &engine,
+                &coordinated,
+                &message,
+                8,
+                allow_writes,
+            )
+        }
+        Some(model) => {
+            let engine = Arc::new(brain::ollama::OllamaBrain::local(model));
+            let coordinated = brain::GpuCoordinatedBrain::new(
+                engine.as_ref(),
+                engine.clone(),
+                services::gpu_arbiter(),
+            );
+            brain::run_agent(
+                &app,
+                actions::registry(),
+                &coordinated,
                 &message,
                 8,
                 allow_writes,
@@ -3782,7 +4103,8 @@ pub fn run() {
     // Headless MCP mode: expose the Action registry over stdio for external agents, then exit
     // without ever starting the GUI. Invoked as `fluxnode --mcp` (spawned by an MCP client).
     if args.iter().any(|a| a == "--mcp") {
-        run_mcp();
+        let allow_writes = args.iter().any(|a| a == "--allow-writes");
+        run_mcp(allow_writes);
         return;
     }
 
@@ -3846,9 +4168,12 @@ pub fn run() {
             start_export_job,
             comfy_ping,
             comfy_generate,
+            narrated_scene_list_voices,
+            narrated_scene_run,
             video_decode_frame,
             video_seek,
             workflow_render_node,
+            workflow_materialize_generated_image,
             window_toggle_fullscreen
         ])
         .run(tauri::generate_context!())
@@ -3858,12 +4183,18 @@ pub fn run() {
 /// Headless entry for `fluxnode --mcp`: builds an `AppHandle` (actions need it for app-dir I/O),
 /// then serves the Action registry over stdio via `rmcp`. Blocks until the client disconnects.
 ///
-/// NOTE: compile-verified only — not yet runtime-tested. `Builder::build` may still create the
-/// configured window; if so, suppress it via the tauri.conf window config or close it here before
-/// serving. Never `println!` in this process — stdout is the JSON-RPC channel.
-fn run_mcp() {
+/// The MCP entry builds an AppHandle without the configured GUI windows, then serves JSON-RPC over
+/// stdin/stdout until the client disconnects. Tauri still owns a small Tao event-target helper
+/// window on Windows; it is not a FluxNode application window. Never `println!` here — stdout is
+/// the JSON-RPC channel.
+fn run_mcp(allow_writes: bool) {
+    let mut context = tauri::generate_context!();
+    // `Builder::build` creates every window listed in the application config. MCP needs an
+    // AppHandle for filesystem-backed actions, but it must stay headless, so remove window
+    // declarations before Tauri constructs any native windows.
+    context.config_mut().app.windows.clear();
     let app = tauri::Builder::default()
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("failed to build FluxNode (mcp mode)");
     let handle = app.handle().clone();
 
@@ -3878,7 +4209,7 @@ fn run_mcp() {
         .build()
         .expect("failed to build tokio runtime for mcp mode");
 
-    if let Err(err) = runtime.block_on(mcp::serve_stdio(registry, handle)) {
+    if let Err(err) = runtime.block_on(mcp::serve_stdio(registry, handle, allow_writes)) {
         eprintln!("fluxnode mcp server error: {err}");
     }
 }
@@ -3887,15 +4218,20 @@ fn run_mcp() {
 /// runs one agent-loop conversation against the live registry via the shared brain, and prints
 /// the final answer to stdout. End-to-end smoke test without the GUI.
 fn run_agent_cli(message: &str, allow_writes: bool) {
+    let mut context = tauri::generate_context!();
+    context.config_mut().app.windows.clear();
     let app = tauri::Builder::default()
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("failed to build FluxNode (agent mode)");
     let handle = app.handle().clone();
+    let engine = services::brain();
+    let coordinated =
+        brain::GpuCoordinatedBrain::new(engine.as_ref(), engine.clone(), services::gpu_arbiter());
 
     match brain::run_agent(
         &handle,
         actions::registry(),
-        services::brain().as_ref(),
+        &coordinated,
         message,
         8,
         allow_writes,
@@ -4170,6 +4506,26 @@ mod tests {
 mod render_pipeline_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn ffmpeg_gpu_lease_is_required_only_for_nvenc_plans() {
+        assert!(!ffmpeg_plan_uses_gpu_encoder(&[
+            "-c:v".to_string(),
+            "libx264".to_string(),
+        ]));
+        assert!(ffmpeg_plan_uses_gpu_encoder(&[
+            "-c:v".to_string(),
+            "h264_nvenc".to_string(),
+        ]));
+        assert!(ffmpeg_plan_uses_gpu_encoder(&[
+            "-c:v".to_string(),
+            "hevc_nvenc".to_string(),
+        ]));
+        assert!(!ffmpeg_plan_uses_gpu_encoder(&[
+            "-c:v".to_string(),
+            "libx264".to_string(),
+        ]));
+    }
 
     #[test]
     fn render_plan_produces_a_real_composited_video() {

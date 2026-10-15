@@ -95,10 +95,7 @@ jobs:
 
       - name: cargo clippy
         working-directory: src-tauri
-        # Clippy is not yet a hard gate: the codebase has an actively-evolving AI Copilot /
-        # agent layer (src-tauri/src/action.rs, brain/, media/) and clippy has not been run
-        # against it yet in CI. Flip this to non-continue-on-error once the backlog is clean.
-        continue-on-error: true
+        # Treat warnings as errors across library, tests, and other Rust targets.
         run: cargo clippy --all-targets -- -D warnings
 
       - name: cargo test

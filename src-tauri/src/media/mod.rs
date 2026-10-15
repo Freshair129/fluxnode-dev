@@ -85,7 +85,7 @@ impl MediaBroker {
         let backend = self
             .pick_image(&req)
             .ok_or("no image backend supports this request")?;
-        let lease = self.gpu.acquire(GpuNeed::Heavy);
+        let lease = self.gpu.acquire(GpuNeed::Heavy)?;
         backend.generate(app, req, lease)
     }
 
@@ -99,7 +99,7 @@ impl MediaBroker {
             .pick_video(&req)
             .ok_or("no video backend supports this request")?;
         // The lease moves into the backend's background thread and releases when the job ends.
-        let lease = self.gpu.acquire(GpuNeed::Heavy);
+        let lease = self.gpu.acquire(GpuNeed::Heavy)?;
         backend.start(app, job_id, req, lease)
     }
 

@@ -1,17 +1,24 @@
 # FluxNode — Embedded AI Copilot & Media Engine Adapter Design
 
-> **Status:** Implemented — core layer live (§9 phases 1–3 + brain done). Not yet: in-app chat
-> UI panel, in-process llama.cpp backend (stub behind `--features llama`), sidecar binaries
-> (whisper/piper/sd not bundled), and runtime hardening of `--mcp`.
+> **Status:** Source includes the action registry, Ollama agent loop, MCP stdio mode, media broker,
+> generated-image materialization, and GPU arbitration. Standalone native acceptance is still
+> required for MCP execution, project reopen/export, packaging, and live Ollama/Comfy behavior.
+> The in-process llama.cpp backend remains a stub behind `--features llama`; Piper and sd.cpp
+> binaries remain opt-in rather than bundled.
 > **Scope:** Turn FluxNode into an *agent-native* video editor — command it by text or voice
 > from inside the app, and expose it as a tool (MCP + CLI) that external agents can drive.
 > **Audience:** FluxNode maintainers.
 >
-> **What's live in code:** Action registry (30 actions) + `action_invoke`/`action_list`; the
-> `brain/` agent loop with write-tool gating (Ollama backend, E2E-verified: agent → `asset_probe`
-> → ffprobe → answer); the `media/` adapter + `MediaBroker` + `GpuArbiter` with comfy/sdcpp/
-> whisper/piper backends wired via `services::media_broker()`; the `rmcp` MCP server; and the
-> `agent_chat` command plus `--mcp` / `--agent` CLI modes.
+> **Current source paths (reconciled 2026-10-15):** `action_invoke` and the agent share the action
+> registry; `--mcp` defaults to read-only and requires an explicit `--allow-writes` for Rust-side
+> mutating tools. Frontend-only timeline tools are not exposed through stdio. The Comfy image path
+> returns a prompt identity that can be saved as a project asset and timeline clip. The GPU gate
+> starts with no managed model so media-only use remains independent of Ollama; each successful
+> selected-model turn registers that Ollama identity under a light lease. Identities include the
+> endpoint and normalized model tag, preserving model selection while limiting unloads to models
+> FluxNode actually used. Local Comfy/sd.cpp work and FFmpeg NVENC plans use the same gate, while
+> CPU-only FFmpeg paths do not. These source paths still need native acceptance; the GitHub CI job
+> does not launch the desktop or exercise Ollama/ComfyUI.
 
 ---
 

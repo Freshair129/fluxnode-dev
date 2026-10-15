@@ -1,15 +1,93 @@
 # FluxNode — Session Handoff: AI Copilot / Agent Layer
 
-> **Written:** 2026-07-06 · **Last reconciled against the code:** 2026-08-19
-> **Branch:** `master` · **HEAD at reconciliation:** `74866a1`
+> **Written:** 2026-07-06 · **Last reconciled against the code:** 2026-10-15
+> **Branch:** `codex/readiness-fixes-20261015` · **Base HEAD:** `ffa9071b0558bda10e676366f3af1475eba2af31`
 > This handoff is for the next agent picking up the AI-copilot work.
+
+## Current readiness reconciliation (2026-10-15)
+
+This worktree contains the fixes below; no commit, PR, or release has been produced. Frontend
+checks, Rust tests, format and clippy, a normal-resource Windows debug build, native MCP acceptance,
+and a bounded native desktop/FFmpeg fixture run have passed. The detailed evidence is in issue #16,
+`docs/standalone-acceptance.md`, and
+`G:\AI-Studio\verification\2026-10-15-readiness-fixes\fluxnode`.
+
+- Final native MCP and desktop checks used acceptance executable SHA-256
+  `7b70b866fd66d9446ec40ea8d815a9df804f6ee2863e0490ace15518c7ad736e`. MCP passed 8 checks and
+  desktop/export passed 11. Full receipts, logs, cleanup, and source/artifact provenance are under
+  `G:\AI-Studio\verification\2026-10-15-readiness-fixes\fluxnode\native-clippyfix-20261015`.
+  MCP initialize, tool listing, read-only health, default write denial, direct frontend-action
+  unavailability, and `--allow-writes` preference/project writes passed. It listed 30 backend
+  tools and no frontend timeline tools. Window inspection found no app window and one small
+  16x16 Tao event helper window.
+- An AI Generate ComfyUI response carries the Comfy prompt ID and source filename. The desktop
+  materialize action validates and saves its PNG, then records a project asset, timeline clip,
+  and media-source node. Deduplication is per (workflow node, Comfy prompt ID), so a repeated
+  click stays idempotent and a later generation can also be added. Native UI acceptance used a
+  deterministic local HTTP fixture: two distinct results were added, repeat-add was disabled,
+  saved PNG bytes/filenames and lineage survived app reload and project reopen, and the reopened
+  timeline rendered through production FFmpeg. The decoded pixel at 0.5s was RGB [251,1,0].
+  This proves the local integration path, not ComfyUI inference.
+- The GPU arbiter starts without a managed model, so media-only use does not require the optional
+  Ollama daemon. Successful agent inference registers the selected Ollama model while holding a
+  light lease. Model identities are scoped by endpoint and normalized model tag. Heavy leases
+  unload only registered models observed resident in /api/ps, require acknowledgement and
+  disappearance, and restore only models FluxNode evicted; a failed handoff aborts the job and
+  releases the gate. Deterministic fixture/unit tests cover identity and failure paths. No live
+  Ollama request or GPU handoff ran because the GPU remained reserved. CPU FFmpeg paths do not
+  request the GPU lease; NVENC plans do. Remote ComfyUI endpoints do not take this machine's lease.
+- The final native acceptance executable was built with normal Windows Tauri resource mapping,
+  after scripts/fetch-whisper.ps1 staged checksum-verified pinned whisper.cpp v1.8.6 files and
+  ggml-base.en.bin. whisper-cli --help passed. No Whisper inference was run, and no MSI/NSIS
+  installer or signed release was built. This is a debug acceptance build, not package proof.
+- Lalin, ACE-Step, Blender, and a cross-app workflow controller are deferred until FluxNode's
+  standalone MCP, project persistence, media export, and runtime packaging acceptance is complete.
+
+### Current validation evidence (2026-10-15)
+
+- Frontend lint, typecheck, all 355 Vitest tests, and Vite build passed. The final build log is
+  `G:\AI-Studio\verification\2026-10-15-readiness-fixes\fluxnode\npm-build-final-20261015.log`;
+  the other frontend logs are in the same verification folder.
+- `cargo fmt --check` passed (empty output, explicit exit code 0 in
+  `cargo-fmt-check-final-20261015.json`). `cargo clippy --all-targets -- -D warnings` passed with
+  normal Windows resources in `cargo-clippy-final-normal-resources-20261015.log`. Rust tests
+  passed 99, failed 0, with one Whisper-inference test filtered under the GPU hold; see
+  `cargo-test-final-no-whisper-inference-20261015.log`.
+- The exact-base GitHub CI run was green while Clippy failed with 23 test-target and 21 library
+  diagnostics because the step used `continue-on-error`. The backlog was fixed locally and that
+  step is now mandatory in `.github/workflows/ci.yml`. No post-change remote CI run exists because
+  this worktree has not been pushed. Exact-base evidence:
+  `ci-clippy-base-failure.log` and
+  [the Rust job log](https://github.com/Freshair129/fluxnode-dev/actions/runs/32285402094/job/96173616764).
+- Final native receipts are
+  `native-clippyfix-20261015/mcp/receipt.json` and
+  `native-clippyfix-20261015/desktop/receipt.json`. The latter verifies two distinct synthetic
+  generated PNG results, same-result idempotency, persistence/reopen, production FFmpeg export,
+  ffprobe metadata, and a decoded red fixture pixel.
+- The earlier broad visible-window check was a harness false positive: both the pre-change and
+  final executable show the same small Tao helper and no application window.
+
+### Remaining acceptance gates
+
+- After the GPU reservation ends, test only FluxNode-owned Ollama models and one real Comfy GPU
+  handoff; do not unload unrelated Ollama models.
+- Run live ComfyUI generation and Whisper inference when the service/device is available. The
+  passed desktop flow used a deterministic local fixture; Whisper only passed checksum staging
+  and --help.
+- Run the mandatory Clippy step on remote Linux CI after publishing the changes. The local
+  Windows Clippy pass does not establish Linux dependency/build success.
+- Build and inspect MSI/NSIS packages and release signing when release validation is authorized.
+  The local debug app used normal Windows resource mapping but is not an installer.
+- Keep Lalin, ACE-Step, Blender, and cross-app controller integration deferred until these
+  standalone gates are resolved.
+
 
 > **Repo status correction (2026-08-19):** the original header said this repo has *no git
 > remote* and that nothing was pushed. That is no longer true — there is a GitHub remote and
 > work now lands through PRs (12 merged as of `74866a1`, e.g. `#12 perf/workflow-dock-rerender`).
 > The "9 local commits" trail at the bottom of this file is the original AI-copilot series only.
 
-## TL;DR
+## Historical TL;DR snapshot (2026-08-19; superseded by the readiness reconciliation above)
 
 > **Whisper update (2026-07-19):** Windows x64 whisper.cpp is now staged with
 > `scripts/fetch-whisper.ps1`, checksum-verified, and bundled with its required DLLs/model as
@@ -74,7 +152,7 @@ Whisper no longer needs env vars — `services::bundled_whisper` auto-registers 
 `binaries/whisper/` (dev) or the app's `whisper/` resource dir; `FLUXNODE_WHISPER_BIN`+
 `FLUXNODE_WHISPER_MODEL` still override each path individually.
 
-## Verified vs NOT verified (be honest)
+## Historical verification snapshot (2026-08-19; superseded by the readiness reconciliation above)
 
 **Verified**
 - `cargo check` passes — **default** and `--features llama`.
@@ -104,7 +182,7 @@ Whisper no longer needs env vars — `services::bundled_whisper` auto-registers 
   Two of those are `ReadOnly`, so they run ungated on every surface — including unauthenticated
   MCP stdio.
 
-## Pending work (ranked — highest leverage first)
+## Historical pending work snapshot (2026-08-19; recheck against current status above)
 
 1. ~~**In-app chat/voice UI panel**~~ — **DONE (partial).** `src/features/copilot/CopilotPanel.tsx`
    calls `agent_chat`, shows proposals as a ghost preview, and approves timeline edits as one
