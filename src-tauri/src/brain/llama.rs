@@ -45,6 +45,19 @@ impl Brain for LlamaBrain {
 }
 
 impl BrainVram for LlamaBrain {
-    fn unload(&self) {}
-    fn reload(&self) {}
+    fn managed_endpoint_identity(&self) -> String {
+        "in-process:llama".to_string()
+    }
+
+    fn managed_model_identity(&self) -> String {
+        self.model.clone()
+    }
+
+    fn unload(&self) -> Result<bool, String> {
+        Err("llama.cpp backend is not implemented".to_string())
+    }
+
+    fn reload(&self) -> Result<(), String> {
+        Err("llama.cpp backend is not implemented".to_string())
+    }
 }

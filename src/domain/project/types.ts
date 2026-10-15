@@ -223,6 +223,8 @@ export interface WorkflowClipboard {
 export interface MediaSourceData {
   assetId: string | null
   timelineClipId: string | null
+  sourceWorkflowNodeId?: string
+  sourceWorkflowResultId?: string
 }
 
 export interface CameraData {
@@ -849,6 +851,8 @@ export interface WaveformCacheEntry {
 export interface PreviewFrameData {
   assetId: string
   sourcePath: string
+  sourceFileName?: string | null
+  sourceResultId?: string | null
   requestedTime: number
   width: number
   height: number

@@ -13,7 +13,9 @@ pub mod llama;
 pub mod ollama;
 
 use crate::action::Registry;
+use crate::media::gpu::{BrainVram, GpuArbiter, GpuNeed};
 use serde_json::{json, Value};
+use std::sync::Arc;
 use tauri::AppHandle;
 
 /// Benchmark/debug tracing: when `FLUXNODE_AGENT_TRACE=1`, every agent-loop event is emitted to
@@ -65,6 +67,40 @@ pub struct AgentOutcome {
 pub trait Brain: Send + Sync {
     fn model(&self) -> &str;
     fn chat(&self, messages: &[Value], tools: &[Value]) -> Result<ChatTurn, String>;
+}
+
+/// Wrap an inference backend so each model turn shares FluxNode's GPU gate with media jobs.
+/// The lease is released before `run_agent` dispatches any returned tools, so a tool that starts
+/// heavy media work can acquire the GPU without deadlocking behind its own agent turn.
+pub struct GpuCoordinatedBrain<'a> {
+    inner: &'a dyn Brain,
+    vram: Arc<dyn BrainVram>,
+    arbiter: Arc<GpuArbiter>,
+}
+
+impl<'a> GpuCoordinatedBrain<'a> {
+    pub fn new(inner: &'a dyn Brain, vram: Arc<dyn BrainVram>, arbiter: Arc<GpuArbiter>) -> Self {
+        Self {
+            inner,
+            vram,
+            arbiter,
+        }
+    }
+}
+
+impl Brain for GpuCoordinatedBrain<'_> {
+    fn model(&self) -> &str {
+        self.inner.model()
+    }
+
+    fn chat(&self, messages: &[Value], tools: &[Value]) -> Result<ChatTurn, String> {
+        let lease = self.arbiter.acquire(GpuNeed::Light)?;
+        let result = self.inner.chat(messages, tools);
+        if result.is_ok() {
+            self.arbiter.register_brain(self.vram.clone());
+        }
+        lease.finish_with(result)
+    }
 }
 
 /// Build OpenAI/Ollama-style tool definitions from the registry metadata (the SSOT).
@@ -169,4 +205,108 @@ pub fn run_agent(
     Err(format!(
         "agent: exceeded max_steps ({max_steps}) without a final answer"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::media::gpu::BrainVram;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FakeBrain;
+
+    impl Brain for FakeBrain {
+        fn model(&self) -> &str {
+            "fixture"
+        }
+
+        fn chat(&self, _messages: &[Value], _tools: &[Value]) -> Result<ChatTurn, String> {
+            Ok(ChatTurn {
+                raw_message: json!({"role":"assistant","content":"fixture reply"}),
+                reply: BrainReply::Text("fixture reply".to_string()),
+            })
+        }
+    }
+
+    struct FakeBrainVram {
+        unloads: AtomicUsize,
+        reloads: AtomicUsize,
+    }
+
+    impl BrainVram for FakeBrainVram {
+        fn managed_endpoint_identity(&self) -> String {
+            "fixture://ollama".to_string()
+        }
+
+        fn managed_model_identity(&self) -> String {
+            "fixture:latest".to_string()
+        }
+
+        fn unload(&self) -> Result<bool, String> {
+            self.unloads.fetch_add(1, Ordering::SeqCst);
+            Ok(false)
+        }
+
+        fn reload(&self) -> Result<(), String> {
+            self.reloads.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn coordinated_chat_releases_gpu_before_a_media_tool_can_acquire_it() {
+        let fake_vram = Arc::new(FakeBrainVram {
+            unloads: AtomicUsize::new(0),
+            reloads: AtomicUsize::new(0),
+        });
+        let arbiter = GpuArbiter::new(None);
+        let brain = FakeBrain;
+        let coordinated = GpuCoordinatedBrain::new(&brain, fake_vram.clone(), arbiter.clone());
+
+        let turn = coordinated
+            .chat(&[], &[])
+            .expect("fixture chat should succeed");
+        assert!(matches!(turn.reply, BrainReply::Text(_)));
+
+        // run_agent invokes tools only after `chat` returns. A media tool can therefore acquire
+        // the heavy lease here without waiting on the agent's completed inference lease.
+        arbiter
+            .acquire(GpuNeed::Heavy)
+            .expect("media tool should acquire GPU after the model turn")
+            .finish()
+            .expect("fixture media lease should release");
+        assert_eq!(fake_vram.unloads.load(Ordering::SeqCst), 1);
+        assert_eq!(fake_vram.reloads.load(Ordering::SeqCst), 0);
+    }
+
+    struct FailingBrain;
+
+    impl Brain for FailingBrain {
+        fn model(&self) -> &str {
+            "fixture"
+        }
+
+        fn chat(&self, _messages: &[Value], _tools: &[Value]) -> Result<ChatTurn, String> {
+            Err("fixture inference failed".to_string())
+        }
+    }
+
+    #[test]
+    fn failed_inference_does_not_register_an_ollama_model_for_media_handoff() {
+        let fake_vram = Arc::new(FakeBrainVram {
+            unloads: AtomicUsize::new(0),
+            reloads: AtomicUsize::new(0),
+        });
+        let arbiter = GpuArbiter::new(None);
+        let brain = FailingBrain;
+        let coordinated = GpuCoordinatedBrain::new(&brain, fake_vram.clone(), arbiter.clone());
+
+        assert!(coordinated.chat(&[], &[]).is_err());
+        arbiter
+            .acquire(GpuNeed::Heavy)
+            .expect("media work should proceed if no inference succeeded")
+            .finish()
+            .expect("no managed brain should need restoring");
+        assert_eq!(fake_vram.unloads.load(Ordering::SeqCst), 0);
+    }
 }

@@ -119,42 +119,42 @@ impl ImageGenerator for ComfyBackend {
         req: ImageRequest,
         gpu: GpuLease,
     ) -> Result<MediaArtifact, String> {
-        // Keep the GPU lease alive for the entire (blocking) generation. It must
-        // NOT be dropped until this function returns, so bind it to a named local.
-        let _gpu = gpu;
+        let result = (|| {
+            // 1. Build the ComfyUI prompt graph from the request. If the request carries a source
+            //    image, drive img2img by passing its file name as the LoadImage input.
+            //    TODO(comfy upload): ComfyUI resolves LoadImage names against its own `input/` dir,
+            //    so the file must first be POSTed to `/upload/image`. Until staging exists, this
+            //    relies on the user having placed the basename in ComfyUI's input folder.
+            let data = Self::node_data(&req);
+            let input_name = req
+                .input
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned());
+            let prompt = build_comfy_prompt("ai_generate", &data, input_name.as_deref())
+                .map_err(|e| format!("comfyui: failed to build prompt: {e}"))?;
 
-        // 1. Build the ComfyUI prompt graph from the request. If the request carries a source
-        //    image, drive img2img by passing its file name as the LoadImage input.
-        //    TODO(comfy upload): ComfyUI resolves LoadImage names against its own `input/` dir, so
-        //    the file must first be POSTed to `/upload/image`. Until that staging step exists, this
-        //    passes the basename and relies on the user having placed it in ComfyUI's input folder.
-        let data = Self::node_data(&req);
-        let input_name = req
-            .input
-            .as_ref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned());
-        let prompt = build_comfy_prompt("ai_generate", &data, input_name.as_deref())
-            .map_err(|e| format!("comfyui: failed to build prompt: {e}"))?;
+            // 2. Submit, wait for the output image, then fetch its bytes.
+            let prompt_id = submit_prompt(&self.endpoint, &prompt)
+                .map_err(|e| format!("comfyui: submit failed: {e}"))?;
+            let image_ref = wait_for_output(&self.endpoint, &prompt_id, self.timeout_secs)
+                .map_err(|e| format!("comfyui: no output: {e}"))?;
+            let bytes = fetch_image(&self.endpoint, &image_ref)
+                .map_err(|e| format!("comfyui: fetch failed: {e}"))?;
 
-        // 2. Submit, wait for the output image, then fetch its bytes.
-        let prompt_id = submit_prompt(&self.endpoint, &prompt)
-            .map_err(|e| format!("comfyui: submit failed: {e}"))?;
-        let image_ref = wait_for_output(&self.endpoint, &prompt_id, self.timeout_secs)
-            .map_err(|e| format!("comfyui: no output: {e}"))?;
-        let bytes = fetch_image(&self.endpoint, &image_ref)
-            .map_err(|e| format!("comfyui: fetch failed: {e}"))?;
+            // 3. Derive a stable-ish, unique asset id and write the PNG to a temp path.
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let asset_id = format!("comfy-{prompt_id}-{n}");
+            let path = write_png(&asset_id, &bytes)?;
 
-        // 3. Derive a stable-ish, unique asset id and write the PNG to a temp path.
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let asset_id = format!("comfy-{prompt_id}-{n}");
-        let path = write_png(&asset_id, &bytes)?;
+            Ok(MediaArtifact {
+                asset_id,
+                path,
+                kind: "image".into(),
+            })
+        })();
 
-        Ok(MediaArtifact {
-            asset_id,
-            path,
-            kind: "image".into(),
-        })
+        gpu.finish_with(result)
     }
 }
 

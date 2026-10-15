@@ -5,6 +5,14 @@
 > "can the local 4B brain plan?" question — **yes for read-chains and single typed write proposals.**
 > This scope turns that proven behavior into a shipping propose→approve→execute loop.
 
+> **Implementation reconciliation (2026-10-15):** `FrontendEdit` actions still materialize only
+> through the frontend project store. MCP stdio does not advertise those actions because it has no
+> frontend bridge; proposal markers are not reported as executed MCP results. The generated-image
+> Comfy flow is a separate explicit materialization action that saves the PNG and adds a linked
+> asset, clip, and media-source node. Native MCP, reopen, and export acceptance are still pending.
+> The planning notes below describe intended behavior and historical work, not standalone runtime
+> proof.
+
 ## 0. The one architectural decision everything hangs on
 
 The agent brain and the action registry are **Rust-side**. Timeline state authority and every

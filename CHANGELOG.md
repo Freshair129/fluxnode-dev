@@ -9,8 +9,26 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- MCP now defaults to read-only access; Rust-backed writes require `--allow-writes`, while
+  frontend-only timeline actions are not advertised over stdio. Proposal responses are returned
+  as errors instead of successful tool executions.
+- AI Generate previews now retain their ComfyUI prompt identity. The desktop can materialize a
+  generated PNG as a project asset, timeline clip, and media-source node, with per-result
+  idempotency across retries and later runs.
+- GPU coordination now covers each successfully invoked agent model and FFmpeg plans
+  that select an NVENC encoder, in addition to the media broker and local ComfyUI generation
+  paths. The arbiter starts without a managed model so media-only use does not depend on Ollama;
+  selected model identities are scoped by Ollama endpoint and model tag.
+- Ollama chat rejects non-success HTTP responses, server error payloads, and malformed replies
+  without a message object. The `/api/ps` parser ignores blank or non-string model names and uses
+  a valid `model` identity when available.
+- `scripts/acceptance/` provides isolated native desktop and stdio MCP runners. Their synthetic
+  ComfyUI-shaped fixture is labeled separately from live ComfyUI/model/GPU acceptance.
+- `docs/standalone-acceptance.md` records the Windows acceptance build configuration, test
+  commands, output isolation, and limits.
 - CI workflow (`.github/workflows/ci.yml`): lint (oxlint), typecheck (`tsc -b`), Vitest, a
-  build-output smoke check, and a Rust job (`cargo fmt --check`, `cargo clippy`, `cargo test`).
+  build-output smoke check, and a Rust job (`cargo fmt --check`, mandatory `cargo clippy`,
+  `cargo test`).
 - Release workflow (`.github/workflows/release.yml`): tag-triggered (`v*`) cross-platform
   build via `tauri-apps/tauri-action` (Windows/macOS/Linux matrix; only Windows is currently
   proven end-to-end).
@@ -24,6 +42,14 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   formatting/tooling across contributors.
 - `STATUS.md`: single living source of truth for implementation status, linking out to the
   MASTERPLAN family, PRD/SRS, and `HANDOFF.md`.
+
+### Fixed
+
+- Preserve a Comfy-generated preview result identity when an older asynchronous graph-render
+  preview completes afterward; this keeps the generated result eligible for safe timeline
+  materialization.
+- Clear the Rust Clippy backlog with behavior-preserving simplifications; the CI Clippy step now
+  fails the job when `cargo clippy --all-targets -- -D warnings` finds a diagnostic.
 
 ### Changed
 

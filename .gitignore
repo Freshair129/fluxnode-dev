@@ -38,6 +38,10 @@ src-tauri/binaries/
 .playwright-cli/
 .claude/
 
+# Python acceptance runner bytecode
+__pycache__/
+*.py[cod]
+
 # Generated status/report HTML (regenerate from STATUS.md / MASTERPLAN docs, do not commit)
 MASTERPLAN Remaining Work Report.html
 MASTERPLAN Remaining Work Checklist.html

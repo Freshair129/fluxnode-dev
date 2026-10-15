@@ -1,7 +1,7 @@
 //! Process-wide wired services: the shared brain and the GPU arbiter that evicts it for media
-//! jobs. Building the arbiter with `Some(brain)` is what connects the two — when a heavy media
-//! job acquires the GPU, the arbiter calls the brain's `BrainVram::unload`, and reloads it on
-//! release. Both are lazy singletons so every caller shares the same instances.
+//! jobs. The arbiter starts without a managed model so standalone media remains usable when
+//! Ollama is absent. The coordinated agent registers each selected brain after a successful
+//! inference while holding a light lease; later heavy jobs can then evict and restore those models.
 #![allow(dead_code)]
 
 use std::path::PathBuf;
@@ -13,7 +13,7 @@ use crate::media::backends::comfy::ComfyBackend;
 use crate::media::backends::piper::PiperBackend;
 use crate::media::backends::sdcpp::SdCppBackend;
 use crate::media::backends::whisper::WhisperBackend;
-use crate::media::gpu::{BrainVram, GpuArbiter};
+use crate::media::gpu::GpuArbiter;
 use crate::media::MediaBroker;
 
 /// Default local tool-calling model for the in-app brain. `qwen3.5:4b` is the tag validated by
@@ -39,9 +39,7 @@ pub fn brain() -> Arc<OllamaBrain> {
 /// The shared GPU arbiter, wired to evict the brain from VRAM during heavy media jobs.
 pub fn gpu_arbiter() -> Arc<GpuArbiter> {
     static ARBITER: OnceLock<Arc<GpuArbiter>> = OnceLock::new();
-    ARBITER
-        .get_or_init(|| GpuArbiter::new(Some(brain() as Arc<dyn BrainVram>)))
-        .clone()
+    ARBITER.get_or_init(|| GpuArbiter::new(None)).clone()
 }
 
 /// Resolve an env var to a path only if it is set AND the file exists (opt-in backend config).

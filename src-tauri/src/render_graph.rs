@@ -968,11 +968,12 @@ mod tests {
     #[test]
     fn rotation_emits_rotate_filter_when_nonzero() {
         let mut project = sample_project();
-        // Give clip A a rotation of 1.5708 radians (~90deg).
-        project["timeline"]["tracks"][0]["clips"][0]["transform"]["rotation"] = json!(1.5708);
+        // Give clip A a rotation of 90 degrees.
+        project["timeline"]["tracks"][0]["clips"][0]["transform"]["rotation"] =
+            json!(std::f64::consts::FRAC_PI_2);
         let plan = build_render_plan(&project, &h264_preset(), "out.mp4").unwrap();
         let g = filter_graph(&plan);
-        assert!(g.contains("rotate=1.5708"), "{g}");
+        assert!(g.contains("rotate=1.570796"), "{g}");
     }
 
     #[test]

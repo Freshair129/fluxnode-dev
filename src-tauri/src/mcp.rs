@@ -11,30 +11,17 @@
 //!   is dispatched onto [`tokio::task::spawn_blocking`]; the MCP layer above stays fully async.
 //! * Errors cross the boundary as `String`s. A tool that fails is reported as a *tool-level* error
 //!   (`CallToolResult::error`, so the caller sees the message) rather than a protocol error.
-//! * Side-effect gating: all tools are exposed, but `Mutating` / `LongJob` / `FrontendEdit`
-//!   actions get a `[mutating]` / `[long job]` / `[proposes edit]` marker prefixed to their
-//!   advertised description so clients can warn before invoking. No auth layer yet.
-//!
-//! ## Known limitation: proposals have no approver over MCP
-//!
-//! This transport calls `Registry::invoke` with `allow_writes = false`, and since the
-//! approve-gate landed that no longer means "refuse". A gated action is **not executed**, but the
-//! registry returns a `__fluxnode_proposal__`-tagged value that this handler currently forwards as
-//! `CallToolResult::success`. There is no approval channel over stdio, so an MCP client sees a
-//! successful call for work that never happened, and the 6 `FrontendEdit` tools can never be
-//! executed by an external client at all (they are materialized by the FluxNode frontend store).
-//! Of the 36 advertised tools, 25 (14 `Mutating` + 5 `LongJob` + 6 `FrontendEdit`) can only ever
-//! return a proposal here; only the 11 `ReadOnly` tools actually do work over this transport.
-//!
-//! Fix direction (not yet implemented): return `CallToolResult::error` for a proposal with a
-//! "requires approval in the FluxNode app" message, and either hide `FrontendEdit` tools from
-//! `list_tools` or mark them clearly as unavailable over this transport.
+//! * Side-effect gating is explicit: MCP is read-only by default. `--mcp --allow-writes` is a
+//!   user-controlled opt-in for Rust-backed `Mutating` and `LongJob` actions.
+//! * `FrontendEdit` actions are not advertised or callable over stdio because their executor is
+//!   the live frontend store. They require a running-instance bridge, which this transport does
+//!   not provide.
+//! * A proposal is never reported as a successful tool call. If a gated proposal reaches this
+//!   layer unexpectedly, it is returned as a tool-level error.
 //!
 //! Targeted crate: `rmcp` 0.16.x with features `["server", "transport-io"]`.
 //!
-//! Runtime status: **compile-verified only** — no real MCP client has driven this. `run_mcp` in
-//! `lib.rs` also still builds the full Tauri context while `tauri.conf.json` declares a `main`
-//! window, so headless window suppression is unresolved.
+//! The stdio process still needs a real MCP client smoke test on each packaged target.
 #![allow(dead_code)]
 
 use std::borrow::Cow;
@@ -53,7 +40,9 @@ use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler, ServiceExt,
 };
 
-use crate::action::{Registry, SideEffect};
+use crate::action::{ActionResult, Registry, SideEffect};
+
+const PROPOSAL_KEY: &str = "__fluxnode_proposal__";
 
 /// The MCP server handler. Holds a shared, read-only view of the registry plus the Tauri
 /// [`AppHandle`] needed to actually run actions (`Action::run(&self, app, args)`).
@@ -61,18 +50,57 @@ use crate::action::{Registry, SideEffect};
 struct RegistryMcp {
     registry: Arc<Registry>,
     app: AppHandle,
+    allow_writes: bool,
 }
 
 impl RegistryMcp {
-    /// Build the advertised description for an action, prefixing a side-effect marker so MCP
-    /// clients can warn the user before invoking mutating / long-running tools.
-    fn describe(def_desc: &str, side_effect: SideEffect) -> String {
+    fn is_advertised(side_effect: SideEffect) -> bool {
+        side_effect != SideEffect::FrontendEdit
+    }
+
+    /// The headless transport cannot materialize frontend-owned edits. Other writes require an
+    /// explicit opt-in when the MCP process is launched.
+    fn access_error(name: &str, side_effect: SideEffect, allow_writes: bool) -> Option<String> {
+        match side_effect {
+            SideEffect::ReadOnly => None,
+            SideEffect::FrontendEdit => Some(format!(
+                "{name} was not executed: this frontend-owned edit is unavailable over headless MCP."
+            )),
+            SideEffect::Mutating | SideEffect::LongJob if !allow_writes => Some(format!(
+                "{name} was not executed: this MCP process is read-only. Restart it with --mcp --allow-writes only when you explicitly authorize backend changes."
+            )),
+            SideEffect::Mutating | SideEffect::LongJob => None,
+        }
+    }
+
+    /// Describe whether an action can execute in this process configuration.
+    fn describe(def_desc: &str, side_effect: SideEffect, allow_writes: bool) -> String {
         match side_effect {
             SideEffect::ReadOnly => def_desc.to_string(),
-            SideEffect::Mutating => format!("[mutating] {def_desc}"),
-            SideEffect::LongJob => format!("[long job] {def_desc}"),
-            SideEffect::FrontendEdit => format!("[proposes edit] {def_desc}"),
+            SideEffect::Mutating if allow_writes => format!("[mutating] {def_desc}"),
+            SideEffect::LongJob if allow_writes => format!("[long job] {def_desc}"),
+            SideEffect::Mutating | SideEffect::LongJob => {
+                format!("[requires --allow-writes; not executed by default] {def_desc}")
+            }
+            SideEffect::FrontendEdit => {
+                format!("[unavailable over headless MCP] {def_desc}")
+            }
         }
+    }
+}
+
+fn action_result_to_tool_result(result: ActionResult) -> CallToolResult {
+    match result {
+        Ok(value) if value.get(PROPOSAL_KEY).is_some() => CallToolResult::error(vec![
+            Content::text(
+                "Action was not executed: FluxNode returned a proposal, but this MCP transport has no approval channel. No changes were made.".to_string(),
+            ),
+        ]),
+        Ok(value) => {
+            let text = serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
+            CallToolResult::success(vec![Content::text(text)])
+        }
+        Err(err) => CallToolResult::error(vec![Content::text(err)]),
     }
 }
 
@@ -86,12 +114,11 @@ impl ServerHandler for RegistryMcp {
                 version: env!("CARGO_PKG_VERSION").into(),
                 ..Default::default()
             },
-            instructions: Some(
-                "FluxNode Action Registry exposed over MCP. Each tool maps to one FluxNode \
-                 action; descriptions prefixed with [mutating] change state and [long job] kick \
-                 off background work."
-                    .to_string(),
-            ),
+            instructions: Some(if self.allow_writes {
+                "FluxNode Action Registry over MCP. Rust-backed Mutating and LongJob tools are enabled by the explicit --allow-writes launch flag. FrontendEdit actions are unavailable over this headless transport.".to_string()
+            } else {
+                "FluxNode Action Registry over MCP. This process is read-only by default. Rust-backed Mutating and LongJob tools require restarting with --mcp --allow-writes after explicit authorization. FrontendEdit actions are unavailable over this headless transport.".to_string()
+            }),
         }
     }
 
@@ -103,6 +130,7 @@ impl ServerHandler for RegistryMcp {
         let tools = self
             .registry
             .defs()
+            .filter(|def| Self::is_advertised(def.side_effect))
             .map(|def| {
                 // `params` is a JSON Schema Value; MCP wants an object schema (Map).
                 let schema: Map<String, Value> = match def.params {
@@ -116,7 +144,11 @@ impl ServerHandler for RegistryMcp {
                 };
                 Tool::new(
                     Cow::Owned(def.name.to_string()),
-                    Cow::Owned(Self::describe(def.description, def.side_effect)),
+                    Cow::Owned(Self::describe(
+                        def.description,
+                        def.side_effect,
+                        self.allow_writes,
+                    )),
                     Arc::new(schema),
                 )
             })
@@ -151,42 +183,28 @@ impl ServerHandler for RegistryMcp {
             .map(Value::Object)
             .unwrap_or(Value::Object(Map::new()));
 
+        let action = self.registry.get(&name).expect("checked above");
+        if let Some(error) = Self::access_error(&name, action.def().side_effect, self.allow_writes)
+        {
+            return Ok(CallToolResult::error(vec![Content::text(error)]));
+        }
+
         // `Registry::invoke` is sync and may block on real backend work → run off the async
         // executor. Clone the shared handles into the blocking closure.
         let registry = self.registry.clone();
         let app = self.app.clone();
         let name_for_task = name.clone();
+        let allow_writes = self.allow_writes;
 
-        // The MCP server is read-only by design (no confirmation UI exists over this transport):
-        // `allow_writes = false` means `Registry::invoke` never *runs* a `Mutating`/`LongJob`
-        // action, regardless of what the tool schema might suggest. `FrontendEdit` actions never
-        // run in Rust at all.
-        //
-        // NOTE: it does not *reject* them either. Since the approve-gate landed, `invoke` returns
-        // `Ok(json!({ "__fluxnode_proposal__": { .. } }))` for a gated call, which falls through
-        // to the `Ok(value)` arm below and reaches the client as a SUCCESS result. Callers must
-        // therefore inspect the payload for `__fluxnode_proposal__` to tell "done" from "queued
-        // for an approval this transport cannot deliver" — see the module docs.
-        let result =
-            tokio::task::spawn_blocking(move || registry.invoke(&app, &name_for_task, args, false))
-                .await
-                .map_err(|join_err| {
-                    // The blocking task panicked or was cancelled — that's a server-internal fault.
-                    McpError::internal_error(format!("action task failed: {join_err}"), None)
-                })?;
+        let result = tokio::task::spawn_blocking(move || {
+            registry.invoke(&app, &name_for_task, args, allow_writes)
+        })
+        .await
+        .map_err(|join_err| {
+            McpError::internal_error(format!("action task failed: {join_err}"), None)
+        })?;
 
-        match result {
-            // Success: return the JSON value as pretty text content. (Clients that want the raw
-            // JSON can parse this back; MCP tool output is text/content blocks.)
-            Ok(value) => {
-                let text =
-                    serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
-                Ok(CallToolResult::success(vec![Content::text(text)]))
-            }
-            // Action returned an error String → surface it as a *tool-level* error so the caller
-            // sees the message (not a hard protocol error).
-            Err(err) => Ok(CallToolResult::error(vec![Content::text(err)])),
-        }
+        Ok(action_result_to_tool_result(result))
     }
 }
 
@@ -195,8 +213,16 @@ impl ServerHandler for RegistryMcp {
 /// Run this from a dedicated process / CLI subcommand whose stdout is reserved for the JSON-RPC
 /// stream — do **not** call it inside the normal Tauri GUI process (stdout there is not the MCP
 /// channel). See the module docs and the lead's integration notes.
-pub async fn serve_stdio(registry: Arc<Registry>, app: AppHandle) -> Result<(), String> {
-    let handler = RegistryMcp { registry, app };
+pub async fn serve_stdio(
+    registry: Arc<Registry>,
+    app: AppHandle,
+    allow_writes: bool,
+) -> Result<(), String> {
+    let handler = RegistryMcp {
+        registry,
+        app,
+        allow_writes,
+    };
 
     // `serve` performs the MCP initialize handshake over the stdio transport and returns a running
     // service; `waiting` resolves when the peer closes the connection.
@@ -211,4 +237,51 @@ pub async fn serve_stdio(registry: Arc<Registry>, app: AppHandle) -> Result<(), 
         .map_err(|e| format!("mcp service error: {e}"))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn headless_tools_do_not_advertise_frontend_edits() {
+        assert!(RegistryMcp::is_advertised(SideEffect::ReadOnly));
+        assert!(RegistryMcp::is_advertised(SideEffect::Mutating));
+        assert!(RegistryMcp::is_advertised(SideEffect::LongJob));
+        assert!(!RegistryMcp::is_advertised(SideEffect::FrontendEdit));
+    }
+
+    #[test]
+    fn write_actions_require_an_explicit_mcp_opt_in() {
+        assert!(RegistryMcp::access_error("health_ping", SideEffect::ReadOnly, false).is_none());
+        assert!(
+            RegistryMcp::access_error("save_project_state", SideEffect::Mutating, false)
+                .unwrap()
+                .contains("--mcp --allow-writes")
+        );
+        assert!(RegistryMcp::access_error("render_start", SideEffect::LongJob, false).is_some());
+        assert!(
+            RegistryMcp::access_error("save_project_state", SideEffect::Mutating, true).is_none()
+        );
+        assert!(
+            RegistryMcp::access_error("timeline_add_clip", SideEffect::FrontendEdit, true)
+                .unwrap()
+                .contains("unavailable over headless MCP")
+        );
+    }
+
+    #[test]
+    fn proposals_are_never_reported_as_successful_tool_calls() {
+        let result = action_result_to_tool_result(Ok(json!({
+            "__fluxnode_proposal__": { "action": "save_project_state" }
+        })));
+        let wire_value = serde_json::to_value(result).expect("tool result serializes");
+
+        assert_eq!(wire_value["isError"], true);
+        assert!(wire_value["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("No changes were made"));
+    }
 }

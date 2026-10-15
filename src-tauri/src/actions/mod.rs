@@ -67,8 +67,8 @@ impl Action for InspectAssetPath {
             .to_string();
 
         let inspection = crate::inspect_asset_path(app.clone(), path)?;
-        let inspection = serde_json::from_str::<Value>(&inspection)
-            .unwrap_or_else(|_| Value::String(inspection));
+        let inspection =
+            serde_json::from_str::<Value>(&inspection).unwrap_or(Value::String(inspection));
 
         Ok(json!({ "inspection": inspection }))
     }
@@ -99,7 +99,7 @@ impl Action for AssetProbe {
             .to_string();
 
         let probe = crate::asset_probe_blocking(app, path)?;
-        let probe = serde_json::from_str::<Value>(&probe).unwrap_or_else(|_| Value::String(probe));
+        let probe = serde_json::from_str::<Value>(&probe).unwrap_or(Value::String(probe));
 
         Ok(json!({ "probe": probe }))
     }
@@ -295,7 +295,7 @@ impl Action for LoadRecentProjects {
     fn run(&self, app: &AppHandle, _args: Value) -> ActionResult {
         let recent_projects = crate::load_recent_projects(app.clone())?;
         let recent_projects = serde_json::from_str::<Value>(&recent_projects)
-            .unwrap_or_else(|_| Value::String(recent_projects));
+            .unwrap_or(Value::String(recent_projects));
         Ok(json!({ "recent_projects": recent_projects }))
     }
 }
@@ -384,8 +384,7 @@ impl Action for AssetGenerateWaveform {
             source_path,
             bucket_count as usize,
         )?;
-        let waveform =
-            serde_json::from_str::<Value>(&waveform).unwrap_or_else(|_| Value::String(waveform));
+        let waveform = serde_json::from_str::<Value>(&waveform).unwrap_or(Value::String(waveform));
         Ok(json!({ "waveform": waveform }))
     }
 }
@@ -423,7 +422,7 @@ impl Action for AssetGenerateThumbnail {
             .ok_or_else(|| "Missing or invalid 'time'".to_string())?;
         let thumbnail = crate::asset_generate_thumbnail_blocking(app, asset_id, source_path, time)?;
         let thumbnail =
-            serde_json::from_str::<Value>(&thumbnail).unwrap_or_else(|_| Value::String(thumbnail));
+            serde_json::from_str::<Value>(&thumbnail).unwrap_or(Value::String(thumbnail));
         Ok(json!({ "thumbnail": thumbnail }))
     }
 }
@@ -506,7 +505,7 @@ impl Action for AssetGenerateProxy {
             target_width as u32,
             target_height as u32,
         )?;
-        let proxy = serde_json::from_str::<Value>(&proxy).unwrap_or_else(|_| Value::String(proxy));
+        let proxy = serde_json::from_str::<Value>(&proxy).unwrap_or(Value::String(proxy));
         Ok(json!({ "proxy": proxy }))
     }
 }
@@ -563,7 +562,7 @@ impl Action for VideoDecodeFrame {
             width as u32,
             height as u32,
         )?;
-        let frame = serde_json::from_str::<Value>(&frame).unwrap_or_else(|_| Value::String(frame));
+        let frame = serde_json::from_str::<Value>(&frame).unwrap_or(Value::String(frame));
         Ok(json!({ "frame": frame }))
     }
 }
@@ -605,8 +604,7 @@ impl Action for RenderStart {
             .ok_or_else(|| "Missing or invalid 'preset_json'".to_string())?
             .to_string();
         let render = crate::render_start(app.clone(), job_id, project_json, preset_json)?;
-        let render =
-            serde_json::from_str::<Value>(&render).unwrap_or_else(|_| Value::String(render));
+        let render = serde_json::from_str::<Value>(&render).unwrap_or(Value::String(render));
         Ok(json!({ "render": render }))
     }
 }
@@ -636,8 +634,7 @@ impl Action for RenderGetStatus {
             .ok_or_else(|| "Missing or invalid 'job_id'".to_string())?
             .to_string();
         let status = crate::render_get_status(app.clone(), job_id)?;
-        let status =
-            serde_json::from_str::<Value>(&status).unwrap_or_else(|_| Value::String(status));
+        let status = serde_json::from_str::<Value>(&status).unwrap_or(Value::String(status));
         Ok(json!({ "status": status }))
     }
 }
@@ -766,8 +763,8 @@ impl Action for StartExportJob {
             .ok_or_else(|| "Missing or invalid 'preset_json'".to_string())?
             .to_string();
         let export_job = crate::start_export_job(app.clone(), job_id, project_json, preset_json)?;
-        let export_job = serde_json::from_str::<Value>(&export_job)
-            .unwrap_or_else(|_| Value::String(export_job));
+        let export_job =
+            serde_json::from_str::<Value>(&export_job).unwrap_or(Value::String(export_job));
         Ok(json!({ "export_job": export_job }))
     }
 }
@@ -849,8 +846,7 @@ impl Action for ComfyGenerate {
             timeout_secs,
             allow_remote,
         )?;
-        let result =
-            serde_json::from_str::<Value>(&result).unwrap_or_else(|_| Value::String(result));
+        let result = serde_json::from_str::<Value>(&result).unwrap_or(Value::String(result));
         Ok(json!({ "result": result }))
     }
 }
@@ -869,8 +865,7 @@ impl Action for HealthPing {
 
     fn run(&self, app: &AppHandle, _args: Value) -> ActionResult {
         let health = crate::health_ping(app.clone())?;
-        let health =
-            serde_json::from_str::<Value>(&health).unwrap_or_else(|_| Value::String(health));
+        let health = serde_json::from_str::<Value>(&health).unwrap_or(Value::String(health));
         Ok(json!({ "health": health }))
     }
 }
@@ -889,8 +884,8 @@ impl Action for LoadAppPreferences {
 
     fn run(&self, app: &AppHandle, _args: Value) -> ActionResult {
         let preferences = crate::load_app_preferences(app.clone())?;
-        let preferences = serde_json::from_str::<Value>(&preferences)
-            .unwrap_or_else(|_| Value::String(preferences));
+        let preferences =
+            serde_json::from_str::<Value>(&preferences).unwrap_or(Value::String(preferences));
         Ok(json!({ "preferences": preferences }))
     }
 }
