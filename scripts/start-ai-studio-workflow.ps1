@@ -107,6 +107,8 @@ $gpuStatus = Invoke-RestMethod "$env:LOCAL_LLM_HUB_URL/v1/gpu/leases/status" -He
 if ($null -eq $gpuStatus.devices) { throw 'Hub does not expose the required GPU lease API.' }
 
 $lalinPython = "$lalinInstalled\apps\api\.venv\Scripts\python.exe"
+$lalinHfHome = Join-Path "$lalinInstalled\runtime\data" "huggingface"
+New-Item -ItemType Directory -Force -Path $lalinHfHome | Out-Null
 if ($null -eq (Listener 8756)) {
     if (-not (Test-Path -LiteralPath "$LalinSource\app\main.py")) { throw "Lalin API source is missing: $LalinSource" }
     $env:PYTHONPATH = $LalinSource
@@ -114,10 +116,16 @@ if ($null -eq (Listener 8756)) {
     $arguments = @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8756')
     $installedEnv = "$lalinInstalled\apps\api\.env"
     if (Test-Path -LiteralPath $installedEnv) { $arguments += @('--env-file', $installedEnv) }
+    $previousHfHome = $env:HF_HOME
+    $env:HF_HOME = $lalinHfHome
     $env:PATH = "$lalinInstalled\apps\api\.venv\Lib\site-packages\torch\lib;" + $workflowPath
     try {
         $lalin = Start-Process -FilePath $lalinPython -ArgumentList $arguments -WorkingDirectory $LalinSource -WindowStyle Hidden -PassThru -RedirectStandardOutput "$logs\$runId-lalin.stdout.log" -RedirectStandardError "$logs\$runId-lalin.stderr.log"
-    } finally { $env:PATH = $workflowPath }
+    } finally {
+        $env:PATH = $workflowPath
+        if ($null -eq $previousHfHome) { Remove-Item Env:HF_HOME -ErrorAction SilentlyContinue }
+        else { $env:HF_HOME = $previousHfHome }
+    }
     Write-Output "Started Lalin API process $($lalin.Id)."
 }
 $lalinSchema = Wait-Json "$env:FLUXNODE_LALIN_URL/openapi.json"

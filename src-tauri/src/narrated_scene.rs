@@ -152,6 +152,29 @@ fn run_blocking(
     narration: String,
     voice_id: String,
 ) -> Result<NarratedSceneResult, String> {
+    let app_data_directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Could not resolve FluxNode app-data path: {error}"))?;
+    run_blocking_with_progress(
+        &app_data_directory,
+        |stage, status, message| emit(&app, stage, status, message),
+        image_prompt,
+        narration,
+        voice_id,
+    )
+}
+
+fn run_blocking_with_progress<F>(
+    app_data_directory: &Path,
+    mut progress: F,
+    image_prompt: String,
+    narration: String,
+    voice_id: String,
+) -> Result<NarratedSceneResult, String>
+where
+    F: FnMut(&str, &str, &str),
+{
     let image_prompt = image_prompt.trim();
     let narration = narration.trim();
     let voice_id = voice_id.trim();
@@ -180,8 +203,7 @@ fn run_blocking(
         .unwrap_or(DEFAULT_MIN_FREE_VRAM_MB);
     let client = http_client(Duration::from_secs(20))?;
 
-    emit(
-        &app,
+    progress(
         "preflight",
         "running",
         "Checking local providers and queues.",
@@ -199,8 +221,7 @@ fn run_blocking(
         minimum_free_vram_mb,
     )?;
     let comfy_heartbeat = heartbeat_guard(&client, &hub, &comfy_lease)?;
-    emit(
-        &app,
+    progress(
         "image",
         "running",
         "Generating the Qwen image in Comfy Desktop.",
@@ -226,19 +247,13 @@ fn run_blocking(
     ensure_comfy_queue_idle(&client, &comfy_url)?;
 
     let run_id = format!("{}-{}", timestamp_compact(), std::process::id());
-    let run_directory = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("Could not resolve FluxNode app-data path: {error}"))?
-        .join("narrated-scene-runs")
-        .join(&run_id);
+    let run_directory = app_data_directory.join("narrated-scene-runs").join(&run_id);
     fs::create_dir_all(&run_directory)
         .map_err(|error| format!("Could not create scene staging directory: {error}"))?;
     let image_path = run_directory.join("scene.png");
     write_file(&image_path, &image_bytes)?;
 
-    emit(
-        &app,
+    progress(
         "image-release",
         "running",
         "Releasing the Comfy model and verifying VRAM.",
@@ -271,8 +286,7 @@ fn run_blocking(
     verify_hub_lease_free(&client, &hub, &comfy_lease.gpu_uuid)?;
     drop(comfy_heartbeat);
 
-    emit(
-        &app,
+    progress(
         "narration",
         "running",
         "Generating narration with the selected Lalin voice.",
@@ -291,8 +305,7 @@ fn run_blocking(
         wait_for_lalin_tts(&client, &lalin_url, &job_id, &lalin_heartbeat)?;
     ensure_lalin_used_cuda(&client, &lalin_url)?;
     if release_status != "released" && release_status != "not_applicable" {
-        emit(
-            &app,
+        progress(
             "narration-release",
             "blocked",
             "Lalin did not confirm an owned-model release; the Hub lease remains held.",
@@ -320,8 +333,7 @@ fn run_blocking(
     verify_hub_lease_free(&client, &hub, &lalin_lease.gpu_uuid)?;
     drop(lalin_heartbeat);
 
-    emit(
-        &app,
+    progress(
         "complete",
         "done",
         "Image and narration are ready to add to the timeline.",
@@ -1158,5 +1170,53 @@ mod tests {
         assert!(timestamp.ends_with('Z'));
         assert_eq!(timestamp.len(), 20);
         assert_eq!(civil_from_days(0), (1970, 1, 1));
+    }
+
+    #[test]
+    #[ignore = "requires the locally owned Comfy Desktop session, Lalin CUDA API, and a free Hub lease"]
+    fn live_narrated_scene_generates_real_local_image_and_tts() {
+        assert_eq!(
+            std::env::var("FLUXNODE_COMFY_CLEAN_SESSION").as_deref(),
+            Ok("1"),
+            "run scripts/acceptance/run-narrated-scene-live.ps1 to validate Comfy ownership first"
+        );
+        assert!(
+            std::env::var("LOCAL_LLM_HUB_TOKEN")
+                .ok()
+                .is_some_and(|token| !token.trim().is_empty()),
+            "live acceptance requires the Hub token supplied by the local launcher"
+        );
+
+        let app_data_directory = std::env::var_os("FLUXNODE_LIVE_APP_DATA_DIR")
+            .map(std::path::PathBuf::from)
+            .expect("live acceptance app-data directory must be set to the evidence drive");
+        let result = run_blocking_with_progress(
+            &app_data_directory,
+            |stage, status, message| println!("PROGRESS {stage} {status}: {message}"),
+            "A small lantern boat gliding across a dark Thai river at blue hour, cinematic wide shot, soft gold reflections, realistic atmosphere".to_string(),
+            "เมื่อแสงสุดท้ายแตะผิวน้ำ เรือโคมไฟลำเล็กก็เริ่มออกเดินทาง".to_string(),
+            "b8c819fd489f".to_string(),
+        )
+        .unwrap_or_else(|error| panic!("live narrated-scene workflow failed: {error}"));
+
+        let image_path = Path::new(&result.image_path);
+        let audio_path = Path::new(&result.audio_path);
+        let image_bytes = fs::read(image_path).expect("FluxNode-staged image exists");
+        let audio_bytes = fs::read(audio_path).expect("FluxNode-staged narration exists");
+        assert!(image_bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(audio_bytes.starts_with(b"RIFF"));
+        assert_eq!(result.lalin_release_status, "released");
+        assert!(
+            result.comfy_free_vram_after_mb + VRAM_RELEASE_TOLERANCE_MB
+                >= result.comfy_free_vram_before_mb
+        );
+        assert!(
+            result.lalin_free_vram_after_mb + VRAM_RELEASE_TOLERANCE_MB
+                >= result.lalin_free_vram_before_mb
+        );
+        println!(
+            "LIVE_NARRATED_SCENE_RESULT={}",
+            serde_json::to_string(&result).unwrap()
+        );
     }
 }

@@ -15,7 +15,7 @@ This runbook covers the single local workflow that creates one image, one spoken
 3. Open or create a saved FluxNode project, select **Narrated scene** in the header, enter an image prompt and narration, and choose a saved Lalin voice.
 4. Start the workflow. FluxNode reports preflight, image generation, Comfy release, narration, project import, and MP4 export. The image and narration are appended after the last existing timeline clip (with a 0.4-second gap when the project already has clips); both clips are linked and span the narration duration. The CPU-rendered MP4 includes the existing timeline and the appended scene.
 
-The launcher creates and protects the Hub bearer token locally. FluxNode reads it from its process environment; users do not paste tokens or provider JSON into the app. Provider base URLs default to loopback (`127.0.0.1:8188` for Comfy Desktop, `127.0.0.1:8756` for Lalin, and `127.0.0.1:8787` for local-llm-hub). The launcher sets these values and `FLUXNODE_COMFY_CLEAN_SESSION` for the validated Desktop session.
+The launcher creates and protects the Hub bearer token locally. FluxNode reads it from its process environment; users do not paste tokens or provider JSON into the app. Provider base URLs default to loopback (`127.0.0.1:8188` for Comfy Desktop, `127.0.0.1:8756` for Lalin, and `127.0.0.1:8787` for local-llm-hub). The launcher sets these values and `FLUXNODE_COMFY_CLEAN_SESSION` for the validated Desktop session. It sets HF_HOME only for the Lalin process to G:\AI-Studio\Lalin-Studio\runtime\data\huggingface, so first-time F5 model downloads stay on G drive.
 
 ## GPU ownership and release
 
@@ -37,3 +37,15 @@ The image stage uses the Qwen model files already installed in this Comfy Deskto
 ## Verification status
 
 CPU-only unit, frontend, and build checks cover the API payload parsers, queue and single-device fail-closed checks, release contract, CPU export preset, UI wiring, and project materialization. Live acceptance is recorded separately and must include the actual Comfy prompt ID and PNG, Lalin job ID and WAV/release receipt, Hub VRAM readings between stages, reopened project assets, and `ffprobe` confirmation that the exported MP4 contains video and audio. Fixture tests are not hardware acceptance.
+
+### Backend live acceptance on the local workstation
+
+With the AI-Studio launcher-owned Comfy Desktop session open, Hub and Lalin idle, and at least 9,216 MiB free, run:
+
+```powershell
+& .\scripts\acceptance\run-narrated-scene-live.ps1
+```
+
+The script checks the current Comfy API process against the launch receipt and Desktop owner, checks the Hub lease, Comfy queues, and Lalin activity, then invokes the same Rust workflow core used by the Tauri command. It saves the generated PNG, WAV, Cargo log, provider IDs, per-stage VRAM figures, and post-run idle/free checks in its G-drive evidence directory. The acceptance runner substitutes only the Tauri progress-event sink and uses an evidence-drive app-data folder. This proves the live Comfy-to-Lalin backend and GPU lease handoff; the app's saved-project import, reopened-project check, and native MP4 export remain separate desktop acceptance steps.
+
+The 2026-10-15 workstation run completed with Comfy prompt `1277f7d7-6e14-4534-8829-742cd1c0454b` and Lalin job `9f8dfa9f335e`. Comfy returned a 512×512 PNG; Lalin returned a 10.055-second mono 24 kHz PCM WAV and confirmed model release. Hub telemetry returned to `free` with no lease, both Comfy queue arrays were empty, and Lalin was idle with CUDA effective. The output files and JSON evidence are under `G:\AI-Studio\verification\2026-10-15-workflow\fluxnode-live-acceptance\20261015-114647`. This was a backend hardware acceptance run; it did not reopen a FluxNode project or produce the UI's timeline MP4 export.
