@@ -1963,8 +1963,10 @@ function estimateProjectFootprintMb(project: FluxNodeProject) {
 
 function getMemoryPressurePct(runtimeHealth: RuntimeHealth) {
   if (
-    runtimeHealth.totalMemoryGb === null ||
-    runtimeHealth.availableMemoryGb === null ||
+    typeof runtimeHealth.totalMemoryGb !== 'number' ||
+    !Number.isFinite(runtimeHealth.totalMemoryGb) ||
+    typeof runtimeHealth.availableMemoryGb !== 'number' ||
+    !Number.isFinite(runtimeHealth.availableMemoryGb) ||
     runtimeHealth.totalMemoryGb <= 0
   ) {
     return null
@@ -5024,6 +5026,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     const endpoint = get().preferences.comfyUiEndpoint
     const connected = await pingComfy(endpoint)
     set({ comfyConnected: connected })
+    get().syncResilienceState()
     return connected
   },
   unlinkSelectedMedia: () =>
@@ -7633,7 +7636,12 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
             : 'balanced',
       },
     }))
-    get().syncResilienceState()
+    if (runtimeHealth.backend === 'tauri') {
+      await get().pingComfyConnection()
+    } else {
+      set({ comfyConnected: null })
+      get().syncResilienceState()
+    }
   },
   syncResilienceState: () => {
     const state = get()
@@ -7654,7 +7662,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     }
 
     if (
-      (state.runtimeHealth.status !== 'degraded' || state.project.workflow.computeMode !== 'local') &&
+      (state.comfyConnected !== false || state.project.workflow.computeMode !== 'local') &&
       state.recoveryAttempts.comfyConnection !== 0
     ) {
       clearRecoveryTimer('comfyConnection')
@@ -7692,7 +7700,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       })
     }
 
-    if (state.runtimeHealth.status === 'degraded' && state.project.workflow.computeMode === 'local') {
+    if (state.comfyConnected === false && state.project.workflow.computeMode === 'local') {
       scheduleRecoveryRetry(
         'comfyConnection',
         set,
@@ -7702,7 +7710,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       pushAppError(set, {
         id: `${nextId('error')}-comfy`,
         category: 'comfy_connection',
-        message: 'Local backend health is degraded while local compute is selected.',
+        message: 'ComfyUI is unreachable while local compute is selected.',
         userMessage:
           state.recoveryAttempts.comfyConnection >= 3
             ? 'ComfyUI is still unavailable after three retry attempts.'
@@ -7710,7 +7718,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         recoverable: true,
         suggestedAction:
           state.recoveryAttempts.comfyConnection >= 3
-            ? 'Switch to cloud compute, retry local backend health, or check the ComfyUI setup.'
+            ? 'Switch to cloud compute, retry the ComfyUI connection, or check the endpoint in Settings.'
             : `Retrying automatically with backoff (${Math.min(state.recoveryAttempts.comfyConnection + 1, 3)}/3).`,
         actionLabel: state.ui.networkStatus === 'online' ? 'Switch to Cloud' : 'Refresh Health',
         actionCommand: state.ui.networkStatus === 'online' ? 'switch_cloud_compute' : 'refresh_runtime_health',

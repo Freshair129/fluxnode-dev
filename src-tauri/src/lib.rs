@@ -294,12 +294,20 @@ fn read_vram_telemetry() -> (Option<f64>, Option<f64>) {
 
 #[cfg(target_os = "windows")]
 fn query_windows_vram_total_gb() -> Option<f64> {
+    if let Some(total_gb) = query_nvidia_smi_memory_gb("memory.total") {
+        return (total_gb > 0.0).then_some(total_gb);
+    }
+
     let script = "(Get-CimInstance Win32_VideoController | Where-Object {$_.AdapterRAM -gt 0} | Sort-Object AdapterRAM -Descending | Select-Object -First 1 -ExpandProperty AdapterRAM)";
     read_powershell_number(script).map(|bytes| ((bytes / 1_073_741_824.0) * 10.0).round() / 10.0)
 }
 
 #[cfg(target_os = "windows")]
 fn query_windows_vram_used_gb() -> Option<f64> {
+    if let Some(used_gb) = query_nvidia_smi_memory_gb("memory.used") {
+        return Some(used_gb);
+    }
+
     let dedicated_usage_bytes = read_powershell_number(
         "(Get-Counter '\\GPU Process Memory(*)\\Dedicated Usage').CounterSamples | Measure-Object -Property CookedValue -Sum | Select-Object -ExpandProperty Sum",
     );
@@ -313,6 +321,39 @@ fn query_windows_vram_used_gb() -> Option<f64> {
         }
         _ => None,
     }
+}
+
+#[cfg(target_os = "windows")]
+fn query_nvidia_smi_memory_gb(field: &str) -> Option<f64> {
+    let query = format!("--query-gpu={field}");
+    let output = Command::new("nvidia-smi")
+        .args([query.as_str(), "--format=csv,noheader,nounits"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    parse_nvidia_smi_memory_gb(&stdout)
+}
+
+fn parse_nvidia_smi_memory_gb(output: &str) -> Option<f64> {
+    let values: Vec<f64> = output
+        .lines()
+        .filter_map(|line| line.trim().parse::<f64>().ok())
+        .collect();
+
+    if values.is_empty()
+        || values
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+    {
+        return None;
+    }
+
+    Some(values.iter().sum::<f64>() / 1024.0)
 }
 
 #[cfg(target_os = "windows")]
@@ -4254,6 +4295,13 @@ fn run_agent_cli(message: &str, allow_writes: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_nvidia_smi_mib_values_as_gib_and_sums_adapters() {
+        assert_eq!(parse_nvidia_smi_memory_gb("12288\n"), Some(12.0));
+        assert_eq!(parse_nvidia_smi_memory_gb("8192\n4096\n"), Some(12.0));
+        assert_eq!(parse_nvidia_smi_memory_gb("N/A\n"), None);
+    }
 
     #[test]
     fn apply_resolution_override_replaces_a_concrete_resolution() {

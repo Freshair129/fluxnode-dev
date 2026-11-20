@@ -282,7 +282,10 @@ export function SettingsModal() {
                 <InfoCard
                   label="Memory Headroom"
                   value={
-                    runtimeHealth.availableMemoryGb !== null && runtimeHealth.totalMemoryGb !== null
+                    typeof runtimeHealth.availableMemoryGb === 'number' &&
+                    Number.isFinite(runtimeHealth.availableMemoryGb) &&
+                    typeof runtimeHealth.totalMemoryGb === 'number' &&
+                    Number.isFinite(runtimeHealth.totalMemoryGb)
                       ? `${runtimeHealth.availableMemoryGb.toFixed(1)} GB free / ${runtimeHealth.totalMemoryGb.toFixed(1)} GB total`
                       : `${runtimeHealth.deviceMemoryGb ?? '?'} GB device memory`
                   }
@@ -290,7 +293,10 @@ export function SettingsModal() {
                 <InfoCard
                   label="Disk Headroom"
                   value={
-                    runtimeHealth.diskFreeGb !== null && runtimeHealth.diskCapacityGb !== null
+                    typeof runtimeHealth.diskFreeGb === 'number' &&
+                    Number.isFinite(runtimeHealth.diskFreeGb) &&
+                    typeof runtimeHealth.diskCapacityGb === 'number' &&
+                    Number.isFinite(runtimeHealth.diskCapacityGb)
                       ? `${runtimeHealth.diskFreeGb.toFixed(1)} GB free / ${runtimeHealth.diskCapacityGb.toFixed(1)} GB total`
                       : 'Disk telemetry pending'
                   }
@@ -298,7 +304,8 @@ export function SettingsModal() {
                 <InfoCard
                   label="VRAM Pressure"
                   value={
-                    runtimeHealth.vramTotalGb !== null
+                    typeof runtimeHealth.vramTotalGb === 'number' &&
+                    Number.isFinite(runtimeHealth.vramTotalGb)
                       ? `${runtimeHealth.vramUsedGb?.toFixed(1) ?? '?'} GB used / ${runtimeHealth.vramTotalGb.toFixed(1)} GB total (${runtimeHealth.vramUtilizationPct?.toFixed(1) ?? '?'}%)`
                       : 'VRAM telemetry pending'
                   }

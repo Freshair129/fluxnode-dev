@@ -49,7 +49,11 @@ export async function readRuntimeHealth(): Promise<RuntimeHealth> {
   }
 
   try {
-    const summary = await invokeCommand<TauriHealthResponse>('health_ping')
+    const payload = await invokeCommand<unknown>('health_ping')
+    const summary =
+      typeof payload === 'string'
+        ? (JSON.parse(payload) as TauriHealthResponse)
+        : (payload as TauriHealthResponse)
     return {
       backend: 'tauri',
       status: summary.status === 'ok' ? 'ok' : 'degraded',
