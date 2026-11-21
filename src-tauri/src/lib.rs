@@ -339,6 +339,7 @@ fn query_nvidia_smi_memory_gb(field: &str) -> Option<f64> {
     parse_nvidia_smi_memory_gb(&stdout)
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn parse_nvidia_smi_memory_gb(output: &str) -> Option<f64> {
     let values: Vec<f64> = output
         .lines()
@@ -1030,7 +1031,8 @@ fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
     }
     let mut output = Vec::with_capacity(input.len() / 4 * 3);
     let group_count = input.len() / 4;
-    for (index, group) in input.as_bytes().chunks_exact(4).enumerate() {
+    let (groups, _) = input.as_bytes().as_chunks::<4>();
+    for (index, group) in groups.iter().enumerate() {
         let last_group = index + 1 == group_count;
         let third_padded = group[2] == b'=';
         let fourth_padded = group[3] == b'=';
